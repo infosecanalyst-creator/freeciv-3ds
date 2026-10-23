@@ -530,8 +530,7 @@ int main(int argc, char* argv[])
         u32 kHeld = hidKeysHeld();
         u32 kUp = hidKeysUp();
         audio_update();
-        audio_set_music(app_state == APP_GAME ? (get_game_turn() > 0 && !fc3ds_server_is_busy() ? MUSIC_GAME : MUSIC_NONE)
-                                              : MUSIC_MENU);
+        audio_set_music(app_state == APP_GAME ? MUSIC_GAME : MUSIC_MENU);
 
         // Mode as it was at the START of this frame. The modal touch handler
         // gates on this (not the live ui_mode) so that the same tap which
