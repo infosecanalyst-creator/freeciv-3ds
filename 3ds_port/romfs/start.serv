@@ -1,0 +1,28 @@
+rulesetdir classic
+# Overhead (non-iso, non-hex) topology. The classic ruleset defaults to
+# ISO|HEX, but this port draws a plain square overhead grid and drives units
+# with a 4-way D-Pad: on an iso/hex map, map coordinates != native (storage)
+# coordinates and movement is 6-way at diagonal screen angles, so the square
+# render and the D-Pad directions cannot line up (units render/move in the
+# wrong place/direction). Overhead makes map == native, so the renderer, tile
+# selection, fog and D-Pad N/S/E/W all agree. Wrap stays WRAPX (the default),
+# and the port's WRAPX-aware draw/touch keep the east/west seam continuous.
+# An empty value clears both the ISO and HEX bits (topology 0 = overhead). The
+# "topology" setting is bitwise: it only accepts bit *names* ("ISO"/"HEX") or an
+# empty string for none - a bare "0" is rejected as an unknown name and silently
+# leaves the default ISO|HEX in place.
+set topology ""
+# Create the human player before aifill runs, so aifill tops up the
+# remaining slots with AI instead of counting/displacing this one
+# (aifill fills to a target *total* player count).
+create Human
+set aifill 5
+# No network client ever connects (the 3DS client reads/writes server state
+# in-process), so allow the game to start with zero connected human players.
+set minplayers 0
+# Flip "Human" from its default AI control to human control. Nobody ever
+# connects to end its turn for it - the 3DS client drives turn advancement
+# itself via force_end_of_sniff (A = End Turn), which doesn't require a
+# connected human. See Short-Term Goal 6 in STATUS.md.
+aitoggle Human
+start

@@ -1,0 +1,8 @@
+ common/game.h       |  8 ++++++++
+ common/map.h        |  2 +-
+ common/oblig_reqs.c | 11 +++++------
+ configure.ac        | 17 +++++++++++++----
+ server/sernet.c     | 51 +++++++++++++++++++++++++++++++++++++++++++++++++--
+ utility/shared.h    |  4 +++-
+ utility/support.c   | 40 ++++++++++++++++++++++++++++++++++++++++
+ 7 files changed, 119 insertions(+), 14 deletions(-)

@@ -1,0 +1,10 @@
+# Used only when resuming a Load Game (fc3ds_server_begin_load_game(),
+# fc3ds_server.c) - srv_prepare() has already restored the full player
+# roster/game state from the save via its "load instead of pregame-generate"
+# branch before this script runs, so unlike start.serv this must NOT
+# create/aitoggle a player (that would re-toggle an already-human player back
+# to AI-controlled - see handoff.md). All that's still needed is exiting the
+# pregame sniff loop so the server thread reaches its normal per-turn park
+# point; `start` is safe on an already-loaded game (start_game() in
+# server/srv_main.c does nothing but flip force_end_of_sniff).
+start

@@ -1,0 +1,28 @@
+rulesetdir classic
+set topology ""        # overhead - matches the square renderer (STATUS.md O5)
+set mapsize XYSIZE
+set xsize 20
+set ysize 16           # tiny map => fast gen AND fast AI contact. 16 is Freeciv's actual floor
+                        # (MAP_MIN_LINEAR_SIZE, common/map.h) - the previous "14" silently failed
+                        # validation and fell back to a much taller ~20x64 map instead (found
+                        # 2026-07-15 via a hardware freeciv_out.log pull: "Value out of range: 14
+                        # (min: 16; max: 2375)"), defeating the "tiny/fast" point of this preset.
+set landmass 85        # mostly land: one shared continent
+set startpos ALL       # every player starts on the same continent -> contact in a few tiles
+set techlevel 90       # techlevel N grants N *random* techs, one at a time, each drawn only from
+                        # the currently-reachable frontier (pick_random_tech(), techtools.c) - a
+                        # small N (e.g. 9) can easily miss a specific tech like Monarchy by chance
+                        # (hardware-confirmed: techlevel 9 granted Code of Laws but not Ceremonial
+                        # Burial/Monarchy, leaving every non-Anarchy government greyed out). Once N
+                        # exceeds the ruleset's total tech count (87 in classic), every tech is
+                        # granted deterministically - pick_random_tech() returns A_FUTURE (a no-op)
+                        # once nothing new is reachable - so this reliably makes Monarchy available
+                        # turn 1 regardless of draw order.
+set sciencebox 20      # cheap research, in case a future tech is still needed for anything else
+set revolen 1          # revolution = exactly 1 anarchy turn...
+set revolentype FIXED  # ...deterministically, so the govt change completes almost immediately
+create Human
+set aifill 2           # exactly ONE AI opponent -> fast turns, easy to find
+set minplayers 0
+aitoggle Human
+start

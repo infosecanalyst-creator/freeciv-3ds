@@ -1,0 +1,33 @@
+# --- Copyright: NEVER commit ripped Nintendo/Firaxis assets ---
+*.nds
+extracted/
+
+# --- Upstream Freeciv clone (huge; local changes tracked via port-patches/) ---
+freeciv/
+
+# --- Build artifacts ---
+3ds_port/build/
+3ds_port/*.3dsx
+3ds_port/*.elf
+3ds_port/*.smdh
+3ds_port/*.map
+3ds_port/romfs/gfx/
+# Generated/derived ROMFS data (assembled from Freeciv data dir at build time)
+3ds_port/romfs/data/
+
+# --- Unrelated: other 3DS homebrew project notes ---
+claude-memories/
+
+# --- Logs / crash dumps / scratch ---
+*.log
+*.dmp
+crash_dump.dmp
+__pycache__/
+a.out
+
+# --- Root-level investigation scratch (hardware/emulator screenshots, one-off
+# analysis scripts) - these belong in a session's local scratch space, not history.
+# Scoped to root only; 3ds_port/gfx/ art is tracked separately above.
+/*.bmp
+/*.png
+/analyze.py

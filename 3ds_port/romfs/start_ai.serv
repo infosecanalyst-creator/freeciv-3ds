@@ -1,0 +1,6 @@
+rulesetdir classic
+set aifill 5
+# No network client connects (the 3DS client reads server state in-process),
+# so allow the game to start with zero connected human players.
+set minplayers 0
+start
