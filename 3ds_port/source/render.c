@@ -1378,72 +1378,102 @@ void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
 // selection past this window scrolls the *window*, not the list.
 #define CITY_GARRISON_VISIBLE 3
 
+static void progress_bar(float x, float y, float w, float h, float frac, u32 fg)
+{
+    if (frac < 0) frac = 0;
+    if (frac > 1) frac = 1;
+    C2D_DrawRectSolid(x, y, 0.0f, w, h, C2D_Color32(0x22, 0x2C, 0x3A, 0xFF));
+    C2D_DrawRectSolid(x, y, 0.01f, w * frac, h, fg);
+}
+
 void render_city_top(const CityInfo *info, int garrison_sel)
 {
     C2D_TextBufClear(g_textBuf);
 
     u32 white = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
-    u32 dim   = C2D_Color32(0xC0, 0xCE, 0xDC, 0xFF);
+    u32 soft  = C2D_Color32(0xC0, 0xCE, 0xDC, 0xFF);
     u32 label = C2D_Color32(0x8C, 0xA0, 0xB4, 0xFF);
-    char line[160]; // wide enough for "In city (N): <garrison names>"
+    u32 food  = C2D_Color32(0x70, 0xD0, 0x60, 0xFF);
+    u32 shld  = C2D_Color32(0xE0, 0x98, 0x50, 0xFF);
+    u32 trade = C2D_Color32(0xF0, 0xD8, 0x50, 0xFF);
+    char line[160];
 
-    C2D_DrawRectSolid(0, 0, 0.0f, 400, 30, owner_color(info->owner));
-    C2D_DrawRectSolid(0, 30, 0.0f, 400, 2, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
-    draw_text(8, 5, 0.8f, white, info->name[0] ? info->name : "?");
+    // Header: owner colour band, name, size badge.
+    u32 oc = owner_color(info->owner);
+    C2D_DrawRectSolid(0, 0, 0.0f, 400, 32, C2D_Color32(0x14, 0x1E, 0x2E, 0xFF));
+    C2D_DrawRectSolid(0, 0, 0.01f, 6, 32, oc);
+    C2D_DrawRectSolid(0, 32, 0.0f, 400, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
+    draw_text(14, 3, 0.85f, white, info->name[0] ? info->name : "?");
     snprintf(line, sizeof(line), "Size %d", info->size);
-    draw_text(320, 8, 0.6f, white, line);
+    float sw = text_width(line, 0.55f);
+    C2D_DrawRectSolid(392 - sw - 12, 6, 0.01f, sw + 12, 20, oc);
+    draw_text_z(392 - sw - 6, 4, 0.02f, 0.55f, C2D_Color32(0x10, 0x10, 0x10, 0xFF), line);
 
-    // surplus[] index order is documented on CityInfo: food,shield,trade,gold,lux,sci.
-    snprintf(line, sizeof(line), "Food %+d  Shield %+d  Trade %+d",
-             info->surplus[0], info->surplus[1], info->surplus[2]);
-    draw_text(8, 44, 0.6f, dim, line);
-    snprintf(line, sizeof(line), "Gold %+d  Lux %+d  Sci %+d",
-             info->surplus[3], info->surplus[4], info->surplus[5]);
-    draw_text(8, 68, 0.6f, dim, line);
-
-    snprintf(line, sizeof(line), "Food: %d/%d", info->food_stock, info->food_needed);
-    draw_text(8, 96, 0.6f, dim, line);
-    if (info->grow_turns >= 0) {
-        snprintf(line, sizeof(line), "grow in %d", info->grow_turns);
-    } else {
-        snprintf(line, sizeof(line), "not growing");
+    // Left column: yields, growth, production.
+    float x = 12, y = 42;
+    struct { const char *n; int v; u32 c; } yv[6] = {
+        { "Food", info->surplus[0], food }, { "Shields", info->surplus[1], shld },
+        { "Trade", info->surplus[2], trade }, { "Gold", info->surplus[3], C2D_Color32(0xFF, 0xD0, 0x40, 0xFF) },
+        { "Luxury", info->surplus[4], C2D_Color32(0xE0, 0x90, 0xE0, 0xFF) }, { "Science", info->surplus[5], C2D_Color32(0x70, 0xB8, 0xFF, 0xFF) },
+    };
+    for (int i = 0; i < 6; i++) {
+        float cx = x + (i % 3) * 78, cy = y + (i / 3) * 20;
+        C2D_DrawRectSolid(cx, cy + 5, 0.0f, 8, 8, yv[i].c);
+        snprintf(line, sizeof(line), "%s %+d", yv[i].n, yv[i].v);
+        draw_text(cx + 12, cy, 0.45f, soft, line);
     }
-    draw_text(150, 96, 0.55f, label, line);
 
-    snprintf(line, sizeof(line), "Building: %s", info->producing[0] ? info->producing : "?");
-    draw_text(8, 122, 0.6f, white, line);
-    snprintf(line, sizeof(line), "%d/%d shields (%d turns)",
-             info->shield_stock, info->prod_cost, info->prod_turns);
-    draw_text(8, 146, 0.55f, dim, line);
+    y = 90;
+    draw_text(x, y, 0.45f, label, "Growth");
+    snprintf(line, sizeof(line), "%d/%d", info->food_stock, info->food_needed);
+    draw_text(x + 160, y, 0.45f, soft, line);
+    progress_bar(x, y + 18, 224, 6, info->food_needed > 0 ? (float)info->food_stock / info->food_needed : 0, food);
+    if (info->grow_turns >= 0) snprintf(line, sizeof(line), "Grows in %d turn%s", info->grow_turns, info->grow_turns == 1 ? "" : "s");
+    else snprintf(line, sizeof(line), "Not growing");
+    draw_text(x, y + 25, 0.42f, info->grow_turns >= 0 ? soft : C2D_Color32(0xE0, 0x80, 0x60, 0xFF), line);
 
-    // Garrison: pov units in the city, one per line, highlighting the
-    // L/R-cycled ui_garrison_sel entry so "Y: take a unit out" acts on a
-    // specific unit, not always the first (handoff.md §3).
-    if (info->garrison_count > 0) {
-        snprintf(line, sizeof(line), "In city (%d):", info->garrison_count);
-        draw_text(8, 168, 0.5f, label, line);
+    y = 140;
+    draw_text(x, y, 0.45f, label, "Building");
+    draw_text(x, y + 15, 0.55f, white, info->producing[0] ? info->producing : "?");
+    progress_bar(x, y + 37, 224, 6, info->prod_cost > 0 ? (float)info->shield_stock / info->prod_cost : 0, shld);
+    snprintf(line, sizeof(line), "%d/%d shields, %d turn%s", info->shield_stock, info->prod_cost,
+             info->prod_turns, info->prod_turns == 1 ? "" : "s");
+    draw_text(x, y + 44, 0.42f, soft, line);
+    if (info->can_buy) {
+        snprintf(line, sizeof(line), "Buy now: %d gold", info->buy_cost);
+        draw_text(x, y + 60, 0.42f, C2D_Color32(0x70, 0xE0, 0x70, 0xFF), line);
+    }
 
-        int window = (garrison_sel / CITY_GARRISON_VISIBLE) * CITY_GARRISON_VISIBLE;
-        int shown = info->garrison_count - window;
-        if (shown > CITY_GARRISON_VISIBLE) shown = CITY_GARRISON_VISIBLE;
-        for (int i = 0; i < shown; i++) {
+    // Right column: units in the city (L/R picks, Y leads it out).
+    float rx = 252;
+    C2D_DrawRectSolid(rx - 6, 38, 0.0f, 152, 172, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
+    snprintf(line, sizeof(line), "Units here (%d)", info->garrison_count);
+    draw_text(rx, 40, 0.45f, label, line);
+    if (info->garrison_count == 0) {
+        draw_text(rx, 62, 0.45f, soft, "None");
+    } else {
+        int per = 5;
+        int window = (garrison_sel / per) * per;
+        for (int i = 0; i < per && window + i < info->garrison_count; i++) {
             int idx = window + i;
-            bool sel = (idx == garrison_sel);
-            snprintf(line, sizeof(line), "%s%s", sel ? "> " : "  ", info->garrison_names[idx]);
-            draw_text(70, 168 + i * 11, 0.5f,
-                      sel ? C2D_Color32(0xFF, 0xE0, 0x60, 0xFF) : dim, line);
+            float uy = 60 + i * 29;
+            bool sel = idx == garrison_sel;
+            if (sel) C2D_DrawRectSolid(rx - 4, uy - 1, 0.01f, 148, 28, C2D_Color32(0x34, 0x50, 0x78, 0xFF));
+            C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, get_unit_sprite(info->garrison_names[idx])),
+                            rx - 2, uy - 2, 0.02f, NULL, 1.0f, 1.0f);
+            draw_text_z(rx + 32, uy + 3, 0.03f, 0.47f, sel ? C2D_Color32(0xFF, 0xE8, 0x80, 0xFF) : soft,
+                        info->garrison_names[idx]);
         }
-        if (window + shown < info->garrison_count) {
-            snprintf(line, sizeof(line), "+%d more", info->garrison_count - (window + shown));
-            draw_text(70, 168 + shown * 11, 0.45f, label, line);
+        if (window + per < info->garrison_count) {
+            snprintf(line, sizeof(line), "+%d more", info->garrison_count - window - per);
+            draw_text(rx, 196, 0.42f, label, line);
         }
-    } else {
-        draw_text(8, 168, 0.5f, label, "In city: (no units)");
     }
 
-    draw_text_z(8, 212, 0.0f, 0.5f, label, "Tap a row below: change build");
-    draw_text(8, 228, 0.5f, label,
-              info->garrison_count > 0 ? "B: Close  L/R: pick  Y: take out" : "B: Close");
+    C2D_DrawRectSolid(0, 240 - 17, 0.0f, 400, 17, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
+    draw_text(5, 240 - 16, 0.45f, soft, info->garrison_count > 0
+              ? "Tap what to build below.  L/R: pick a unit   Y: lead it out   B: close"
+              : "Tap what to build below.   B: close");
 }
 
 void draw_scroll_list(int x, const ScrollRow *rows, int count)
@@ -1459,66 +1489,63 @@ void render_city_panel(const CityInfo *info, const BuildOption *opts, int n, int
 {
     C2D_TextBufClear(g_textBuf);
 
-    u32 white = C2D_Color32(0xE8, 0xE8, 0xE8, 0xFF);
-    u32 dim   = C2D_Color32(0xA0, 0xA0, 0xA0, 0xFF);
+    u32 white = C2D_Color32(0xF0, 0xF0, 0xF0, 0xFF);
+    u32 soft  = C2D_Color32(0xA8, 0xB4, 0xC4, 0xFF);
     u32 cur   = C2D_Color32(0xFF, 0xE0, 0x60, 0xFF);
     char line[96];
 
-    C2D_DrawRectSolid(0, 0, 0.0f, 320, PANEL_HEADER_H, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
-    draw_text(8, 5, 0.6f, white, info->name[0] ? info->name : "?");
+    C2D_DrawRectSolid(0, 0, 0.0f, 320, 240, C2D_Color32(0x10, 0x16, 0x22, 0xFF));
+    C2D_DrawRectSolid(0, 0, 0.01f, 320, PANEL_HEADER_H, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
+    draw_text_z(8, 3, 0.02f, 0.6f, white, info->name[0] ? info->name : "?");
 
-    // NOW/QUEUE toggle (handoff.md §6.4) - switches what tapping a buildable
-    // row below does. Sits in the header band, well clear of the list/footer
-    // rows main.c hit-tests separately.
-    C2D_DrawRectSolid(CITY_TOGGLE_X, CITY_TOGGLE_Y, 0.0f, CITY_TOGGLE_W, CITY_TOGGLE_H,
-                      queue_mode ? C2D_Color32(0x80, 0x60, 0x20, 0xFF) : C2D_Color32(0x20, 0x60, 0x30, 0xFF));
-    draw_text(CITY_TOGGLE_X + 8, CITY_TOGGLE_Y + 4, 0.45f, white, queue_mode ? "QUEUE" : "NOW");
+    // NOW/QUEUE toggle: what tapping a buildable row does.
+    draw_button(CITY_TOGGLE_X, CITY_TOGGLE_Y, CITY_TOGGLE_W, CITY_TOGGLE_H, 0.03f,
+                queue_mode ? "Add to queue" : "Build now", 0.42f, true, !queue_mode);
 
-    snprintf(line, sizeof(line), "Now: %s (%d/%d, %d turns)",
-             info->producing[0] ? info->producing : "?",
+    snprintf(line, sizeof(line), "%s  %d/%d  (%d turns)", info->producing[0] ? info->producing : "?",
              info->shield_stock, info->prod_cost, info->prod_turns);
-    draw_text(8, PANEL_HEADER_H + 4, 0.45f, white, line);
-    draw_text(8, PANEL_HEADER_H + 24, 0.45f, dim,
-              queue_mode ? "Tap: add to queue ->" : "Tap: build now ->");
+    draw_text(8, PANEL_HEADER_H + 4, 0.47f, cur, line);
+    draw_text(8, PANEL_HEADER_H + 26, 0.42f, soft, queue_mode ? "Tap an item to add it to the queue." :
+                                                               "Tap an item to build it now.");
+    draw_text(CITY_WORKLIST_COL_X + 4, PANEL_HEADER_H + 40, 0.42f, soft, worklist_n ? "Queue (tap: remove)" : "Queue empty");
 
-    // Buildable list (left column) - names truncated so they never run into
-    // the worklist column starting at CITY_WORKLIST_COL_X.
-    ScrollRow rows[PANEL_ROWS_VISIBLE];
-    int visible = 0;
+    // Buildables (left), as tappable rows.
     for (int i = 0; i < PANEL_ROWS_VISIBLE; i++) {
         int idx = scroll + i;
         if (idx >= n) break;
         const BuildOption *opt = &opts[idx];
-        snprintf(rows[visible].text, sizeof(rows[visible].text), "%s%.13s(%d)",
-                 opt->is_current ? "> " : "  ", opt->name, opt->cost);
-        rows[visible].color = opt->is_current ? cur : white;
-        visible++;
+        float y = PANEL_LIST_Y + i * PANEL_ROW_H;
+        C2D_DrawRectSolid(4, y + 1, 0.0f, CITY_WORKLIST_COL_X - 12, PANEL_ROW_H - 2,
+                          opt->is_current ? C2D_Color32(0x3A, 0x4A, 0x20, 0xFF)
+                                          : (i & 1) ? C2D_Color32(0x1A, 0x24, 0x34, 0xFF) : C2D_Color32(0x20, 0x2C, 0x3E, 0xFF));
+        char nm[32];
+        snprintf(nm, sizeof(nm), "%.20s", opt->name);
+        draw_text_z(10, y + 1, 0.01f, 0.45f, opt->is_current ? cur : white, nm);
+        snprintf(line, sizeof(line), "%d", opt->cost);
+        draw_text_z(CITY_WORKLIST_COL_X - 12 - text_width(line, 0.42f), y + 2, 0.01f, 0.42f, soft, line);
     }
-    draw_scroll_list(8, rows, visible);
+    if (n > PANEL_ROWS_VISIBLE) {
+        // scroll position
+        float track = PANEL_ROW_H * PANEL_ROWS_VISIBLE;
+        float th = track * PANEL_ROWS_VISIBLE / n, ty = track * scroll / n;
+        C2D_DrawRectSolid(CITY_WORKLIST_COL_X - 7, PANEL_LIST_Y + ty, 0.0f, 3, th, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
+    }
 
-    // Worklist column (right, "beside" the buildables list per §6.4) - not
-    // independently scrollable in v1, so only the first PANEL_ROWS_VISIBLE
-    // queued items show; "x" hints that tapping a row removes it.
-    C2D_DrawRectSolid(CITY_WORKLIST_COL_X - 4, PANEL_LIST_Y, 0.0f, 2,
-                      PANEL_ROW_H * PANEL_ROWS_VISIBLE, C2D_Color32(0x40, 0x48, 0x54, 0xFF));
-    ScrollRow wrows[PANEL_ROWS_VISIBLE];
-    int wvisible = 0;
+    // Worklist (right).
     for (int i = 0; i < PANEL_ROWS_VISIBLE && i < worklist_n; i++) {
-        snprintf(wrows[wvisible].text, sizeof(wrows[wvisible].text), "x %.10s", worklist[i].name);
-        wrows[wvisible].color = dim;
-        wvisible++;
+        float y = PANEL_LIST_Y + i * PANEL_ROW_H;
+        C2D_DrawRectSolid(CITY_WORKLIST_COL_X, y + 1, 0.0f, 316 - CITY_WORKLIST_COL_X, PANEL_ROW_H - 2,
+                          C2D_Color32(0x2A, 0x24, 0x18, 0xFF));
+        char nm[32];
+        snprintf(nm, sizeof(nm), "%d. %.12s", i + 1, worklist[i].name);
+        draw_text_z(CITY_WORKLIST_COL_X + 4, y + 1, 0.01f, 0.42f, soft, nm);
     }
-    draw_scroll_list(CITY_WORKLIST_COL_X + 4, wrows, wvisible);
 
-    C2D_DrawRectSolid(0, PANEL_FOOTER_Y, 0.0f, 320, 240 - PANEL_FOOTER_Y, C2D_Color32(0x20, 0x20, 0x20, 0xFF));
-    if (info->can_buy) {
-        snprintf(line, sizeof(line), "Buy (%d g)", info->buy_cost);
-        draw_text(12, PANEL_FOOTER_Y + 6, 0.55f, C2D_Color32(0x60, 0xE0, 0x60, 0xFF), line);
-    } else {
-        draw_text_z(12, PANEL_FOOTER_Y + 6, 0.0f, 0.55f, dim, "Buy");
-    }
-    draw_text_z(110, PANEL_FOOTER_Y + 8, 0.0f, 0.42f, dim, "Y: unit out");
-    draw_text_z(200, PANEL_FOOTER_Y + 6, 0.0f, 0.55f, white, "Close");
+    // Footer: Buy (left half) / Close (right half) - matches main.c's hit test.
+    if (info->can_buy) snprintf(line, sizeof(line), "Buy (%d gold)", info->buy_cost);
+    else snprintf(line, sizeof(line), "Buy");
+    draw_button(4, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, line, 0.5f, info->can_buy, false);
+    draw_button(164, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
 }
 
 void render_civ_top(const CivInfo *civ, const char *title)

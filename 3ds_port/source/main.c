@@ -10,6 +10,7 @@
 #include "fc3ds_server.h"
 #include "render.h"
 #include "font.h"
+#include "audio.h"
 
 // Screen dimensions
 #define SCREEN_WIDTH_TOP  400
@@ -243,7 +244,7 @@ enum { POPUP_NONE, POPUP_UNIT, POPUP_CONFIRM_DISBAND, POPUP_STACK, POPUP_MENU };
 #define PID_OPEN_CITY   (-100)
 #define PID_YES         1
 #define PID_NO          0
-enum { MENU_RESEARCH = 1, MENU_RATES, MENU_GOVERNMENT, MENU_DIPLOMACY, MENU_SAVE, MENU_CLOSE };
+enum { MENU_RESEARCH = 1, MENU_RATES, MENU_GOVERNMENT, MENU_DIPLOMACY, MENU_SAVE, MENU_MUSIC, MENU_EFFECTS, MENU_CLOSE };
 
 static void popup_add(PopupMenu *m, int id, const char *label, bool enabled)
 {
@@ -286,9 +287,57 @@ static void open_game_menu(PopupMenu *m)
     popup_add(m, MENU_GOVERNMENT, "Government", true);
     popup_add(m, MENU_DIPLOMACY,  "Diplomacy", true);
     popup_add(m, MENU_SAVE,       "Save Game", true);
+    char lbl[24];
+    snprintf(lbl, sizeof(lbl), "Music: %d", audio_music_volume());
+    popup_add(m, MENU_MUSIC, lbl, audio_available());
+    snprintf(lbl, sizeof(lbl), "Effects: %d", audio_sfx_volume());
+    popup_add(m, MENU_EFFECTS, lbl, audio_available());
     popup_add(m, MENU_CLOSE,      "Close", true);
     popup_layout(m, HUD_MENU_X, HUD_Y - 10);
     m->x = 2;
+}
+
+// ---- Settings (sdmc:/3ds/freeciv/settings.ini) ----
+#define SETTINGS_PATH "sdmc:/3ds/freeciv/settings.ini"
+static void load_settings(void)
+{
+    FILE *f = fopen(SETTINGS_PATH, "r");
+    int mv = 6, sv = 8;
+    if (f) {
+        char line[64];
+        while (fgets(line, sizeof(line), f)) {
+            sscanf(line, "music=%d", &mv);
+            sscanf(line, "effects=%d", &sv);
+        }
+        fclose(f);
+    }
+    audio_set_volumes(mv, sv);
+}
+
+static void save_settings(void)
+{
+    FILE *f = fopen(SETTINGS_PATH, "w");
+    if (!f) return;
+    fprintf(f, "music=%d\neffects=%d\n", audio_music_volume(), audio_sfx_volume());
+    fclose(f);
+}
+
+// Volume steps the menu cycles through.
+static int next_volume(int v) { return v >= 10 ? 0 : v >= 6 ? 10 : v >= 3 ? 6 : 3; }
+
+// "m_" + a unit's ruleset name in soundspec form ("Mech. Inf." -> "m_mech_inf").
+static void unit_sound_tag(char kind, const char *rule, char *tag, int len)
+{
+    int j = 0;
+    tag[j++] = kind; tag[j++] = '_';
+    for (int i = 0; rule && rule[i] && j < len - 1; i++) {
+        char c = rule[i];
+        if (c >= 'A' && c <= 'Z') c += 32;
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) tag[j++] = c;
+        else if (tag[j - 1] != '_') tag[j++] = '_';
+    }
+    while (j > 2 && tag[j - 1] == '_') j--;
+    tag[j] = 0;
 }
 
 // ---- New Game setup ----
@@ -342,6 +391,7 @@ int main(int argc, char* argv[])
     // Initialize graphics
     gfxInitDefault();
     romfsInit();
+    audio_init();
     C3D_Init(C3D_DEFAULT_CMDBUF_SIZE);
     C2D_Init(C2D_DEFAULT_MAX_OBJECTS);
     C2D_Prepare();
@@ -463,6 +513,7 @@ int main(int argc, char* argv[])
     int ui_other_player_count = 0;
     DiploInfo ui_diplo_info;
 
+    load_settings();
     if (!isNew3DS) {
         ng_size = 0; ng_rivals = 2;
         ng_max_size = 1; ng_max_rivals = 4;
@@ -478,6 +529,9 @@ int main(int argc, char* argv[])
         u32 kDown = hidKeysDown();
         u32 kHeld = hidKeysHeld();
         u32 kUp = hidKeysUp();
+        audio_update();
+        audio_set_music(app_state == APP_GAME ? (get_game_turn() > 0 && !fc3ds_server_is_busy() ? MUSIC_GAME : MUSIC_NONE)
+                                              : MUSIC_MENU);
 
         // Mode as it was at the START of this frame. The modal touch handler
         // gates on this (not the live ui_mode) so that the same tap which
@@ -1021,6 +1075,38 @@ int main(int argc, char* argv[])
                 ui_goto_x = ui_goto_y = -1;
             }
 
+            // Sounds: engine cues (combat, city founded), your unit moving,
+            // research completing, the game starting.
+            {
+                char tag[32];
+                while (game_pop_sound(tag, sizeof(tag))) audio_play(tag);
+                static int snd_unit = -1, snd_x = -1, snd_y = -1;
+                if (selected_unit_id >= 0 && unit_info.valid) {
+                    if (selected_unit_id == snd_unit && (unit_info.x != snd_x || unit_info.y != snd_y)) {
+                        unit_sound_tag('m', unit_info.rule_name, tag, sizeof(tag));
+                        audio_play(tag);
+                    }
+                    snd_unit = selected_unit_id; snd_x = unit_info.x; snd_y = unit_info.y;
+                } else {
+                    snd_unit = -1;
+                }
+                static int snd_bulbs = -1;
+                static char snd_research[48] = "";
+                if (have_map_civ) {
+                    if (snd_bulbs >= 0 && map_civ_info.bulbs < snd_bulbs
+                        && strcmp(snd_research, map_civ_info.research_name) != 0) {
+                        audio_play("e_tech_gain");
+                    }
+                    snd_bulbs = map_civ_info.bulbs;
+                    snprintf(snd_research, sizeof(snd_research), "%s", map_civ_info.research_name);
+                }
+                static bool snd_started = false;
+                if (!snd_started && get_game_turn() > 0) {
+                    audio_play("e_enter_game");
+                    snd_started = true;
+                }
+            }
+
             // A new turn: clear "Wait" marks and pick the first unit to move.
             int turn_now = get_game_turn();
             if (turn_now > 0 && turn_now != last_turn) {
@@ -1101,6 +1187,15 @@ int main(int argc, char* argv[])
                         freeciv_request_save_game();
                         save_toast_frames = SAVE_TOAST_FRAMES;
                         save_in_flight = true;
+                        break;
+                    case MENU_MUSIC:
+                    case MENU_EFFECTS:
+                        if (id == MENU_MUSIC) audio_set_volumes(next_volume(audio_music_volume()), audio_sfx_volume());
+                        else audio_set_volumes(audio_music_volume(), next_volume(audio_sfx_volume()));
+                        save_settings();
+                        if (id == MENU_EFFECTS) audio_play("e_tech_gain");
+                        open_game_menu(&popup);      // stay open to show the new level
+                        popup_kind = POPUP_MENU;
                         break;
                     default: break;
                     }
@@ -1522,6 +1617,7 @@ int main(int argc, char* argv[])
     // does a clean libctru shutdown (proper APT close handshake), which
     // returns to the Homebrew Launcher without a crash or hang.
     fc3ds_server_shutdown();
+    audio_exit();
 
     render_deinit();
 

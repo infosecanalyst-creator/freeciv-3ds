@@ -467,22 +467,51 @@ static bool try_city_actions(struct player *pov, struct unit *punit, struct city
     return false;
 }
 
-static bool try_stack_actions(struct player *pov, struct unit *punit, struct tile *dst,
-                               const action_id *ids, int n)
-{
-    for (int i = 0; i < n; i++) {
-        if (is_action_enabled_unit_on_stack(&(wld.map), ids[i], punit, dst)) {
-            unit_perform_action(pov, punit->id, tile_index(dst), 0, "", ids[i], ACT_REQ_PLAYER);
-            return true;
-        }
-    }
-    return false;
-}
 
 // Resolve "move punit onto dst" into attack/conquer-city/capture if dst is
 // occupied by someone else, falling back to a plain move otherwise. This is
 // what gives moving into an enemy the standard Freeciv "bump to attack" UX
 // - there is deliberately no separate attack button.
+// Sound-cue ring: written on the server thread, read on the main thread
+// while the server is parked (same discipline as the command ring).
+#define SOUND_RING 8
+static char s_sound_ring[SOUND_RING][32];
+static volatile int s_sound_head, s_sound_tail;
+
+static void push_sound(const char *tag)
+{
+    int next = (s_sound_head + 1) % SOUND_RING;
+    if (next == s_sound_tail) return;
+    fc_strlcpy(s_sound_ring[s_sound_head], tag, sizeof(s_sound_ring[0]));
+    s_sound_head = next;
+}
+
+// "f_" / "m_" + the unit's ruleset name in soundspec form ("Mech. Inf." -> "mech_inf").
+static void push_unit_sound(char kind, const struct unit *punit)
+{
+    char tag[32];
+    const char *rn = unit_rule_name(punit);
+    int j = 0;
+    tag[j++] = kind; tag[j++] = '_';
+    for (int i = 0; rn && rn[i] && j < (int)sizeof(tag) - 1; i++) {
+        char c = rn[i];
+        if (c >= 'A' && c <= 'Z') c += 32;
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) tag[j++] = c;
+        else if (tag[j - 1] != '_') tag[j++] = '_';
+    }
+    while (j > 2 && tag[j - 1] == '_') j--;
+    tag[j] = 0;
+    push_sound(tag);
+}
+
+bool game_pop_sound(char *tag, int len)
+{
+    if (s_sound_tail == s_sound_head) return false;
+    fc_strlcpy(tag, s_sound_ring[s_sound_tail], len);
+    s_sound_tail = (s_sound_tail + 1) % SOUND_RING;
+    return true;
+}
+
 static void move_or_fight(struct player *pov, struct unit *punit, struct tile *dst)
 {
     // A manual D-Pad move overrides any pending goto route (handoff.md §2d/
@@ -507,9 +536,14 @@ static void move_or_fight(struct player *pov, struct unit *punit, struct tile *d
         static const action_id combat_ids[] = {
             ACTION_CAPTURE_UNITS, ACTION_ATTACK, ACTION_ATTACK2
         };
-        if (try_stack_actions(pov, punit, dst, combat_ids, ARRAY_SIZE(combat_ids))) {
-            return;
+        for (int i = 0; i < (int)ARRAY_SIZE(combat_ids); i++) {
+            if (is_action_enabled_unit_on_stack(&(wld.map), combat_ids[i], punit, dst)) {
+                push_unit_sound('f', punit);   // before: the attacker may not survive
+                unit_perform_action(pov, punit->id, tile_index(dst), 0, "", combat_ids[i], ACT_REQ_PLAYER);
+                return;
+            }
         }
+
     }
     // Same validated path handle_unit_orders()/ORDER_MOVE uses server-side
     // (server/unittools.c) - movement points, terrain, ZOC etc are all
@@ -811,6 +845,7 @@ void freeciv3ds_process_pending_actions(void)
                 }
                 case UNIT_ACTION_FOUND_CITY:
                     if (is_action_enabled_unit_on_tile(&(wld.map), ACTION_FOUND_CITY, punit, unit_tile(punit), NULL)) {
+                        push_sound("w_generic");
                         unit_do_action(pov, punit->id, tile_index(unit_tile(punit)), 0,
                                        city_name_suggestion(pov, unit_tile(punit)), ACTION_FOUND_CITY);
                     }

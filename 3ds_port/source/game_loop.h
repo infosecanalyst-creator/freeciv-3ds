@@ -411,6 +411,9 @@ void freeciv_request_diplomacy_accept(int counterpart);
 // false if the pov player has no units yet (e.g. not placed this frame) or
 // no pov player exists.
 bool find_pov_unit_tile(int *x, int *y);
+// Sound cues raised by the engine side (combat, a city founded); the main
+// thread pops them each frame and plays them. Tags are Freeciv soundspec tags.
+bool game_pop_sound(char *tag, int len);
 // Fills *out for unit_id (out->valid=false if it no longer exists).
 void get_unit_info(int unit_id, UnitInfo *out);
 // The units on tile (x, y), pov's first; returns how many were written.
