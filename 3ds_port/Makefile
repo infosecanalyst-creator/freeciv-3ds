@@ -36,8 +36,8 @@ ROMFS		:=	romfs
 GFXBUILD	:=	$(ROMFS)/gfx
 
 APP_TITLE	:=	Freeciv 3DS
-APP_DESCRIPTION	:=	Freeciv turn-based strategy game
-APP_AUTHOR	:=	xPsycho999
+APP_DESCRIPTION	:=	Civilization-style strategy (Freeciv)
+APP_AUTHOR	:=	Freeciv 3DS contributors
 ICON		:=	../freeciv/data/icons/48x48/freeciv-client.png
 #---------------------------------------------------------------------------------
 # options for code generation

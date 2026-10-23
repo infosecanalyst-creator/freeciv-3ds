@@ -1,129 +1,119 @@
-# Freeciv 3DS (fork)
+# Freeciv 3DS
 
-A fork of [xPsycho999/freeciv3ds](https://github.com/xPsycho999/freeciv3ds) (GPL-2.0-or-later) working toward a
-fuller 3DS client: the map on the top screen with zoom, touch controls on the bottom screen, sound and
-music, readable text and stereo 3D. CI builds `freeciv3ds.3dsx` on every push (see `.github/workflows`).
+[Freeciv](https://www.freeciv.org/), the open-source Civilization-style strategy game, as a Nintendo 3DS
+homebrew app with a handheld interface built for the two screens and the stylus.
 
----
+The real Freeciv engine (server, rulesets, map generator and AI) is cross-compiled for the 3DS and runs
+in-process. A native `citro2d` client draws the game and talks to the engine directly, so there is no
+network client. Everything ships as a single `freeciv3ds.3dsx`.
 
-A New Nintendo 3DS homebrew port of [Freeciv](https://www.freeciv.org/), the open-source
-Civilization-style strategy game.
-
-The Freeciv **server core** — the full game engine, rulesets, map generator and AI, with no desktop
-client — is cross-compiled to the 3DS's ARM11 processor. A custom `libctru`/`citro2d` client renders
-the game across the console's two screens and reads the engine's state **in-process** (there is no
-network client): the whole thing runs as a single ~10 MB `.3dsx` homebrew app. It runs on the
-[Azahar](https://azahar-emu.org/) emulator and on real 3DS hardware with custom firmware (developed and
-tested on a New 3DS — see [Hardware](#hardware)).
-
-> **Status:** playable end-to-end. You can start or load a game, explore, found and manage cities,
-> research tech, change government, conduct diplomacy with the AI, and play turns through to a
-> decision — all on the handheld.
+This is a fork of [xPsycho999/freeciv3ds](https://github.com/xPsycho999/freeciv3ds), which got the
+engine running on the 3DS. This fork rebuilds the interface, adds sound, music and stereo 3D, and
+supports the Old 3DS.
 
 ## Features
 
-- **Real, playable game loop** — start menu (New Game / Load Game), a generated overhead map with one
-  human civ and several AI opponents, and turn advancement (**A** = End Turn) with the AI taking its
-  turns, founding cities and waging war.
-- **Two-screen UI** — the bottom screen renders the map (`citro2d`, 60 FPS): terrain with
-  cardinal-matched tiling, per-type unit and city sprites, coastlines, fog-of-war, owner-tinted
-  borders, and road/rail/river/resource/hut/pollution overlays. The top screen is a HUD featuring a **real-time Minimap**, along with turn, selected tile, government, and control info.
-- **Unit control** — D-Pad / Circle-Pad pan; touch selects a tile 1:1; touch your own unit to arm it,
-  D-Pad moves it (8 directions, corner = diagonal), moving into an enemy attacks/conquers. **Multi-turn
-  goto**: arm a unit, tap **GOTO**, tap a destination — the engine's own pathfinder routes it and
-  continues across turns until it arrives.
-- **City & civilization management** — tap a city for its production / buy / worklist / garrison
-  screen; a touch action bar opens Research (with a tech-tree view), tax rates, Government (with
-  revolutions), and Diplomacy (propose / accept / cancel treaties with the AI).
-- **Save / Load** on demand to the SD card, plus autosaves, with a newest-first load picker.
-- **HOME suspend/resume safe** — the app parks the engine before the OS freezes it.
-- **Dev quick-game preset** — hold **L+R** while tapping New Game for a tiny, fast-starting test world
-  (small map, one AI nearby, tech pre-granted).
-
-## How it works
-
-Two design invariants keep the in-process client and the full Freeciv engine coexisting safely on a
-single console:
-
-- **Cooperative-coroutine server.** The engine runs as one gated coroutine that keeps its own stack
-  across yields, runs only when the main loop ticks it, and parks at a single yield point. Exactly one
-  of {UI thread, engine} is runnable at a time — this is what makes HOME/suspend safe and every read of
-  game state race-free.
-- **One read path, one write path.** The UI reads engine state only while the engine is parked
-  (snapshotting into plain structs); all UI actions go through a small command ring drained on the
-  engine thread into Freeciv's own self-validating handlers. The port adds features this way with **no
-  patches to Freeciv's game logic** (only build-system and headless-server glue; see `port-patches/`).
-
-## Repository layout
-
-| Path | Contents |
-|---|---|
-| `3ds_port/` | The custom 3DS client — source (`source/`), Makefile, sprite art (`gfx/`), and server config (`romfs/*.serv`). **This is the port.** |
-| `port-patches/` | What's applied to upstream Freeciv: `freeciv-core.patch` (build / headless glue), the ARM configure script, and the CMake toolchain file. |
-| `scripts/`, `3ds_port/crop.sh` | Asset pipeline that slices the sprite art out of Freeciv's GPL `trident` tileset. |
-
-The upstream `freeciv/` source clone and all build artifacts are not tracked (see `.gitignore`).
-
-## Building
-
-Prerequisites: the [devkitPro](https://devkitpro.org/) 3DS toolchain (`devkitARM`, `libctru`,
-`citro2d`) installed at `/opt/devkitpro`, plus ImageMagick (for the art pipeline) and, optionally,
-`azahar` to run it.
-
-1. **Freeciv core** — clone upstream Freeciv into `freeciv/`, apply `port-patches/freeciv-core.patch`,
-   then configure and build it for ARM (server-only, static, `--disable-icu --disable-nls`) using
-   `port-patches/run_configure_3ds.sh`. This produces the static libraries the client links against.
-2. **Client**
-   ```sh
-   export DEVKITPRO=/opt/devkitpro DEVKITARM=/opt/devkitpro/devkitARM
-   export PATH=$PATH:/opt/devkitpro/tools/bin:/opt/devkitpro/devkitARM/bin
-   cd 3ds_port && make
-   ```
-   Output: `3ds_port/3ds_port.3dsx`.
-3. **ROMFS data** — populate `3ds_port/romfs/data/` with the Freeciv **server** ruleset data (from
-   Freeciv's `data/` dir). Only server rulesets are needed, not client tilesets.
-
-## Running
-
-- **Emulator:** `azahar -w 3ds_port/3ds_port.3dsx`
-- **Hardware:** copy the `.3dsx` to `sdmc:/3ds/` and launch it from the Homebrew Launcher (see
-  [Hardware](#hardware) for which consoles are supported).
-
-## Hardware
-
-This is unsigned homebrew, so it needs a console running **custom firmware** (e.g.
-[Luma3DS](https://github.com/LumaTeam/Luma3DS)); it launches from the Homebrew Launcher. There is no
-strict New-3DS-only dependency in the code, though it takes advantage of New 3DS features — specifically a CPU clock boost
-(`osSetSpeedupEnable`) and **Core Affinity** (pinning the Freeciv engine thread to the spare ARM11 core) — which gracefully fall back to default behavior on older hardware.
-
-- **New 3DS / New 3DS XL / New 2DS XL** — developed and tested here. The faster ARM11 (with the clock
-  boost and Core Affinity) and the larger 256 MB RAM comfortably run the engine, AI, and a full-size map without stalling the renderer.
-- **Old 3DS / 3DS XL / 2DS** — expected to work (nothing in the port is New-3DS-only), but **currently
-  untested**. Without the clock boost, world generation and AI turns will be noticeably slower, and the
-  smaller 128 MB RAM may require a smaller map — the L+R "dev" quick-game preset (tiny map) is a good
-  starting point there.
+- **DS-style two-screen layout**, modelled on *Civilization Revolution* and *Anno* for the DS:
+  - **Bottom screen (touch): the map.** Drag to scroll and zoom in five steps. Tap your unit to
+    command it and open its orders. Tap a neighbouring square to move, or tap a farther square twice
+    to send the unit along a route. Tapping a stack or a city with units gives a picker.
+  - **Top screen (information only):**
+    - status bar with turn, gold, government and tax rates;
+    - minimap with a frame showing where the bottom screen is looking;
+    - research progress;
+    - a card for whatever you selected: a unit (portrait, attack/defense/firepower, HP, moves,
+      activity, home city) or a tile (terrain, improvements, resource, city, units).
+- **Unit orders menu** lists only what the unit can do right now: Build City, Join City, Build Road,
+  Irrigate, Mine, Fortify, Sentry, Explore, Cancel Orders, Wait, Done, and Disband (which asks first).
+  After you give orders, the next unit that needs them is selected automatically.
+- **Map labels**: city name plates with size, owner shields, health bars for wounded units,
+  activity badges (Fortified, Sentry, Working, Exploring, Goto), and dimmed units that are done.
+- **Cities**: yields, growth and production bars, and the units inside (lead one out with Y). Change
+  production, keep a build queue, and buy.
+- **Civilization**: research (list and tech tree), tax rates, government and revolutions, and
+  diplomacy with the AI.
+- **New Game setup**: map size, number of rivals and AI skill.
+- **Sound and music**: Freeciv's sound set (unit moves, combat, cities, technology) plus a rotation of
+  CC0 medieval music. Volumes are in the Menu.
+- **Stereo 3D** on the top screen, driven by the 3D slider: panels float gently in front of the screen.
+- **Crisp text**: the UI font is pre-rendered at exact pixel sizes, not scaled.
+- Save and load to the SD card, plus autosaves. Suspending with HOME is safe.
 
 ## Controls
 
-| Input | Action |
+| | |
 |---|---|
-| Touch | Select a tile / your unit; tap a city to open it; drive all menus |
-| D-Pad / Circle Pad | Move the armed unit / pan the camera |
-| A | End Turn |
-| B / X / Y | Fortify-Sentry / context action (found city, build road…) / disband |
-| L / R | Research / tax-rate panels |
-| SELECT | Re-center on your units |
-| Action bar (touch) | Research, Rates, Government, Diplomacy, Save, Goto |
-| START | Quit to the Homebrew Launcher |
+| Stylus on the map | Tap a unit: command it and show its orders. Tap a neighbouring square: move. Tap a farther square twice: route. Drag: scroll. |
+| Menu / Next / − + / End Turn | Bottom-row buttons (Menu: Research, Tax Rates, Government, Diplomacy, Save, Music, Effects) |
+| D-Pad | Move the selected unit (or scroll if none is selected) |
+| Circle Pad | Scroll |
+| A | Selected unit's orders, or the next unit |
+| X | Next unit |
+| B | Back, close, or cancel a route |
+| L / R | Research / Tax rates |
+| ZL / ZR | Zoom out / in (New 3DS) |
+| START | End turn |
+| SELECT + START | Quit |
+| In a city | Tap an item to build it now (or to queue it), L/R to pick a unit, Y to lead it out |
 
-## License
+## Old 3DS and New 3DS
 
-Freeciv is licensed under the GNU General Public License, version 2 or later. This port links the
-Freeciv engine and uses art derived from Freeciv's `trident` tileset, so it is distributed under the
-**GPL-2.0-or-later** as well (see `3ds_port/LICENSE`).
+The same `.3dsx` runs on both:
 
-## Acknowledgements
+- **New 3DS:** 804 MHz mode on, and the engine on its own CPU core.
+- **Old 3DS (64 MB, 268 MHz):** New Game defaults to a Small map with 2 rivals, and is capped at a
+  Medium map with 4 rivals so turns stay quick and memory holds.
 
-- The [Freeciv](https://www.freeciv.org/) project and its contributors — the engine, rulesets, AI, and
-  the `trident` tileset this port's art is sliced from.
-- [devkitPro](https://devkitpro.org/) — `devkitARM`, `libctru`, and `citro2d`.
+Sound needs a DSP firmware dump (`/3ds/dspfirm.cdc`, made by the DSP1 homebrew). Without one, the game
+runs silently.
+
+There is no DS version. The DS has 4 MB of RAM, far less than the Freeciv engine needs.
+
+## Installing
+
+Copy `freeciv3ds.3dsx` to `/3ds/` on the SD card and start it from the Homebrew Launcher. Saves go to
+`/3ds/freeciv/saves/` and settings to `/3ds/freeciv/settings.ini`. CI builds every push; the latest
+build is on the `builds` branch.
+
+## Building
+
+GitHub Actions does all of this (`.github/workflows/build.yml`). To build locally you need
+[devkitPro](https://devkitpro.org/) with `3ds-dev`, `3ds-curl`, `3ds-mbedtls` and `3ds-zlib`, plus the
+usual autotools.
+
+```sh
+scripts/build_freeciv_core.sh   # fetch upstream Freeciv at the pinned commit, patch it, build the
+                                # engine as static ARM11 libraries, copy rulesets into romfs
+cd 3ds_port && make             # build the client -> 3ds_port.3dsx
+```
+
+`tools/make_font.py` (needs Pillow) regenerates the font atlas, and `tools/make_audio.sh` (needs
+ffmpeg) regenerates the audio. Both outputs are committed, so a normal build needs neither tool.
+
+## How it works
+
+- **The engine runs as a cooperative coroutine.** It runs only when the UI loop lets it and parks at
+  one yield point, so the UI reads game state only while the engine is parked. That makes reads
+  race-free and suspend safe.
+- **One read path, one write path.** The UI snapshots engine state into plain structs, and every
+  action goes through a small command ring into Freeciv's own validated handlers. Freeciv's game
+  logic is unpatched; `port-patches/freeciv-core.patch` only adds build-system and headless glue.
+
+| Path | Contents |
+|---|---|
+| `3ds_port/source/` | The client: `main.c` (input and screens), `render.c` (drawing), `game_loop.c` (engine glue), `fc3ds_server.c` (engine coroutine), `font.c`, `audio.c` |
+| `3ds_port/gfx/` | Sprites cut from Freeciv's `trident` tileset, plus the font atlas |
+| `3ds_port/romfs/` | Server scripts and audio (rulesets are added by the build) |
+| `port-patches/` | Changes applied to upstream Freeciv |
+| `scripts/`, `tools/` | Engine build, font and audio generators |
+
+## Credits and licences
+
+- **Freeciv** engine, rulesets, `trident` tileset and sound set: the Freeciv project, GPL-2.0-or-later.
+- **Original 3DS port**: [xPsycho999](https://github.com/xPsycho999/freeciv3ds), GPL-2.0-or-later.
+- **Menu music** "Dawning Fanfare": Cullam Bruce-Lockhart (Freeciv `stdmusic`).
+- **Game music** "Exploration", "Harvest Season", "Market Day" and "The Bard's Tale": RandomMind,
+  [opengameart.org](https://opengameart.org/users/randommind), CC0.
+- **Inter** font: Rasmus Andersson, SIL Open Font License 1.1 (`licenses/Inter-LICENSE.txt`).
+
+This program is free software under the GNU General Public License, version 2 or later; see `LICENSE`.
