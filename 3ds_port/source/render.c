@@ -1300,6 +1300,19 @@ void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
             draw_selection((wx - cam_x) * SC, (sel_y * TILE_PX - cam_y) * SC, sel_armed);
         }
     }
+    // Same for a route target in the dark.
+    if (goto_x >= 0 && goto_y >= 0) {
+        TileInfo gi;
+        get_tile_info(goto_x, goto_y, &gi);
+        if (gi.visibility == 0) {
+            int wx = goto_x * TILE_PX;
+            if (wrapx) {
+                int d = ((wx - cam_x + TILE_PX) % world_w + world_w) % world_w - TILE_PX;
+                wx = cam_x + d;
+            }
+            draw_goto_marker((wx - cam_x) * SC, (goto_y * TILE_PX - cam_y) * SC);
+        }
+    }
 }
 
 // Garrison rows visible at once on the top-screen readout before falling
