@@ -53,7 +53,8 @@ mkdir -p build-3ds
 	ac_cv_header_stdbool_h=yes ../configure --host=arm-none-eabi --enable-client=no --enable-server \
 		--disable-shared --enable-static --disable-nls --disable-icu \
 		--enable-sys-tolua-cmd="$TOLUA" --enable-ack-legacy --disable-ipv6 \
-		--without-iconv --enable-fcdb=no --enable-fcmp=no --without-readline
+		--without-iconv --enable-fcdb=no --enable-fcmp=no --without-readline \
+			--without-libbz2 --without-liblzma --without-libzstd
 	# -k: the standalone freeciv-server program cannot link for the 3DS (no
 	# libctru start-up); only its libraries are wanted, checked below.
 	make -k -j"$(nproc)" || true
