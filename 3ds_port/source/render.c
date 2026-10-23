@@ -2,6 +2,7 @@
 #include "game_loop.h"
 #include "fc3ds_server.h"
 #include "sprites.h"
+#include "font.h"
 #include <citro2d.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -264,10 +265,7 @@ static u32 owner_color(int idx)
 // render_busy_indicator()'s comment).
 static void draw_text_z(float x, float y, float z, float scale, u32 color, const char *str)
 {
-    C2D_Text txt;
-    C2D_TextParse(&txt, g_textBuf, str);
-    C2D_TextOptimize(&txt);
-    C2D_DrawText(&txt, C2D_WithColor, x, y, z, scale, scale, color);
+    font_draw(str, x, y, z, scale, color);
 }
 
 static void draw_text(float x, float y, float scale, u32 color, const char *str)
@@ -521,11 +519,7 @@ static void hud_strip(float y, float w, float h)
 // Text helpers that measure, for centring and right-aligning.
 static float text_width(const char *str, float scale)
 {
-    C2D_Text t;
-    C2D_TextParse(&t, g_textBuf, str);
-    float w = 0, h = 0;
-    C2D_TextGetDimensions(&t, scale, scale, &w, &h);
-    return w;
+    return font_width(str, scale);
 }
 
 static void draw_button(float x, float y, float w, float h, float z, const char *label,
@@ -1384,7 +1378,7 @@ void render_city_top(const CityInfo *info, int garrison_sel)
         draw_text(8, 168, 0.5f, label, "In city: (no units)");
     }
 
-    C2D_DrawText(&s_txt_tap_row_hint, C2D_WithColor, 8, 212, 0.0f, 0.5f, 0.5f, label);
+    draw_text_z(8, 212, 0.0f, 0.5f, label, "Tap a row below: change build");
     draw_text(8, 228, 0.5f, label,
               info->garrison_count > 0 ? "B: Close  L/R: pick  Y: take out" : "B: Close");
 }
@@ -1458,10 +1452,10 @@ void render_city_panel(const CityInfo *info, const BuildOption *opts, int n, int
         snprintf(line, sizeof(line), "Buy (%d g)", info->buy_cost);
         draw_text(12, PANEL_FOOTER_Y + 6, 0.55f, C2D_Color32(0x60, 0xE0, 0x60, 0xFF), line);
     } else {
-        C2D_DrawText(&s_txt_buy, C2D_WithColor, 12, PANEL_FOOTER_Y + 6, 0.0f, 0.55f, 0.55f, dim);
+        draw_text_z(12, PANEL_FOOTER_Y + 6, 0.0f, 0.55f, dim, "Buy");
     }
-    C2D_DrawText(&s_txt_y_unit_out, C2D_WithColor, 110, PANEL_FOOTER_Y + 8, 0.0f, 0.42f, 0.42f, dim);
-    C2D_DrawText(&s_txt_close, C2D_WithColor, 200, PANEL_FOOTER_Y + 6, 0.0f, 0.55f, 0.55f, white);
+    draw_text_z(110, PANEL_FOOTER_Y + 8, 0.0f, 0.42f, dim, "Y: unit out");
+    draw_text_z(200, PANEL_FOOTER_Y + 6, 0.0f, 0.55f, white, "Close");
 }
 
 void render_civ_top(const CivInfo *civ, const char *title)
@@ -1479,7 +1473,7 @@ void render_civ_top(const CivInfo *civ, const char *title)
     if (strcmp(title, "Tax & Science") == 0) title_txt = &s_txt_tax_science_title;
     else if (strcmp(title, "Government") == 0) title_txt = &s_txt_gov_title;
     else if (strcmp(title, "Diplomacy") == 0) title_txt = &s_txt_diplo_title;
-    C2D_DrawText(title_txt, C2D_WithColor, 8, 5, 0.0f, 0.85f, 0.85f, white);
+    draw_text_z(8, 5, 0.0f, 0.85f, white, title); (void)title_txt;
 
     snprintf(line, sizeof(line), "Gold: %d", civ->gold);
     draw_text(8, 44, 0.65f, white, line);
@@ -1515,7 +1509,7 @@ void render_research_panel(const TechOption *opts, int n, int scroll)
     u32 dim   = C2D_Color32(0xA0, 0xA0, 0xA0, 0xFF);
 
     C2D_DrawRectSolid(0, 0, 0.0f, 320, PANEL_HEADER_H, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
-    C2D_DrawText(&s_txt_choose_research_header, C2D_WithColor, 8, 5, 0.0f, 0.6f, 0.6f, white);
+    draw_text_z(8, 5, 0.0f, 0.6f, white, "Choose research");
 
     ScrollRow rows[PANEL_ROWS_VISIBLE];
     int visible = 0;
@@ -1529,8 +1523,8 @@ void render_research_panel(const TechOption *opts, int n, int scroll)
     draw_scroll_list(8, rows, visible);
 
     C2D_DrawRectSolid(0, PANEL_FOOTER_Y, 0.0f, 320, 240 - PANEL_FOOTER_Y, C2D_Color32(0x20, 0x20, 0x20, 0xFF));
-    C2D_DrawText(&s_txt_y_tree_view, C2D_WithColor, 12, PANEL_FOOTER_Y + 8, 0.0f, 0.42f, 0.42f, dim);
-    C2D_DrawText(&s_txt_close, C2D_WithColor, 200, PANEL_FOOTER_Y + 6, 0.0f, 0.55f, 0.55f, white);
+    draw_text_z(12, PANEL_FOOTER_Y + 8, 0.0f, 0.42f, dim, "Y: Tree View");
+    draw_text_z(200, PANEL_FOOTER_Y + 6, 0.0f, 0.55f, white, "Close");
 }
 
 // Shared row-walk for the tiered tech-tree view (handoff.md §8.4), used
@@ -1563,7 +1557,7 @@ void render_tech_tree_panel(const TechNode *nodes, int n, int scroll)
     char label[8];
 
     C2D_DrawRectSolid(0, 0, 0.0f, 320, PANEL_HEADER_H, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
-    C2D_DrawText(&s_txt_tech_tree_header, C2D_WithColor, 8, 5, 0.0f, 0.6f, 0.6f, white);
+    draw_text_z(8, 5, 0.0f, 0.6f, white, "Tech tree (by tier)");
 
     int idx = 0, tier_row = 0, display_row = 0;
     while (idx < n && display_row < PANEL_ROWS_VISIBLE) {
@@ -1606,8 +1600,8 @@ void render_tech_tree_panel(const TechNode *nodes, int n, int scroll)
     }
 
     C2D_DrawRectSolid(0, PANEL_FOOTER_Y, 0.0f, 320, 240 - PANEL_FOOTER_Y, C2D_Color32(0x20, 0x20, 0x20, 0xFF));
-    C2D_DrawText(&s_txt_y_flat_list, C2D_WithColor, 12, PANEL_FOOTER_Y + 8, 0.0f, 0.42f, 0.42f, dim);
-    C2D_DrawText(&s_txt_close, C2D_WithColor, 200, PANEL_FOOTER_Y + 6, 0.0f, 0.55f, 0.55f, white);
+    draw_text_z(12, PANEL_FOOTER_Y + 8, 0.0f, 0.42f, dim, "Y: Flat List");
+    draw_text_z(200, PANEL_FOOTER_Y + 6, 0.0f, 0.55f, white, "Close");
 }
 
 int techtree_hit_test(const TechNode *nodes, int n, int scroll, int px, int py)
@@ -1654,7 +1648,7 @@ void render_rates_panel(const CivInfo *civ)
     char line[48];
 
     C2D_DrawRectSolid(0, 0, 0.0f, 320, PANEL_HEADER_H, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
-    C2D_DrawText(&s_txt_tax_science_rates_header, C2D_WithColor, 8, 5, 0.0f, 0.6f, 0.6f, white);
+    draw_text_z(8, 5, 0.0f, 0.6f, white, "Tax / Science Rates");
 
     snprintf(line, sizeof(line), "Tax:      %d%%", civ->tax);
     draw_text(8, RATES_TAX_Y, 0.6f, white, line);
@@ -1672,7 +1666,7 @@ void render_rates_panel(const CivInfo *civ)
     draw_text(8, RATES_SCI_Y + 30, 0.5f, dim, line);
 
     C2D_DrawRectSolid(0, PANEL_FOOTER_Y, 0.0f, 320, 240 - PANEL_FOOTER_Y, C2D_Color32(0x20, 0x20, 0x20, 0xFF));
-    C2D_DrawText(&s_txt_close, C2D_WithColor, 200, PANEL_FOOTER_Y + 6, 0.0f, 0.55f, 0.55f, white);
+    draw_text_z(200, PANEL_FOOTER_Y + 6, 0.0f, 0.55f, white, "Close");
 }
 
 void render_government_panel(const GovOption *opts, int n, int scroll, int current_gov_id)
@@ -1685,7 +1679,7 @@ void render_government_panel(const GovOption *opts, int n, int scroll, int curre
     u32 cur   = C2D_Color32(0xFF, 0xE0, 0x60, 0xFF);
 
     C2D_DrawRectSolid(0, 0, 0.0f, 320, PANEL_HEADER_H, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
-    C2D_DrawText(&s_txt_choose_government_header, C2D_WithColor, 8, 5, 0.0f, 0.6f, 0.6f, white);
+    draw_text_z(8, 5, 0.0f, 0.6f, white, "Choose government");
 
     ScrollRow rows[PANEL_ROWS_VISIBLE];
     int visible = 0;
@@ -1701,8 +1695,8 @@ void render_government_panel(const GovOption *opts, int n, int scroll, int curre
     draw_scroll_list(8, rows, visible);
 
     C2D_DrawRectSolid(0, PANEL_FOOTER_Y, 0.0f, 320, 240 - PANEL_FOOTER_Y, C2D_Color32(0x20, 0x20, 0x20, 0xFF));
-    C2D_DrawText(&s_txt_gov_revolt_hint, C2D_WithColor, 12, PANEL_FOOTER_Y + 8, 0.0f, 0.38f, 0.38f, dim);
-    C2D_DrawText(&s_txt_close, C2D_WithColor, 200, PANEL_FOOTER_Y + 6, 0.0f, 0.55f, 0.55f, white);
+    draw_text_z(12, PANEL_FOOTER_Y + 8, 0.0f, 0.38f, dim, "Tap a government to revolt");
+    draw_text_z(200, PANEL_FOOTER_Y + 6, 0.0f, 0.55f, white, "Close");
 }
 
 void render_processing_overlay(int screen_w, int screen_h, ProcessingReason reason)
@@ -1857,7 +1851,7 @@ void render_diplomacy_panel(int stage, const char *counterpart_name,
     C2D_DrawRectSolid(0, 0, 0.0f, 320, PANEL_HEADER_H, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
 
     if (stage == 1) {
-        C2D_DrawText(&s_txt_choose_player_header, C2D_WithColor, 8, 5, 0.0f, 0.6f, 0.6f, white);
+        draw_text_z(8, 5, 0.0f, 0.6f, white, "Choose player");
 
         ScrollRow rows[PANEL_ROWS_VISIBLE];
         int visible = 0;
@@ -1872,7 +1866,7 @@ void render_diplomacy_panel(int stage, const char *counterpart_name,
         draw_scroll_list(8, rows, visible);
 
         C2D_DrawRectSolid(0, PANEL_FOOTER_Y, 0.0f, 320, 240 - PANEL_FOOTER_Y, C2D_Color32(0x20, 0x20, 0x20, 0xFF));
-        C2D_DrawText(&s_txt_close, C2D_WithColor, 200, PANEL_FOOTER_Y + 6, 0.0f, 0.55f, 0.55f, white);
+        draw_text_z(200, PANEL_FOOTER_Y + 6, 0.0f, 0.55f, white, "Close");
         return;
     }
 
@@ -1907,13 +1901,13 @@ void render_diplomacy_panel(int stage, const char *counterpart_name,
     }
     draw_scroll_list(8, rows, visible);
     if (diplo->clause_count == 0) {
-        C2D_DrawText(&s_txt_no_clauses_hint, C2D_WithColor, 8, PANEL_LIST_Y + 2, 0.0f, 0.45f, 0.45f, dim);
+        draw_text_z(8, PANEL_LIST_Y + 2, 0.0f, 0.45f, dim, "(no clauses proposed yet)");
     }
 
     C2D_DrawRectSolid(0, PANEL_FOOTER_Y, 0.0f, 320, 240 - PANEL_FOOTER_Y, C2D_Color32(0x20, 0x20, 0x20, 0xFF));
-    C2D_DrawText(&s_txt_accept, C2D_WithColor, 8, PANEL_FOOTER_Y + 6, 0.0f, 0.5f, 0.5f, accent);
-    C2D_DrawText(&s_txt_cancel, C2D_WithColor, DIPLO_FOOTER_SPLIT1 + 8, PANEL_FOOTER_Y + 6, 0.0f, 0.5f, 0.5f, white);
-    C2D_DrawText(&s_txt_close, C2D_WithColor, DIPLO_FOOTER_SPLIT2 + 8, PANEL_FOOTER_Y + 6, 0.0f, 0.5f, 0.5f, white);
+    draw_text_z(8, PANEL_FOOTER_Y + 6, 0.0f, 0.5f, accent, "Accept");
+    draw_text_z(DIPLO_FOOTER_SPLIT1 + 8, PANEL_FOOTER_Y + 6, 0.0f, 0.5f, white, "Cancel");
+    draw_text_z(DIPLO_FOOTER_SPLIT2 + 8, PANEL_FOOTER_Y + 6, 0.0f, 0.5f, white, "Close");
 }
 
 void render_start_menu(void)

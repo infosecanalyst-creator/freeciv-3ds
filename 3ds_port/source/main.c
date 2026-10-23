@@ -9,6 +9,7 @@
 #include "game_loop.h"
 #include "fc3ds_server.h"
 #include "render.h"
+#include "font.h"
 
 // Screen dimensions
 #define SCREEN_WIDTH_TOP  400
@@ -363,6 +364,8 @@ int main(int argc, char* argv[])
             C3D_TexSetFilter(img0.tex, GPU_NEAREST, GPU_NEAREST);
         }
     }
+
+    if (!font_init()) printf("Failed to load font.t3x\n");
 
     // Create screens
     C3D_RenderTarget* top = C2D_CreateScreenTarget(GFX_TOP, GFX_LEFT);
@@ -1525,6 +1528,7 @@ int main(int argc, char* argv[])
     if (g_spriteSheet) {
         C2D_SpriteSheetFree(g_spriteSheet);
     }
+    font_exit();
     C2D_Fini();
     C3D_Fini();
     gfxExit();
