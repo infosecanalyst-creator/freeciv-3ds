@@ -1866,6 +1866,101 @@ void render_government_panel(const GovOption *opts, int n, int scroll, int curre
     draw_button(4, PANEL_FOOTER_Y + 2, 312, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
 }
 
+void render_processing_overlay(int screen_w, int screen_h, ProcessingReason reason)
+{
+    // Deliberately touches no Freeciv game state (no get_tile_info/
+    // get_game_turn/etc) - this is drawn precisely while such reads are
+    // unsafe, i.e. while the server coroutine is busy running a step.
+    C2D_TextBufClear(g_textBuf);
+
+    u32 white = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
+    u32 dim   = C2D_Color32(0xA0, 0xA8, 0xB4, 0xFF);
+
+    C2D_DrawRectSolid(0, 0, 0.0f, screen_w, screen_h, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
+
+    const char *headline = reason == PROC_LOADING ? "Generating world..."
+                          : reason == PROC_SAVING  ? "Saving..."
+                                                    : "Processing turn...";
+    draw_text(8, screen_h / 2.0f - 20, 0.75f, white, headline);
+    draw_text(8, screen_h / 2.0f + 8, 0.55f, dim, "Please wait");
+}
+
+void render_busy_indicator(int screen_w)
+{
+    // Same "touches no Freeciv game state" rule as render_processing_overlay
+    // - drawn on top of a panel that was itself rendered from a cached
+    // snapshot, never from a fresh read.
+    // z=0.0f (not layered above 0, like the map-tile stack elsewhere in this
+    // file) - draw_text() always draws at z=0.0f, so anything above that
+    // z-fights in front of and hides the text.
+    C2D_DrawRectSolid(screen_w - 30, 4, 0.0f, 26, 14, C2D_Color32(0x30, 0x30, 0x30, 0xC0));
+    draw_text(screen_w - 26, 5, 0.45f, C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF), "...");
+}
+
+void render_action_bar(void)
+{
+    u32 bg     = C2D_Color32(0x2C, 0x50, 0x80, 0xFF);
+    u32 border = C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF);
+    u32 white  = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
+
+    // z=0.9f, not 0.0f: render_action_bar() is only ever called for UI_MAP,
+    // right after render_bottom_screen(), so - despite an older comment here
+    // claiming otherwise - it DOES overlay the live map, same as
+    // render_toast() below. z=0.0f only stayed hidden-bug-free by luck: the
+    // map's terrain/coast stack (up to z=0.7, see render_bottom_screen()) is
+    // usually fog/unexplored under the action bar's screen column, so
+    // nothing there competed with it - until goto-driven exploration and
+    // varied camera positions put real, explored terrain under it (hardware
+    // finding, 2026-07-11: RES/TAX/top-of-GOV were invisible, boxed out by
+    // ocean coast tiles at z=0.493, while DIP/SAV/GOTO sat over unexplored
+    // tiles and stayed visible - a scroll-position-dependent bug, invisible
+    // in every prior test session by chance). draw_text_z() (not
+    // draw_text(), which is hardcoded to z=0.0f) for the labels for the same
+    // reason - the old panel-rect/label bug is exactly what happens if the
+    // rects move to a higher z than their own text.
+    const float Z = 0.9f;
+    C2D_DrawRectSolid(ACTIONBAR_X, ACTIONBAR_RES_Y, Z, ACTIONBAR_BTN_W, ACTIONBAR_BTN_H, bg);
+    C2D_DrawRectSolid(ACTIONBAR_X, ACTIONBAR_RES_Y, Z, ACTIONBAR_BTN_W, 2, border);
+    draw_text_z(ACTIONBAR_X + 4, ACTIONBAR_RES_Y + 10, Z, 0.45f, white, "RES");
+
+    C2D_DrawRectSolid(ACTIONBAR_X, ACTIONBAR_RATES_Y, Z, ACTIONBAR_BTN_W, ACTIONBAR_BTN_H, bg);
+    C2D_DrawRectSolid(ACTIONBAR_X, ACTIONBAR_RATES_Y, Z, ACTIONBAR_BTN_W, 2, border);
+    draw_text_z(ACTIONBAR_X + 4, ACTIONBAR_RATES_Y + 10, Z, 0.45f, white, "TAX");
+
+    C2D_DrawRectSolid(ACTIONBAR_X, ACTIONBAR_GOV_Y, Z, ACTIONBAR_BTN_W, ACTIONBAR_BTN_H, bg);
+    C2D_DrawRectSolid(ACTIONBAR_X, ACTIONBAR_GOV_Y, Z, ACTIONBAR_BTN_W, 2, border);
+    draw_text_z(ACTIONBAR_X + 4, ACTIONBAR_GOV_Y + 10, Z, 0.45f, white, "GOV");
+
+    C2D_DrawRectSolid(ACTIONBAR_X, ACTIONBAR_DIPL_Y, Z, ACTIONBAR_BTN_W, ACTIONBAR_BTN_H, bg);
+    C2D_DrawRectSolid(ACTIONBAR_X, ACTIONBAR_DIPL_Y, Z, ACTIONBAR_BTN_W, 2, border);
+    draw_text_z(ACTIONBAR_X + 4, ACTIONBAR_DIPL_Y + 10, Z, 0.45f, white, "DIP");
+
+    C2D_DrawRectSolid(ACTIONBAR_X, ACTIONBAR_SAVE_Y, Z, ACTIONBAR_BTN_W, ACTIONBAR_BTN_H, bg);
+    C2D_DrawRectSolid(ACTIONBAR_X, ACTIONBAR_SAVE_Y, Z, ACTIONBAR_BTN_W, 2, border);
+    draw_text_z(ACTIONBAR_X + 4, ACTIONBAR_SAVE_Y + 10, Z, 0.45f, white, "SAV");
+
+    C2D_DrawRectSolid(ACTIONBAR_X, ACTIONBAR_GOTO_Y, Z, ACTIONBAR_BTN_W, ACTIONBAR_BTN_H, bg);
+    C2D_DrawRectSolid(ACTIONBAR_X, ACTIONBAR_GOTO_Y, Z, ACTIONBAR_BTN_W, 2, border);
+    draw_text_z(ACTIONBAR_X + 1, ACTIONBAR_GOTO_Y + 10, Z, 0.45f, white, "GOTO");
+}
+
+void render_toast(const char *text)
+{
+    // Unlike every other rect+text pair in this file, this one overlays the
+    // live UI_MAP map render, whose terrain/overlay/unit stack goes up to
+    // z=0.7 (see render_bottom_screen()) - z=0.0f (the safe value
+    // everywhere else, since panels never draw anything else over
+    // themselves) loses the PICA200 depth test and renders invisibly behind
+    // the map. 0.9f clears that whole stack with margin.
+    const float TOAST_Z = 0.9f;
+    int w = 140;
+    C2D_DrawRectSolid(8, 8, TOAST_Z, w, 22, C2D_Color32(0x20, 0x60, 0x30, 0xE0));
+    draw_text_z(16, 13, TOAST_Z, 0.5f, C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF), text);
+}
+
+// enum diplstate_type's 0..5 values (see PlayerOption's comment in
+// game_loop.h) as short display labels - render.c doesn't include
+// freeciv's player.h, same reasoning as TechNode.state staying a plain int.
 static const char *diplstate_name(int ds)
 {
     switch (ds) {
