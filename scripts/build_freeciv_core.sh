@@ -52,8 +52,20 @@ mkdir -p build-3ds
 		--disable-shared --enable-static --disable-nls --disable-icu \
 		--enable-sys-tolua-cmd="$TOLUA" --enable-ack-legacy --disable-ipv6 \
 		--without-iconv --enable-fcdb=no --enable-fcmp=no --without-readline
-	make -j"$(nproc)"
+	# -k: the standalone freeciv-server program cannot link for the 3DS (no
+	# libctru start-up); only its libraries are wanted, checked below.
+	make -k -j"$(nproc)" || true
 )
+missing=0
+for lib in server/.libs/libfreeciv-srv.a server/advisors/.libs/libadvisors.a server/generator/.libs/libgenerator.a \
+	server/ruleset/.libs/libruleload.a server/savegame/.libs/libsavegame.a server/scripting/.libs/libscripting_fcdb.a \
+	server/scripting/.libs/libscripting_server.a ai/default/.libs/libdefaultai.a ai/classic/.libs/libclassicai.a \
+	ai/tex/.libs/libtexai.a ai/.libs/libaicommon.a common/aicore/.libs/libaicore.a common/networking/.libs/libfcivnetwork.a \
+	common/scriptcore/.libs/libscriptcore.a common/.libs/libfreeciv.a utility/.libs/libcivutility.a \
+	dependencies/lua-5.5/src/.libs/liblua.a dependencies/tolua-5.2/src/lib/.libs/libtolua.a dependencies/cvercmp/.libs/libcvercmp.a; do
+	[ -f "build-3ds/$lib" ] || { echo "missing: $lib"; missing=1; }
+done
+[ "$missing" = 0 ] || exit 1
 
 # 4. server data for the RomFS: top-level data files plus the ruleset dirs
 #    (no tilesets, sounds or music - the client brings its own art)
