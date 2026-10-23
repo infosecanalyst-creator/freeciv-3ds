@@ -71,7 +71,7 @@ typedef enum { UI_MAP, UI_CITY, UI_RESEARCH, UI_RATES, UI_GOVERNMENT, UI_DIPLOMA
 // is called - so APP_START_MENU/APP_LOAD_PICKER must never call
 // fc3ds_server_pump()/is_busy() or read any game state; they render their
 // own screens and only transition to APP_GAME once a choice is made.
-typedef enum { APP_START_MENU, APP_LOAD_PICKER, APP_GAME } AppState;
+typedef enum { APP_START_MENU, APP_NEW_GAME, APP_LOAD_PICKER, APP_GAME } AppState;
 
 // Frames the "Saved" toast stays visible after a SAVE action-bar tap
 // (§A.2) - ~1.5s at the 3DS's fixed 60fps.
@@ -290,6 +290,31 @@ static void open_game_menu(PopupMenu *m)
     m->x = 2;
 }
 
+// ---- New Game setup ----
+static const char *k_size_names[] = { "Small", "Medium", "Large", "Huge" };
+static const int   k_size_tiles[] = { 1, 2, 4, 6 };            // thousands of tiles ("size")
+static const char *k_skill_names[] = { "Novice", "Easy", "Normal", "Hard" };
+static const char *k_skill_cmds[]  = { "novice", "easy", "normal", "hard" };
+
+// Writes the server script for the chosen options; false on an SD error.
+static bool write_new_game_script(const char *path, int size_idx, int rivals, int skill_idx)
+{
+    FILE *f = fopen(path, "w");
+    if (!f) return false;
+    fprintf(f, "rulesetdir classic\n");
+    fprintf(f, "set topology \"\"\n");       // overhead square grid (see start.serv)
+    fprintf(f, "set mapsize FULLSIZE\n");
+    fprintf(f, "set size %d\n", k_size_tiles[size_idx]);
+    fprintf(f, "create Human\n");
+    fprintf(f, "set aifill %d\n", rivals + 1);
+    fprintf(f, "set minplayers 0\n");
+    fprintf(f, "aitoggle Human\n");
+    fprintf(f, "%s\n", k_skill_cmds[skill_idx]);
+    fprintf(f, "start\n");
+    fclose(f);
+    return true;
+}
+
 int main(int argc, char* argv[])
 {
     // Redirect output to SD card to catch fatal errors
@@ -348,6 +373,9 @@ int main(int argc, char* argv[])
     int save_file_count = 0;
     int load_scroll = 0;
     int save_toast_frames = 0; // >0 while the "Saved" banner should show
+    // New Game options. Old 3DS (64 MB, 268 MHz) gets smaller defaults and caps.
+    int ng_size = 1, ng_rivals = 4, ng_skill = 1;
+    int ng_max_size = 3, ng_max_rivals = 7;
     bool save_in_flight = false; // true from the SAV tap until the queued save's busy step ends
 
     int cam_x = 0;
@@ -432,6 +460,11 @@ int main(int argc, char* argv[])
     int ui_other_player_count = 0;
     DiploInfo ui_diplo_info;
 
+    if (!isNew3DS) {
+        ng_size = 0; ng_rivals = 2;
+        ng_max_size = 1; ng_max_rivals = 4;
+    }
+
     // Initialize the Freeciv game engine
     init_freeciv(isNew3DS);
 
@@ -469,12 +502,45 @@ int main(int argc, char* argv[])
                 hidTouchRead(&touch);
                 int px = (int)touch.px, py = (int)touch.py;
 
-                if (app_state == APP_START_MENU) {
+                if (app_state == APP_NEW_GAME) {
+                    int row = (py - SETUP_ROW_Y0) / SETUP_ROW_H;
+                    bool in_rows = py >= SETUP_ROW_Y0 && row < SETUP_ROWS
+                                   && (py - SETUP_ROW_Y0) % SETUP_ROW_H < SETUP_BTN_H;
+                    int d = 0;
+                    if (in_rows && px >= SETUP_MINUS_X && px < SETUP_MINUS_X + SETUP_BTN_W) d = -1;
+                    if (in_rows && px >= SETUP_PLUS_X && px < SETUP_PLUS_X + SETUP_BTN_W) d = 1;
+                    if (d) {
+                        if (row == 0) ng_size += d;
+                        if (row == 1) ng_rivals += d;
+                        if (row == 2) ng_skill += d;
+                        if (ng_size < 0) ng_size = 0;
+                        if (ng_size > ng_max_size) ng_size = ng_max_size;
+                        if (ng_rivals < 1) ng_rivals = 1;
+                        if (ng_rivals > ng_max_rivals) ng_rivals = ng_max_rivals;
+                        if (ng_skill < 0) ng_skill = 0;
+                        if (ng_skill > 3) ng_skill = 3;
+                    } else if (py >= SETUP_FOOT_Y && py < SETUP_FOOT_Y + SETUP_FOOT_H) {
+                        if (px >= SETUP_BACK_X && px < SETUP_BACK_X + SETUP_FOOT_W) {
+                            app_state = APP_START_MENU;
+                        } else if (px >= SETUP_START_X && px < SETUP_START_X + SETUP_FOOT_W) {
+                            const char *path = "sdmc:/3ds/freeciv/newgame.serv";
+                            if (write_new_game_script(path, ng_size, ng_rivals, ng_skill))
+                                fc3ds_server_begin_new_game_script(path);
+                            else
+                                fc3ds_server_begin_new_game(false);
+                            app_state = APP_GAME;
+                        }
+                    }
+                } else if (app_state == APP_START_MENU) {
                     if (px >= STARTMENU_BTN_X && px < STARTMENU_BTN_X + STARTMENU_BTN_W) {
                         if (py >= STARTMENU_NEW_Y && py < STARTMENU_NEW_Y + STARTMENU_BTN_H) {
                             bool dev = (kHeld & KEY_L) && (kHeld & KEY_R); // hold both shoulders = dev quick game
-                            fc3ds_server_begin_new_game(dev);
-                            app_state = APP_GAME;
+                            if (dev) {
+                                fc3ds_server_begin_new_game(true);
+                                app_state = APP_GAME;
+                            } else {
+                                app_state = APP_NEW_GAME;
+                            }
                         } else if (py >= STARTMENU_LOAD_Y && py < STARTMENU_LOAD_Y + STARTMENU_BTN_H) {
                             save_file_count = get_save_files(save_files, MAX_SAVE_FILES);
                             load_scroll = 0;
@@ -493,6 +559,7 @@ int main(int argc, char* argv[])
                     }
                 }
             }
+            if (app_state == APP_NEW_GAME && (kDown & KEY_B)) app_state = APP_START_MENU;
             if (app_state == APP_LOAD_PICKER) {
                 if (kDown & KEY_DUP)   load_scroll--;
                 if (kDown & KEY_DDOWN) load_scroll++;
@@ -508,12 +575,25 @@ int main(int argc, char* argv[])
             C2D_TargetClear(top, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
             C2D_SceneBegin(top);
             C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_TOP, true);
+            char ng_summary[160];
+            snprintf(ng_summary, sizeof(ng_summary), "%s map (about %d,000 tiles), %d rival%s, %s AI.",
+                     k_size_names[ng_size], k_size_tiles[ng_size], ng_rivals, ng_rivals == 1 ? "" : "s",
+                     k_skill_names[ng_skill]);
+            render_new_game_top(isNew3DS, app_state == APP_NEW_GAME ? ng_summary : "Choose New Game or Load Game below.");
 
             C2D_TargetClear(bottom, C2D_Color32(0x10, 0x10, 0x10, 0xFF));
             C2D_SceneBegin(bottom);
             C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_BOTTOM, true);
             if (app_state == APP_START_MENU) {
                 render_start_menu();
+            } else if (app_state == APP_NEW_GAME) {
+                char rv[8];
+                snprintf(rv, sizeof(rv), "%d", ng_rivals);
+                const char *labels[SETUP_ROWS] = { "Map size", "Rivals", "AI skill" };
+                const char *values[SETUP_ROWS] = { k_size_names[ng_size], rv, k_skill_names[ng_skill] };
+                bool dec[SETUP_ROWS] = { ng_size > 0, ng_rivals > 1, ng_skill > 0 };
+                bool inc[SETUP_ROWS] = { ng_size < ng_max_size, ng_rivals < ng_max_rivals, ng_skill < 3 };
+                render_new_game_setup(labels, values, dec, inc);
             } else {
                 render_load_picker(save_files, save_file_count, load_scroll);
             }

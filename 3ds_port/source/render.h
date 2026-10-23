@@ -272,6 +272,24 @@ void render_diplomacy_panel(int stage, const char *counterpart_name,
 
 void render_start_menu(void);
 
+// New Game setup (bottom: rows of  label  [-] value [+], Start/Back;
+// top: summary). Values arrive pre-formatted.
+#define SETUP_ROWS      3
+#define SETUP_ROW_Y0    40
+#define SETUP_ROW_H     44
+#define SETUP_MINUS_X   150
+#define SETUP_PLUS_X    270
+#define SETUP_BTN_W     44
+#define SETUP_BTN_H     34
+#define SETUP_START_X   170
+#define SETUP_BACK_X    10
+#define SETUP_FOOT_Y    190
+#define SETUP_FOOT_W    140
+#define SETUP_FOOT_H    40
+void render_new_game_setup(const char *labels[SETUP_ROWS], const char *values[SETUP_ROWS],
+                           const bool can_dec[SETUP_ROWS], const bool can_inc[SETUP_ROWS]);
+void render_new_game_top(bool is_new_3ds, const char *summary);
+
 // Load-file picker: reuses PANEL_LIST_Y/PANEL_ROW_H/PANEL_ROWS_VISIBLE/
 // PANEL_FOOTER_Y above, so main.c's existing hit_test_scroll_list() applies
 // unchanged - same "draw and hit-test share one set of constants" rule as

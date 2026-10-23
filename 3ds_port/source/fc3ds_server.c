@@ -37,6 +37,7 @@ static LightEvent s_ev_start_chosen;
 static char s_pending_load_filename[512];
 static bool s_pending_has_load = false;
 static bool s_pending_is_dev = false;
+static char s_pending_script[256];        // custom new-game script (setup screen), "" = default
 
 static aptHookCookie s_apt_cookie;
 
@@ -104,6 +105,7 @@ static void fc3ds_server_coro(void *arg)
     // player/map state is touched, loaded or not.
     srvarg.script_filename = s_pending_has_load ? "romfs:/load.serv"
                             : s_pending_is_dev   ? "romfs:/dev.serv"
+                            : s_pending_script[0] ? s_pending_script
                             : "romfs:/start.serv";
 
     // Never returns: falls out via server_quit() -> exit(), which
@@ -141,6 +143,15 @@ void fc3ds_server_begin_new_game(bool dev)
 {
     s_pending_has_load = false;
     s_pending_is_dev = dev;
+    LightEvent_Signal(&s_ev_start_chosen);
+}
+
+void fc3ds_server_begin_new_game_script(const char *script_path)
+{
+    s_pending_has_load = false;
+    s_pending_is_dev = false;
+    strncpy(s_pending_script, script_path, sizeof(s_pending_script) - 1);
+    s_pending_script[sizeof(s_pending_script) - 1] = '\0';
     LightEvent_Signal(&s_ev_start_chosen);
 }
 

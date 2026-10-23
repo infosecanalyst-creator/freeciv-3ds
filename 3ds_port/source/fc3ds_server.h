@@ -39,6 +39,9 @@ void fc3ds_server_start(bool is_new_3ds);
 // romfs:/start.serv, for fast on-device testing of features that are slow
 // to reach on the default game (AI contact, non-Anarchy revolution).
 void fc3ds_server_begin_new_game(bool dev);
+// Same, but the server runs script_path (a .serv file written by the New
+// Game setup screen) instead of romfs:/start.serv.
+void fc3ds_server_begin_new_game_script(const char *script_path);
 
 // Begin by loading an existing save instead of generating a new game.
 // filename is a bare name (no path component - matches save_game()'s own

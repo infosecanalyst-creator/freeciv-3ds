@@ -1939,6 +1939,42 @@ void render_start_menu(void)
     draw_text(8, 220, 0.45f, dim, "Tap to choose");
 }
 
+void render_new_game_setup(const char *labels[SETUP_ROWS], const char *values[SETUP_ROWS],
+                           const bool can_dec[SETUP_ROWS], const bool can_inc[SETUP_ROWS])
+{
+    u32 white = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
+    u32 soft  = C2D_Color32(0xB8, 0xC8, 0xDC, 0xFF);
+    C2D_DrawRectSolid(0, 0, 0.0f, 320, 240, C2D_Color32(0x10, 0x16, 0x22, 0xFF));
+    C2D_DrawRectSolid(0, 0, 0.0f, 320, 28, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
+    draw_text(8, 4, 0.6f, white, "New Game");
+    for (int i = 0; i < SETUP_ROWS; i++) {
+        float y = SETUP_ROW_Y0 + i * SETUP_ROW_H;
+        draw_text(10, y + 8, 0.55f, soft, labels[i]);
+        draw_button(SETUP_MINUS_X, y, SETUP_BTN_W, SETUP_BTN_H, 0.1f, "-", 0.8f, can_dec[i], false);
+        float tw = text_width(values[i], 0.55f);
+        float mid = (SETUP_MINUS_X + SETUP_BTN_W + SETUP_PLUS_X) / 2.0f;
+        draw_text(mid - tw / 2, y + 8, 0.55f, white, values[i]);
+        draw_button(SETUP_PLUS_X, y, SETUP_BTN_W, SETUP_BTN_H, 0.1f, "+", 0.8f, can_inc[i], false);
+    }
+    draw_button(SETUP_BACK_X, SETUP_FOOT_Y, SETUP_FOOT_W, SETUP_FOOT_H, 0.1f, "Back", 0.6f, true, false);
+    draw_button(SETUP_START_X, SETUP_FOOT_Y, SETUP_FOOT_W, SETUP_FOOT_H, 0.1f, "Start", 0.6f, true, true);
+}
+
+void render_new_game_top(bool is_new_3ds, const char *summary)
+{
+    C2D_TextBufClear(g_textBuf);
+    u32 white = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
+    u32 soft  = C2D_Color32(0xB8, 0xC8, 0xDC, 0xFF);
+    u32 label = C2D_Color32(0x8C, 0xA0, 0xB4, 0xFF);
+    C2D_DrawRectSolid(0, 0, 0.0f, 400, 240, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
+    draw_text(16, 20, 0.9f, white, "Freeciv 3DS");
+    draw_text(16, 56, 0.5f, soft, summary);
+    draw_text(16, 150, 0.45f, label, is_new_3ds
+        ? "New 3DS detected: 804 MHz, room for big maps."
+        : "Old 3DS detected: smaller maps keep turns quick.");
+    draw_text(16, 170, 0.45f, label, "Larger maps and more rivals mean longer AI turns.");
+}
+
 void render_load_picker(const SaveFile *files, int n, int scroll)
 {
     C2D_TextBufClear(g_textBuf);
