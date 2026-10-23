@@ -988,27 +988,81 @@ static void draw_ocean_cell(float draw_x, float draw_y, int dx, int dy, int b0, 
     C2D_DrawImageAt(img, draw_x + dx * s_ms, draw_y + dy * s_ms, 0.49f, NULL, s_ms, s_ms);
 }
 
+// City banners are drawn after the tile pass so they can overlap neighbours.
+typedef struct { float x, y; int owner, size; char name[48]; } CityBanner;
+static CityBanner s_banners[48];
+static int s_nbanners;
+
+// Owner shield: a small flag in the player's colour with a dark rim.
+static void draw_shield(float x, float y, float z, u32 color)
+{
+    C2D_DrawRectSolid(x - 1, y - 1, z, 9, 10, C2D_Color32(0x10, 0x10, 0x10, 0xE0));
+    C2D_DrawRectSolid(x, y, z + 0.001f, 7, 6, color);
+    C2D_DrawRectSolid(x + 1, y + 6, z + 0.001f, 5, 1, color);
+    C2D_DrawRectSolid(x + 2, y + 7, z + 0.001f, 3, 1, color);
+}
+
 static void draw_tile_entities(const TileInfo *info, float draw_x, float draw_y)
 {
     // City takes visual priority over a stacked unit.
     const float S = s_ms;
+    const float T = TILE_PX * S;
     if (info->city_owner >= 0) {
         C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_city_idx),
                         draw_x, draw_y, 0.6f, NULL, S, S);
-        C2D_DrawRectSolid(draw_x + 11 * S, draw_y - 3 * S, 0.65f, 8 * S, 5 * S,
-                          owner_color(info->city_owner));
+        if (s_nbanners < (int)(sizeof(s_banners) / sizeof(s_banners[0]))) {
+            CityBanner *b = &s_banners[s_nbanners++];
+            b->x = draw_x + T / 2; b->y = draw_y + T - 3;
+            b->owner = info->city_owner; b->size = info->city_size;
+            snprintf(b->name, sizeof(b->name), "%s", info->city_name);
+        }
     } else if (info->unit_owner >= 0) {
         int sprite_idx = get_unit_sprite(info->unit_name);
+        C2D_ImageTint dim;
+        if (info->unit_done) C2D_PlainImageTint(&dim, C2D_Color32(0x50, 0x50, 0x50, 0xFF), 0.35f);
         C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprite_idx),
-                        draw_x, draw_y, 0.6f, NULL, S, S);
-        C2D_DrawRectSolid(draw_x + 11 * S, draw_y - 3 * S, 0.65f, 8 * S, 5 * S,
-                          owner_color(info->unit_owner));
+                        draw_x, draw_y, 0.6f, info->unit_done ? &dim : NULL, S, S);
+        draw_shield(draw_x + 2, draw_y + 2, 0.65f, owner_color(info->unit_owner));
+        // Health bar when hurt.
+        if (info->unit_hp_max > 0 && info->unit_hp < info->unit_hp_max) {
+            float f = (float)info->unit_hp / info->unit_hp_max;
+            float bw = T - 8;
+            C2D_DrawRectSolid(draw_x + 4, draw_y + T - 4, 0.65f, bw, 3, C2D_Color32(0x20, 0x08, 0x08, 0xE0));
+            C2D_DrawRectSolid(draw_x + 4, draw_y + T - 4, 0.651f, bw * f, 3,
+                              f > 0.5f ? C2D_Color32(0x50, 0xD0, 0x50, 0xFF) : f > 0.25f ? C2D_Color32(0xE0, 0xC0, 0x40, 0xFF)
+                                                                     : C2D_Color32(0xE0, 0x40, 0x40, 0xFF));
+        }
+        // What it's doing: F(ortified), S(entry), W(orking), E(xploring), G(oto).
+        if (info->unit_badge && T >= 20) {
+            char t[2] = { info->unit_badge, 0 };
+            C2D_DrawRectSolid(draw_x + T - 11, draw_y + T - 13, 0.66f, 10, 11, C2D_Color32(0x10, 0x18, 0x26, 0xD8));
+            font_draw(t, draw_x + T - 9.5f, draw_y + T - 16, 0.67f, 0.39f, C2D_Color32(0xFF, 0xF0, 0xA0, 0xFF));
+        }
         if (info->num_units > 1) {
             // Stack marker: a small "+" badge, so a stack reads as more than one unit.
-            C2D_DrawRectSolid(draw_x + 22 * S, draw_y + 1 * S, 0.66f, 7 * S, 7 * S, C2D_Color32(0, 0, 0, 0xC0));
-            C2D_DrawRectSolid(draw_x + 23 * S, draw_y + 4 * S, 0.67f, 5 * S, 1 * S + 0.5f, 0xFFFFFFFF);
-            C2D_DrawRectSolid(draw_x + 25 * S, draw_y + 2 * S, 0.67f, 1 * S + 0.5f, 5 * S, 0xFFFFFFFF);
+            C2D_DrawRectSolid(draw_x + T - 9, draw_y + 1, 0.66f, 8, 8, C2D_Color32(0, 0, 0, 0xC0));
+            C2D_DrawRectSolid(draw_x + T - 8, draw_y + 4, 0.67f, 6, 2, 0xFFFFFFFF);
+            C2D_DrawRectSolid(draw_x + T - 6, draw_y + 2, 0.67f, 2, 6, 0xFFFFFFFF);
         }
+    }
+}
+
+// Civ Rev style name plate under each city: [size] Name, owner-coloured edge.
+static void draw_city_banners(void)
+{
+    for (int i = 0; i < s_nbanners; i++) {
+        const CityBanner *b = &s_banners[i];
+        char sz[8];
+        snprintf(sz, sizeof(sz), "%d", b->size);
+        float nw = font_width(b->name, 0.42f), sw = font_width(sz, 0.42f);
+        float w = nw + sw + 14, h = 14;
+        float x = floorf(b->x - w / 2), y = floorf(b->y);
+        u32 oc = owner_color(b->owner);
+        C2D_DrawRectSolid(x - 1, y - 1, 0.80f, w + 2, h + 2, oc);
+        C2D_DrawRectSolid(x, y, 0.801f, w, h, C2D_Color32(0x0C, 0x12, 0x1E, 0xE8));
+        C2D_DrawRectSolid(x, y, 0.802f, sw + 6, h, oc);
+        font_draw(sz, x + 3, y - 1.5f, 0.803f, 0.42f, C2D_Color32(0x10, 0x10, 0x10, 0xFF));
+        font_draw(b->name, x + sw + 10, y - 1.5f, 0.803f, 0.42f, 0xFFFFFFFF);
     }
 }
 
@@ -1048,6 +1102,7 @@ void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
         return;
     }
     s_ms = scale;
+    s_nbanners = 0;
     const float SC = scale;
     const float T = TILE_PX * SC; // on-screen tile size
 
@@ -1268,6 +1323,12 @@ void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
                 // Under Fog of War (visibility == 1), we still draw city centers but no units
                 if (info.city_owner != -1) {
                     C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_city_idx), draw_x, draw_y, 0.7f, NULL, SC, SC);
+                    if (s_nbanners < (int)(sizeof(s_banners) / sizeof(s_banners[0]))) {
+                        CityBanner *b = &s_banners[s_nbanners++];
+                        b->x = draw_x + T / 2; b->y = draw_y + T - 3;
+                        b->owner = info.city_owner; b->size = info.city_size;
+                        snprintf(b->name, sizeof(b->name), "%s", info.city_name);
+                    }
                 }
             }
 
@@ -1279,6 +1340,8 @@ void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
             }
         }
     }
+
+    draw_city_banners();
 
     // The cursor on an unexplored (black) tile still needs to be visible.
     if (sel_x >= 0 && sel_y >= 0) {

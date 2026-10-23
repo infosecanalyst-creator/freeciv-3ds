@@ -94,6 +94,9 @@ typedef struct {
     int  unit_owner;   // player index of the top unit, or -1
     int  unit_id;      // server-side id of the top unit, or -1
     int  num_units;
+    int  unit_hp, unit_hp_max;   // top unit's hit points
+    bool unit_done;    // top unit is pov's and has no moves left / is busy
+    char unit_badge;   // 'F' fortified, 'S' sentry, 'W' working, 'E' exploring, 'G' goto, 0 none
     int  city_owner;   // player index of the city, or -1
     int  city_id;      // server-side id of the city, or -1 (pass to get_city_info())
     int  city_size;

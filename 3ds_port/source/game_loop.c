@@ -1000,6 +1000,18 @@ void get_tile_info(int x, int y, TileInfo *out)
             if (punit) {
                 out->unit_owner = player_index(unit_owner(punit));
                 out->unit_id = punit->id;
+                out->unit_hp = punit->hp;
+                out->unit_hp_max = unit_type_get(punit)->hp;
+                switch (punit->activity) {
+                case ACTIVITY_FORTIFIED: case ACTIVITY_FORTIFYING: out->unit_badge = 'F'; break;
+                case ACTIVITY_SENTRY:  out->unit_badge = 'S'; break;
+                case ACTIVITY_EXPLORE: out->unit_badge = 'E'; break;
+                case ACTIVITY_IDLE:    out->unit_badge = unit_has_orders(punit) ? 'G' : 0; break;
+                default:               out->unit_badge = 'W'; break;
+                }
+                struct player *pov_p = get_pov_player();
+                out->unit_done = pov_p && unit_owner(punit) == pov_p
+                                 && (punit->moves_left <= 0 || out->unit_badge != 0);
                 const char *uname = unit_rule_name(punit);
                 if (uname) {
                     fc_strlcpy(out->unit_name, uname, sizeof(out->unit_name));

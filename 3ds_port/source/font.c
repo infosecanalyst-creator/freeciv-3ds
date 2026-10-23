@@ -1,6 +1,7 @@
 #include "font.h"
 #include "font_data.h"
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 static C2D_SpriteSheet s_sheet;
