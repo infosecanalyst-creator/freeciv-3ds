@@ -902,8 +902,8 @@ void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
         return;
     }
     s_ms = scale;
-    const float S = scale;
-    const float T = TILE_PX * S; // on-screen tile size
+    const float SC = scale;
+    const float T = TILE_PX * SC; // on-screen tile size
 
     int map_w = 40, map_h = 40;
     get_map_dimensions(&map_w, &map_h);
@@ -950,9 +950,9 @@ void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
     const bool wrapx = map_wraps_x();
     const int world_w = map_w * TILE_PX;
     int ty0 = (int)floorf((float)cam_y / TILE_PX) - 1;
-    int ty1 = (int)floorf((cam_y + view_h / S) / TILE_PX) + 1;
+    int ty1 = (int)floorf((cam_y + view_h / SC) / TILE_PX) + 1;
     int tx0 = (int)floorf((float)cam_x / TILE_PX) - 1;
-    int tx1 = (int)floorf((cam_x + view_w / S) / TILE_PX) + 1;
+    int tx1 = (int)floorf((cam_x + view_w / SC) / TILE_PX) + 1;
     if (ty0 < 0) ty0 = 0;
     if (ty1 > map_h - 1) ty1 = map_h - 1;
     if (!wrapx) {
@@ -967,8 +967,8 @@ void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
             int x = wrapx ? ((xi % map_w) + map_w) % map_w : xi;
             (void)world_w;
             // Overhead square grid: tile (x,y) occupies [x*30, y*30]..[+30,+30] world px.
-            float draw_x = (xi * TILE_PX - cam_x) * S;
-            float draw_y = (y * TILE_PX - cam_y) * S;
+            float draw_x = (xi * TILE_PX - cam_x) * SC;
+            float draw_y = (y * TILE_PX - cam_y) * SC;
 
             if (draw_x <= -T || draw_x >= view_w || draw_y <= -T || draw_y >= view_h) {
                 continue;
@@ -1002,9 +1002,9 @@ void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
                 // Whole-tile coastline curve on top of the corner texture fill.
                 int whole_idx = (!N) | ((!E) << 1) | ((!S) << 2) | ((!W) << 3);
                 C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, coast_l1_sprites[whole_idx]),
-                                draw_x, draw_y, 0.493f, NULL, S, S);
+                                draw_x, draw_y, 0.493f, NULL, SC, SC);
             } else if (info.terrain == TERRAIN_GRASSLAND) {
-                C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grassland_idx), draw_x, draw_y, 0.5f, NULL, S, S);
+                C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grassland_idx), draw_x, draw_y, 0.5f, NULL, SC, SC);
             } else {
                 int N  = is_same_terrain(x, y - 1, map_w, map_h, info.terrain);
                 int S  = is_same_terrain(x, y + 1, map_w, map_h, info.terrain);
@@ -1012,16 +1012,16 @@ void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
                 int W  = is_same_terrain(x - 1, y, map_w, map_h, info.terrain);
                 int match_idx = N | (E << 1) | (S << 2) | (W << 3);
                 int sprite_idx = terrain_match_sprites[info.terrain][match_idx];
-                C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprite_idx), draw_x, draw_y, 0.5f, NULL, S, S);
+                C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprite_idx), draw_x, draw_y, 0.5f, NULL, SC, SC);
             }
 
             // Draw overlays on top of the terrain (except on raw ocean tiles)
             if (info.terrain != TERRAIN_OCEAN) {
                 // 1. Irrigation / Farmland
                 if (info.has_farmland) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_farmland_idx), draw_x, draw_y, 0.51f, NULL, S, S);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_farmland_idx), draw_x, draw_y, 0.51f, NULL, SC, SC);
                 } else if (info.has_irrigation) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_irrigation_idx), draw_x, draw_y, 0.51f, NULL, S, S);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_irrigation_idx), draw_x, draw_y, 0.51f, NULL, SC, SC);
                 }
 
                 // 2. River
@@ -1031,7 +1031,7 @@ void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
                     int rE = has_river_at(x + 1, y);
                     int rW = has_river_at(x - 1, y);
                     int r_idx = rN | (rE << 1) | (rS << 2) | (rW << 3);
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, river_sprites[r_idx]), draw_x, draw_y, 0.52f, NULL, S, S);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, river_sprites[r_idx]), draw_x, draw_y, 0.52f, NULL, SC, SC);
                 }
 
                 // 3. Roads / Railroads / Maglevs
@@ -1041,58 +1041,58 @@ void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
                     int mE = has_maglev_at(x + 1, y);
                     int mW = has_maglev_at(x - 1, y);
                     int m_idx = mN | (mE << 1) | (mS << 2) | (mW << 3);
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, maglev_sprites[m_idx]), draw_x, draw_y, 0.53f, NULL, S, S);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, maglev_sprites[m_idx]), draw_x, draw_y, 0.53f, NULL, SC, SC);
                 } else if (info.has_rail) {
                     int rN = has_rail_at(x, y - 1);
                     int rS = has_rail_at(x, y + 1);
                     int rE = has_rail_at(x + 1, y);
                     int rW = has_rail_at(x - 1, y);
                     int r_idx = rN | (rE << 1) | (rS << 2) | (rW << 3);
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, rail_sprites[r_idx]), draw_x, draw_y, 0.53f, NULL, S, S);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, rail_sprites[r_idx]), draw_x, draw_y, 0.53f, NULL, SC, SC);
                 } else if (info.has_road) {
                     int rN = has_road_at(x, y - 1);
                     int rS = has_road_at(x, y + 1);
                     int rE = has_road_at(x + 1, y);
                     int rW = has_road_at(x - 1, y);
                     int r_idx = rN | (rE << 1) | (rS << 2) | (rW << 3);
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, road_sprites[r_idx]), draw_x, draw_y, 0.53f, NULL, S, S);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, road_sprites[r_idx]), draw_x, draw_y, 0.53f, NULL, SC, SC);
                 }
 
                 // 4. Mine
                 if (info.has_mine) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_mine_idx), draw_x, draw_y, 0.54f, NULL, S, S);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_mine_idx), draw_x, draw_y, 0.54f, NULL, SC, SC);
                 }
 
                 // 5. Resource / Special
                 if (info.resource_tag[0]) {
                     int res_sprite = get_resource_sprite(info.resource_tag);
                     if (res_sprite >= 0) {
-                        C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, res_sprite), draw_x, draw_y, 0.55f, NULL, S, S);
+                        C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, res_sprite), draw_x, draw_y, 0.55f, NULL, SC, SC);
                     }
                 }
 
                 // 6. Goody Hut / Village
                 if (info.has_village) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_village_idx), draw_x, draw_y, 0.56f, NULL, S, S);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_village_idx), draw_x, draw_y, 0.56f, NULL, SC, SC);
                 }
 
                 // 7. Pollution / Fallout
                 if (info.has_pollution) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_pollution_idx), draw_x, draw_y, 0.57f, NULL, S, S);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_pollution_idx), draw_x, draw_y, 0.57f, NULL, SC, SC);
                 } else if (info.has_fallout) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_fallout_idx), draw_x, draw_y, 0.57f, NULL, S, S);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_fallout_idx), draw_x, draw_y, 0.57f, NULL, SC, SC);
                 }
             }
 
             // Draw Fog of War overlay (tx.fog) if known unseen (fogged)
             if (info.visibility == 1) {
-                C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_fog_idx), draw_x, draw_y, 0.58f, NULL, S, S);
+                C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_fog_idx), draw_x, draw_y, 0.58f, NULL, SC, SC);
             }
 
             // Draw Darkness overlay if any neighbor is unknown
             if (info.darkness_idx > 0) {
                 int darkness_sprite = darkness_sprites[info.darkness_idx];
-                C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, darkness_sprite), draw_x, draw_y, 0.59f, NULL, S, S);
+                C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, darkness_sprite), draw_x, draw_y, 0.59f, NULL, SC, SC);
             }
 
             // Draw borders
@@ -1102,16 +1102,16 @@ void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
                 C2D_PlainImageTint(&tint, bcolor, 1.0f);
                 
                 if (info.border_n) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_n_idx), draw_x, draw_y, 0.6f, &tint, S, S);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_n_idx), draw_x, draw_y, 0.6f, &tint, SC, SC);
                 }
                 if (info.border_s) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_s_idx), draw_x, draw_y, 0.6f, &tint, S, S);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_s_idx), draw_x, draw_y, 0.6f, &tint, SC, SC);
                 }
                 if (info.border_e) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_e_idx), draw_x, draw_y, 0.6f, &tint, S, S);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_e_idx), draw_x, draw_y, 0.6f, &tint, SC, SC);
                 }
                 if (info.border_w) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_w_idx), draw_x, draw_y, 0.6f, &tint, S, S);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_w_idx), draw_x, draw_y, 0.6f, &tint, SC, SC);
                 }
             }
 
@@ -1121,7 +1121,7 @@ void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
             } else {
                 // Under Fog of War (visibility == 1), we still draw city centers but no units
                 if (info.city_owner != -1) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_city_idx), draw_x, draw_y, 0.7f, NULL, S, S);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_city_idx), draw_x, draw_y, 0.7f, NULL, SC, SC);
                 }
             }
 
@@ -1145,7 +1145,7 @@ void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
                 int d = ((wx - cam_x + TILE_PX) % world_w + world_w) % world_w - TILE_PX;
                 wx = cam_x + d;
             }
-            draw_selection((wx - cam_x) * S, (sel_y * TILE_PX - cam_y) * S, sel_armed);
+            draw_selection((wx - cam_x) * SC, (sel_y * TILE_PX - cam_y) * SC, sel_armed);
         }
     }
 }

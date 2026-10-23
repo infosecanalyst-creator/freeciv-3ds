@@ -1081,7 +1081,9 @@ int main(int argc, char* argv[])
             C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_BOTTOM, true);
             render_processing_overlay(SCREEN_WIDTH_BOT, SCREEN_HEIGHT_BOT, reason);
         } else {
-            C2D_TargetClear(top, C2D_Color32(0x18, 0x24, 0x38, 0xFF)); // Dark navy HUD
+            // Black behind the map (unexplored land), dark navy behind the panels.
+            C2D_TargetClear(top, ui_mode == UI_MAP ? C2D_Color32(0, 0, 0, 0xFF)
+                                                   : C2D_Color32(0x18, 0x24, 0x38, 0xFF));
             C2D_SceneBegin(top);
             // Force the tilted landscape projection. C2D_SceneSize swaps w/h
             // when tilt=true and expects the PORTRAIT framebuffer dims
