@@ -449,7 +449,7 @@ static void draw_hollow_rect(float x, float y, float w, float h, float thickness
     C2D_DrawRectSolid(x + w - thickness, y, 0.5f, thickness, h, color);
 }
 
-// ---- Minimap (bottom screen, UI_MAP) ----
+// ---- Minimap (top screen, UI_MAP) ----
 // Fits the whole map uniformly into the MINIMAP_* rect (render.h).
 static bool minimap_layout(float *dest_x, float *dest_y, float *S)
 {
@@ -461,26 +461,12 @@ static bool minimap_layout(float *dest_x, float *dest_y, float *S)
     return true;
 }
 
-bool minimap_hit_test(int px, int py, int *tx, int *ty)
-{
-    float dx, dy, S;
-    if (!minimap_layout(&dx, &dy, &S)) return false;
-    int x = (int)floorf((px - dx) / S), y = (int)floorf((py - dy) / S);
-    if (x < 0) x = 0;
-    if (y < 0) y = 0;
-    if (x >= s_map_w) x = s_map_w - 1;
-    if (y >= s_map_h) y = s_map_h - 1;
-    if (px < MINIMAP_X || px >= MINIMAP_X + MINIMAP_W || py < MINIMAP_Y || py >= MINIMAP_Y + MINIMAP_H)
-        return false;
-    *tx = x; *ty = y;
-    return true;
-}
-
 static void draw_minimap(int cam_x, int cam_y, float view_w_tiles, float view_h_tiles,
                          int sel_x, int sel_y)
 {
     float dest_x, dest_y, S;
-    C2D_DrawRectSolid(MINIMAP_X, MINIMAP_Y, 0.0f, MINIMAP_W, MINIMAP_H, C2D_Color32(8, 12, 18, 255));
+    C2D_DrawRectSolid(MINIMAP_X - 2, MINIMAP_Y - 2, 0.0f, MINIMAP_W + 4, MINIMAP_H + 4, C2D_Color32(0x3A, 0x55, 0x78, 255));
+    C2D_DrawRectSolid(MINIMAP_X, MINIMAP_Y, 0.05f, MINIMAP_W, MINIMAP_H, C2D_Color32(0, 0, 0, 255));
     if (!minimap_layout(&dest_x, &dest_y, &S)) return;
 
     // Per-tile rects, run-length-encoded per row (a mostly uniform row - ocean,
@@ -496,21 +482,21 @@ static void draw_minimap(int cam_x, int cam_y, float view_w_tiles, float view_h_
         }
     }
 
-    // The part of the world the top screen shows.
+    // The part of the world the bottom screen shows.
     float cx = (float)cam_x / TILE_PX, cy = (float)cam_y / TILE_PX;
     if (map_wraps_x()) {
         cx = fmodf(cx, (float)s_map_w);
         if (cx < 0.0f) cx += s_map_w;
     }
-    if (cy < 0.0f) cy = 0.0f;
-    if (cy + view_h_tiles > s_map_h) cy = s_map_h - view_h_tiles;
-    if (!map_wraps_x()) {
-        if (cx < 0.0f) cx = 0.0f;
-        if (cx + view_w_tiles > s_map_w) cx = s_map_w - view_w_tiles;
-    }
     float vw = view_w_tiles, vh = view_h_tiles;
     if (vw > s_map_w) vw = s_map_w;
-    if (vh > s_map_h) { vh = s_map_h; cy = 0; }
+    if (vh > s_map_h) vh = s_map_h;
+    if (cy < 0.0f) cy = 0.0f;
+    if (cy + vh > s_map_h) cy = s_map_h - vh;
+    if (!map_wraps_x()) {
+        if (cx < 0.0f) cx = 0.0f;
+        if (cx + vw > s_map_w) cx = s_map_w - vw;
+    }
     u32 fc = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
     if (map_wraps_x() && cx + vw > s_map_w) {
         float first = s_map_w - cx;
@@ -526,133 +512,299 @@ static void draw_minimap(int cam_x, int cam_y, float view_w_tiles, float view_h_
     }
 }
 
-// A translucent strip across a screen, for HUD text over the map.
+// A translucent strip, for HUD text/buttons over the map.
 static void hud_strip(float y, float w, float h)
 {
     C2D_DrawRectSolid(0, y, 0.88f, w, h, C2D_Color32(0x08, 0x0C, 0x14, 0xC8));
 }
 
-void render_top_map(const TileInfo *sel, int sel_x, int sel_y, int armed_unit_id,
-                    bool goto_armed, int cam_x, int cam_y, float scale,
-                    int goto_x, int goto_y, const CivInfo *civ)
+// Text helpers that measure, for centring and right-aligning.
+static float text_width(const char *str, float scale)
+{
+    C2D_Text t;
+    C2D_TextParse(&t, g_textBuf, str);
+    float w = 0, h = 0;
+    C2D_TextGetDimensions(&t, scale, scale, &w, &h);
+    return w;
+}
+
+static void draw_button(float x, float y, float w, float h, float z, const char *label,
+                        float scale, bool enabled, bool highlight)
+{
+    u32 bg = highlight ? C2D_Color32(0x3C, 0x78, 0x40, 0xF0)
+           : enabled   ? C2D_Color32(0x2C, 0x50, 0x80, 0xF0) : C2D_Color32(0x24, 0x2C, 0x38, 0xF0);
+    u32 border = highlight ? C2D_Color32(0x8C, 0xE0, 0x90, 0xFF) : C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF);
+    C2D_DrawRectSolid(x, y, z, w, h, bg);
+    C2D_DrawRectSolid(x, y, z + 0.001f, w, 2, border);
+    float tw = text_width(label, scale);
+    draw_text_z(x + (w - tw) / 2, y + (h - 30 * scale) / 2 + 1, z + 0.002f, scale,
+                enabled ? 0xFFFFFFFF : C2D_Color32(0x80, 0x88, 0x94, 0xFF), label);
+}
+
+static void pretty_tag(const char *tag, char *out, int n)
+{
+    // "ts.grassland_resources" -> "Grassland resources"
+    const char *p = strchr(tag, '.');
+    p = p ? p + 1 : tag;
+    int j = 0;
+    for (int i = 0; p[i] && j < n - 1; i++) {
+        char c = p[i] == '_' ? ' ' : p[i];
+        out[j++] = (i == 0) ? toupper((unsigned char)c) : c;
+    }
+    out[j] = 0;
+}
+
+static const char *k_terrain_names[] = { "Ocean", "Grassland", "Plains", "Desert", "Tundra",
+    "Swamp", "Jungle", "Hills", "Forest", "Mountains", "Arctic" };
+
+// ---- Bottom screen: the map, move hints, HUD buttons and popup ----
+
+void popup_layout(PopupMenu *m, int anchor_x, int anchor_y)
+{
+    m->cols = m->n > 7 ? 2 : 1;
+    int rows = (m->n + m->cols - 1) / m->cols;
+    m->w = m->cols * POPUP_ITEM_W + (m->cols + 1) * 3;
+    m->h = POPUP_TITLE_H + rows * (POPUP_ITEM_H + 3) + 3;
+    int x = anchor_x + 24;
+    if (x + m->w > 318) x = anchor_x - 24 - m->w;
+    if (x < 2) x = 2;
+    if (x + m->w > 318) x = 318 - m->w;
+    int y = anchor_y - m->h / 2;
+    if (y < 2) y = 2;
+    if (y + m->h > HUD_Y - 2) y = HUD_Y - 2 - m->h;
+    if (y < 2) y = 2;
+    m->x = x; m->y = y;
+}
+
+int popup_hit_test(const PopupMenu *m, int px, int py)
+{
+    if (px < m->x || px >= m->x + m->w || py < m->y || py >= m->y + m->h) return -1;
+    int rx = px - m->x - 3, ry = py - m->y - POPUP_TITLE_H;
+    if (rx < 0 || ry < 0) return -2;
+    int col = rx / (POPUP_ITEM_W + 3), row = ry / (POPUP_ITEM_H + 3);
+    if (rx % (POPUP_ITEM_W + 3) >= POPUP_ITEM_W || ry % (POPUP_ITEM_H + 3) >= POPUP_ITEM_H) return -2;
+    int rows = (m->n + m->cols - 1) / m->cols;
+    int idx = col * rows + row;
+    if (col >= m->cols || idx >= m->n || !m->enabled[idx]) return -2;
+    return idx;
+}
+
+static void draw_popup(const PopupMenu *m)
+{
+    const float Z = 0.93f;
+    C2D_DrawRectSolid(m->x - 1, m->y - 1, Z, m->w + 2, m->h + 2, C2D_Color32(0x8C, 0xB8, 0xE8, 0xFF));
+    C2D_DrawRectSolid(m->x, m->y, Z + 0.001f, m->w, m->h, C2D_Color32(0x10, 0x18, 0x26, 0xF4));
+    draw_text_z(m->x + 5, m->y + 2, Z + 0.002f, 0.5f, C2D_Color32(0xFF, 0xE0, 0x80, 0xFF), m->title);
+    int rows = (m->n + m->cols - 1) / m->cols;
+    for (int i = 0; i < m->n; i++) {
+        int col = i / rows, row = i % rows;
+        draw_button(m->x + 3 + col * (POPUP_ITEM_W + 3), m->y + POPUP_TITLE_H + row * (POPUP_ITEM_H + 3),
+                    POPUP_ITEM_W, POPUP_ITEM_H, Z + 0.003f, m->label[i], 0.5f, m->enabled[i], false);
+    }
+}
+
+int hud_hit_test(int px, int py)
+{
+    if (py < HUD_Y) return HUD_NONE;
+    if (px >= HUD_MENU_X && px < HUD_MENU_X + HUD_MENU_W) return HUD_MENU;
+    if (px >= HUD_NEXT_X && px < HUD_NEXT_X + HUD_NEXT_W) return HUD_NEXT;
+    if (px >= HUD_ZOUT_X && px < HUD_ZOUT_X + HUD_ZOOM_W) return HUD_ZOUT;
+    if (px >= HUD_ZIN_X  && px < HUD_ZIN_X  + HUD_ZOOM_W) return HUD_ZIN;
+    if (px >= HUD_END_X  && px < HUD_END_X  + HUD_END_W)  return HUD_END;
+    return HUD_BAR;
+}
+
+void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,
+                       int unit_x, int unit_y, bool unit_can_move, int goto_x, int goto_y,
+                       const PopupMenu *popup, bool can_zoom_out, bool can_zoom_in, bool all_moved)
+{
+    render_map_view(cam_x, cam_y, scale, 320, 240, sel_x, sel_y, unit_x >= 0, goto_x, goto_y);
+
+    // Where the commanded unit can step: a soft frame on each neighbour.
+    if (unit_x >= 0 && unit_can_move && !popup) {
+        int mw = 40, mh = 40;
+        get_map_dimensions(&mw, &mh);
+        float T = TILE_PX * scale;
+        u32 c = C2D_Color32(0xFF, 0xFF, 0xFF, 0x70);
+        for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            int tx = unit_x + dx, ty = unit_y + dy;
+            if (ty < 0 || ty >= mh) continue;
+            if (!map_wraps_x() && (tx < 0 || tx >= mw)) continue;
+            int wx = tx * TILE_PX;
+            if (map_wraps_x()) {
+                int world_w = mw * TILE_PX;
+                int d = ((wx - cam_x + TILE_PX) % world_w + world_w) % world_w - TILE_PX;
+                wx = cam_x + d;
+            }
+            float x = (wx - cam_x) * scale, y = (ty * TILE_PX - cam_y) * scale;
+            float b = 1.5f, in = 3.0f;
+            C2D_DrawRectSolid(x + in, y + in, 0.68f, T - 2 * in, b, c);
+            C2D_DrawRectSolid(x + in, y + T - in - b, 0.68f, T - 2 * in, b, c);
+            C2D_DrawRectSolid(x + in, y + in, 0.68f, b, T - 2 * in, c);
+            C2D_DrawRectSolid(x + T - in - b, y + in, 0.68f, b, T - 2 * in, c);
+        }
+    }
+
+    // HUD button row along the bottom edge.
+    hud_strip(HUD_Y, 320, 240 - HUD_Y);
+    const float Z = 0.9f;
+    float by = HUD_Y + 2, bh = 240 - HUD_Y - 3;
+    draw_button(HUD_MENU_X, by, HUD_MENU_W, bh, Z, "Menu", 0.5f, true, false);
+    draw_button(HUD_NEXT_X, by, HUD_NEXT_W, bh, Z, "Next", 0.5f, !all_moved, false);
+    draw_button(HUD_ZOUT_X, by, HUD_ZOOM_W, bh, Z, "-", 0.7f, can_zoom_out, false);
+    draw_button(HUD_ZIN_X,  by, HUD_ZOOM_W, bh, Z, "+", 0.7f, can_zoom_in, false);
+    draw_button(HUD_END_X,  by, HUD_END_W,  bh, Z, "End Turn", 0.5f, true, all_moved);
+
+    if (popup) draw_popup(popup);
+}
+
+// ---- Top screen: information only (never touched) ----
+
+void render_top_info(const TopInfo *ti)
 {
     C2D_TextBufClear(g_textBuf);
     update_minimap_slice(5);
 
-    render_map_view(cam_x, cam_y, scale, 400, 240, sel_x, sel_y, armed_unit_id >= 0, goto_x, goto_y);
-
-    const float Z = 0.92f;
     u32 white = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
     u32 gold  = C2D_Color32(0xFF, 0xD8, 0x60, 0xFF);
     u32 soft  = C2D_Color32(0xB8, 0xC8, 0xDC, 0xFF);
+    u32 label = C2D_Color32(0x8C, 0xA0, 0xB4, 0xFF);
     char line[128];
 
-    // Status bar: turn, gold, research.
-    hud_strip(0, 400, 17);
+    // Status bar.
+    C2D_DrawRectSolid(0, 0, 0.0f, 400, 18, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
+    C2D_DrawRectSolid(0, 18, 0.0f, 400, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
     int turn = get_game_turn();
     if (turn > 0) {
         snprintf(line, sizeof(line), "Turn %d", turn);
-        draw_text_z(4, 1, Z, 0.5f, white, line);
-        if (civ) {
-            snprintf(line, sizeof(line), "Gold %d", civ->gold);
-            draw_text_z(72, 1, Z, 0.5f, gold, line);
-            if (civ->research_name[0]) {
-                if (civ->research_turns >= 0)
-                    snprintf(line, sizeof(line), "%s %d/%d (%dt)", civ->research_name,
-                             civ->bulbs, civ->bulbs_needed, civ->research_turns);
-                else
-                    snprintf(line, sizeof(line), "%s %d/%d", civ->research_name,
-                             civ->bulbs, civ->bulbs_needed);
-                draw_text_z(150, 1, Z, 0.5f, soft, line);
-            }
+        draw_text(5, 1, 0.52f, white, line);
+        if (ti->civ) {
+            snprintf(line, sizeof(line), "Gold %d", ti->civ->gold);
+            draw_text(78, 1, 0.52f, gold, line);
+            snprintf(line, sizeof(line), "%s  Tax %d Lux %d Sci %d", ti->civ->government_name,
+                     ti->civ->tax, ti->civ->lux, ti->civ->sci);
+            draw_text(395 - text_width(line, 0.45f), 2, 0.45f, soft, line);
         }
-    }
-
-    // Controls line for the current state.
-    hud_strip(240 - 16, 400, 16);
-    const char *hint;
-    u32 hc = soft;
-    if (goto_armed) {
-        hint = "GOTO: D-Pad picks the target   A: go there   B: cancel";
-        hc = C2D_Color32(0xFF, 0xC0, 0x40, 0xFF);
-    } else if (armed_unit_id >= 0) {
-        hint = "D-Pad: move  B: fortify  X: action  Y: disband  A: release";
-        hc = C2D_Color32(0xFF, 0xF0, 0x80, 0xFF);
-    } else if (sel && sel->city_owner >= 0 && is_pov_unit_owner(sel->city_owner)) {
-        hint = "A: open city   START: end turn   ZL/ZR: zoom   L/R: science/tax";
-    } else if (sel && sel->unit_owner >= 0 && is_pov_unit_owner(sel->unit_owner)) {
-        hint = "A: command unit   START: end turn   ZL/ZR: zoom   L/R: science/tax";
     } else {
-        hint = "D-Pad: cursor  Circle: pan  ZL/ZR: zoom  SELECT: units  START: end";
+        draw_text(5, 1, 0.52f, white, "Generating world...");
     }
-    draw_text_z(4, 240 - 15, Z, 0.45f, hc, hint);
-}
 
-void render_bottom_map(const TileInfo *sel, int sel_x, int sel_y, int armed_unit_id,
-                       int cam_x, int cam_y, float scale, int zoom_idx, int zoom_count)
-{
-    draw_minimap(cam_x, cam_y, 400.0f / (TILE_PX * scale), 240.0f / (TILE_PX * scale), sel_x, sel_y);
+    // Left: minimap and research.
+    draw_minimap(ti->cam_x, ti->cam_y, 320.0f / (TILE_PX * ti->zoom), (240.0f - (240 - HUD_Y)) / (TILE_PX * ti->zoom),
+                 ti->tile_x, ti->tile_y);
+    if (ti->civ && ti->civ->research_name[0]) {
+        float y = MINIMAP_Y + MINIMAP_H + 6;
+        draw_text(MINIMAP_X, y, 0.45f, label, "Researching");
+        draw_text(MINIMAP_X, y + 13, 0.5f, white, ti->civ->research_name);
+        int need = ti->civ->bulbs_needed > 0 ? ti->civ->bulbs_needed : 1;
+        float frac = (float)ti->civ->bulbs / need;
+        if (frac < 0) frac = 0;
+        if (frac > 1) frac = 1;
+        C2D_DrawRectSolid(MINIMAP_X, y + 31, 0.0f, MINIMAP_W, 6, C2D_Color32(0x24, 0x30, 0x40, 0xFF));
+        C2D_DrawRectSolid(MINIMAP_X, y + 31, 0.01f, MINIMAP_W * frac, 6, C2D_Color32(0x50, 0xA0, 0xF0, 0xFF));
+        if (ti->civ->research_turns >= 0)
+            snprintf(line, sizeof(line), "%d/%d bulbs, %d turns", ti->civ->bulbs, ti->civ->bulbs_needed, ti->civ->research_turns);
+        else
+            snprintf(line, sizeof(line), "%d/%d bulbs", ti->civ->bulbs, ti->civ->bulbs_needed);
+        draw_text(MINIMAP_X, y + 39, 0.42f, soft, line);
+    }
 
-    u32 white = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
-    u32 dim   = C2D_Color32(0xB0, 0xBE, 0xCC, 0xFF);
-    char line[96];
-    static const char *terrain_names[] = { "Ocean", "Grassland", "Plains", "Desert", "Tundra",
-        "Swamp", "Jungle", "Hills", "Forest", "Mountains", "Arctic" };
-
-    // Selected tile readout.
-    float y = MINIMAP_Y + MINIMAP_H + 3;
-    if (sel && sel_x >= 0) {
-        if (sel->visibility == 0) {
-            snprintf(line, sizeof(line), "(%d,%d) unexplored", sel_x, sel_y);
-            draw_text(4, y, 0.5f, dim, line);
+    // Right: what's selected.
+    const float CX = 206, CW = 190;
+    C2D_DrawRectSolid(CX - 4, 24, 0.0f, CW + 6, 196, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
+    if (ti->unit && ti->unit->valid) {
+        const UnitInfo *u = ti->unit;
+        C2D_DrawRectSolid(CX - 4, 24, 0.01f, 4, 196, owner_color(u->owner));
+        // Unit portrait, double size.
+        C2D_DrawRectSolid(CX + 2, 30, 0.01f, 64, 64, C2D_Color32(0x1C, 0x28, 0x3A, 0xFF));
+        C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, get_unit_sprite(u->rule_name)),
+                        CX + 4, 32, 0.02f, NULL, 2.0f, 2.0f);
+        draw_text(CX + 72, 30, 0.6f, white, u->name);
+        if (u->veteran > 0) {
+            snprintf(line, sizeof(line), "Veteran %d", u->veteran);
+            draw_text(CX + 72, 50, 0.45f, gold, line);
+        }
+        snprintf(line, sizeof(line), "%s", u->activity);
+        draw_text(CX + 72, 66, 0.45f, u->idle ? soft : C2D_Color32(0x90, 0xE0, 0x90, 0xFF), line);
+        if (u->home[0]) {
+            snprintf(line, sizeof(line), "Home: %s", u->home);
+            draw_text(CX + 72, 80, 0.42f, label, line);
+        }
+        float y = 102;
+        snprintf(line, sizeof(line), "Attack %d   Defense %d   FP %d", u->attack, u->defense, u->firepower);
+        draw_text(CX + 2, y, 0.47f, white, line);
+        y += 18;
+        // HP bar
+        draw_text(CX + 2, y, 0.47f, white, "HP");
+        float hpf = u->hp_max > 0 ? (float)u->hp / u->hp_max : 0;
+        C2D_DrawRectSolid(CX + 30, y + 5, 0.01f, 110, 7, C2D_Color32(0x40, 0x18, 0x18, 0xFF));
+        C2D_DrawRectSolid(CX + 30, y + 5, 0.02f, 110 * hpf, 7,
+                          hpf > 0.5f ? C2D_Color32(0x50, 0xD0, 0x50, 0xFF) : hpf > 0.25f ? C2D_Color32(0xE0, 0xC0, 0x40, 0xFF)
+                                                                       : C2D_Color32(0xE0, 0x40, 0x40, 0xFF));
+        snprintf(line, sizeof(line), "%d/%d", u->hp, u->hp_max);
+        draw_text(CX + 146, y, 0.45f, soft, line);
+        y += 18;
+        snprintf(line, sizeof(line), "Moves left: %s", u->moves_left > 0 ? u->moves : "none");
+        draw_text(CX + 2, y, 0.47f, u->moves_left > 0 ? white : label, line);
+        y += 20;
+        if (ti->stack_n > 1) {
+            snprintf(line, sizeof(line), "Stack of %d units here", ti->stack_n);
+            draw_text(CX + 2, y, 0.45f, label, line);
+        }
+    } else if (ti->tile && ti->tile_x >= 0) {
+        const TileInfo *t = ti->tile;
+        snprintf(line, sizeof(line), "Tile %d, %d", ti->tile_x, ti->tile_y);
+        draw_text(CX + 2, 28, 0.45f, label, line);
+        if (t->visibility == 0) {
+            draw_text(CX + 2, 46, 0.6f, soft, "Unexplored");
         } else {
-            const char *tn = (sel->terrain >= 0 && sel->terrain <= TERRAIN_ARCTIC) ? terrain_names[sel->terrain] : "?";
-            snprintf(line, sizeof(line), "(%d,%d) %s%s%s%s", sel_x, sel_y, tn,
-                     sel->has_river ? ", river" : "",
-                     sel->has_rail ? ", railroad" : sel->has_road ? ", road" : "",
-                     sel->has_mine ? ", mine" : sel->has_farmland ? ", farmland" : sel->has_irrigation ? ", irrigated" : "");
-            draw_text(4, y, 0.5f, dim, line);
-            y += 17;
-            if (sel->city_owner >= 0) {
-                snprintf(line, sizeof(line), "%s (size %d)", sel->city_name[0] ? sel->city_name : "City", sel->city_size);
-                draw_text(4, y, 0.55f, owner_color(sel->city_owner), line);
-                y += 17;
+            const char *tn = (t->terrain <= TERRAIN_ARCTIC) ? k_terrain_names[t->terrain] : "?";
+            draw_text(CX + 2, 44, 0.65f, white, tn);
+            float y = 66;
+            char extra[96] = "";
+            snprintf(extra, sizeof(extra), "%s%s%s%s%s",
+                     t->has_river ? "River  " : "",
+                     t->has_maglev ? "Maglev  " : t->has_rail ? "Railroad  " : t->has_road ? "Road  " : "",
+                     t->has_farmland ? "Farmland  " : t->has_irrigation ? "Irrigation  " : "",
+                     t->has_mine ? "Mine  " : "",
+                     t->has_pollution ? "Pollution" : t->has_fallout ? "Fallout" : "");
+            if (extra[0]) { draw_text(CX + 2, y, 0.45f, soft, extra); y += 16; }
+            if (t->resource_tag[0]) {
+                char res[48];
+                pretty_tag(t->resource_tag, res, sizeof(res));
+                snprintf(line, sizeof(line), "Resource: %s", res);
+                draw_text(CX + 2, y, 0.45f, gold, line);
+                y += 16;
             }
-            if (sel->unit_owner >= 0 && sel->visibility == 2) {
-                if (sel->num_units > 1)
-                    snprintf(line, sizeof(line), "%s +%d more%s", sel->unit_name[0] ? sel->unit_name : "Unit",
-                             sel->num_units - 1, armed_unit_id >= 0 ? "  [selected]" : "");
-                else
-                    snprintf(line, sizeof(line), "%s%s", sel->unit_name[0] ? sel->unit_name : "Unit",
-                             armed_unit_id >= 0 ? "  [selected]" : "");
-                draw_text(4, y, 0.55f, owner_color(sel->unit_owner), line);
+            if (t->has_village) { draw_text(CX + 2, y, 0.45f, gold, "Village (hut)"); y += 16; }
+            if (t->visibility == 1) { draw_text(CX + 2, y, 0.42f, label, "(last seen, fogged)"); y += 16; }
+            if (t->city_owner >= 0) {
+                y += 4;
+                snprintf(line, sizeof(line), "%s  (size %d)", t->city_name[0] ? t->city_name : "City", t->city_size);
+                draw_text(CX + 2, y, 0.55f, owner_color(t->city_owner), line);
+                y += 20;
+            }
+            for (int i = 0; i < ti->stack_n && i < 5; i++) {
+                snprintf(line, sizeof(line), "%s%s", ti->stack[i].name,
+                         is_pov_unit_owner(ti->stack[i].owner) && !ti->stack[i].can_move ? "  (done)" : "");
+                draw_text(CX + 2, y, 0.47f, owner_color(ti->stack[i].owner), line);
+                y += 16;
+            }
+            if (ti->stack_n > 5) {
+                snprintf(line, sizeof(line), "+%d more", ti->stack_n - 5);
+                draw_text(CX + 2, y, 0.45f, label, line);
             }
         }
     } else {
-        draw_text(4, y, 0.5f, dim, "Tap the minimap to look around.");
+        draw_text(CX + 2, 30, 0.5f, soft, "Tap the map below.");
+        draw_text(CX + 2, 50, 0.45f, label, "Tap a unit for its orders.");
+        draw_text(CX + 2, 66, 0.45f, label, "Drag to scroll the map.");
     }
 
-    // Button row.
-    u32 bg = C2D_Color32(0x2C, 0x50, 0x80, 0xFF), bgd = C2D_Color32(0x24, 0x30, 0x40, 0xFF);
-    u32 border = C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF);
-    struct { int x, w; const char *t; bool on; } btn[] = {
-        { BOTBTN_END_X,  BOTBTN_END_W,  "End Turn", true },
-        { BOTBTN_ZOUT_X, BOTBTN_ZOOM_W, "-",        zoom_idx > 0 },
-        { BOTBTN_ZIN_X,  BOTBTN_ZOOM_W, "+",        zoom_idx < zoom_count - 1 },
-        { BOTBTN_UNIT_X, BOTBTN_UNIT_W, "Units",    true },
-    };
-    for (int i = 0; i < 4; i++) {
-        C2D_DrawRectSolid(btn[i].x, BOTBTN_Y, 0.0f, btn[i].w, BOTBTN_H, btn[i].on ? bg : bgd);
-        C2D_DrawRectSolid(btn[i].x, BOTBTN_Y, 0.0f, btn[i].w, 2, border);
-        float sc = btn[i].t[1] ? 0.55f : 0.8f;
-        float tw = 0, th = 0;
-        C2D_Text t;
-        C2D_TextParse(&t, g_textBuf, btn[i].t);
-        C2D_TextOptimize(&t);
-        C2D_TextGetDimensions(&t, sc, sc, &tw, &th);
-        C2D_DrawText(&t, C2D_WithColor, btn[i].x + (btn[i].w - tw) / 2, BOTBTN_Y + (BOTBTN_H - th) / 2 + 1,
-                     0.0f, sc, sc, btn[i].on ? white : dim);
-    }
+    // Hint line.
+    C2D_DrawRectSolid(0, 240 - 17, 0.0f, 400, 17, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
+    if (ti->hint) draw_text(5, 240 - 16, 0.45f, ti->hint_color ? ti->hint_color : soft, ti->hint);
 }
 
 // Neighbour lookups for coastline / terrain-edge matching. Coordinates are

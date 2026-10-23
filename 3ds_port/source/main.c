@@ -122,8 +122,9 @@ static const float k_zoom_levels[] = { 0.5f, 0.75f, 1.0f, 1.5f, 2.0f };
 #define ZOOM_DEFAULT 2
 #define TILE_WORLD 30
 
-static int view_w_world(float s) { return (int)(SCREEN_WIDTH_TOP / s); }
-static int view_h_world(float s) { return (int)(SCREEN_HEIGHT_TOP / s); }
+// The map is the bottom screen; the HUD row covers its last few pixels.
+static int view_w_world(float s) { return (int)(SCREEN_WIDTH_BOT / s); }
+static int view_h_world(float s) { return (int)(HUD_Y / s); }
 
 // Centre the top-screen view on tile (tx, ty).
 static void center_on_tile(int tx, int ty, float s, int *cam_x, int *cam_y)
@@ -156,7 +157,7 @@ static void ensure_tile_visible(int tx, int ty, float s, int *cam_x, int *cam_y)
     int mw = 40, mh = 40;
     get_map_dimensions(&mw, &mh);
     int vw = view_w_world(s), vh = view_h_world(s);
-    int mx = TILE_WORLD, my_top = TILE_WORLD + (int)(18 / s), my_bot = TILE_WORLD + (int)(17 / s);
+    int mx = TILE_WORLD, my_top = TILE_WORLD, my_bot = TILE_WORLD;
     if (mx * 2 + TILE_WORLD > vw) mx = (vw - TILE_WORLD) / 2;
     if (my_top + my_bot + TILE_WORLD > vh) my_top = my_bot = (vh - TILE_WORLD) / 2;
     int wx = tx * TILE_WORLD, wy = ty * TILE_WORLD;
@@ -171,6 +172,122 @@ static void ensure_tile_visible(int tx, int ty, float s, int *cam_x, int *cam_y)
     if (wy < *cam_y + my_top) *cam_y = wy - my_top;
     if (wy + TILE_WORLD > *cam_y + vh - my_bot) *cam_y = wy + TILE_WORLD - vh + my_bot;
     clamp_camera(s, cam_x, cam_y);
+}
+
+static void set_zoom(int nz, int *zoom_idx, float *zoom, int *cam_x, int *cam_y)
+{
+    if (nz < 0) nz = 0;
+    if (nz >= ZOOM_COUNT) nz = ZOOM_COUNT - 1;
+    if (nz == *zoom_idx) return;
+    int ccx = *cam_x + view_w_world(*zoom) / 2, ccy = *cam_y + view_h_world(*zoom) / 2;
+    *zoom_idx = nz;
+    *zoom = k_zoom_levels[nz];
+    *cam_x = ccx - view_w_world(*zoom) / 2;
+    *cam_y = ccy - view_h_world(*zoom) / 2;
+}
+
+// Bottom-screen pixel -> native tile (folding across a wrapping seam).
+static bool screen_to_tile(int px, int py, int cam_x, int cam_y, float zoom, int *tx, int *ty)
+{
+    int mw = 40, mh = 40;
+    get_map_dimensions(&mw, &mh);
+    int x = (int)floorf((cam_x + px / zoom) / TILE_WORLD);
+    int y = (int)floorf((cam_y + py / zoom) / TILE_WORLD);
+    if (map_wraps_x()) x = ((x % mw) + mw) % mw;
+    if (map_wraps_y()) y = ((y % mh) + mh) % mh;
+    if (x < 0 || y < 0 || x >= mw || y >= mh) return false;
+    *tx = x; *ty = y;
+    return true;
+}
+
+// Native tile -> bottom-screen pixel of its top-left corner (nearest copy).
+static void tile_to_screen(int tx, int ty, int cam_x, int cam_y, float zoom, int *px, int *py)
+{
+    int mw = 40, mh = 40;
+    get_map_dimensions(&mw, &mh);
+    int wx = tx * TILE_WORLD;
+    if (map_wraps_x()) {
+        int world_w = mw * TILE_WORLD, c = cam_x + view_w_world(zoom) / 2;
+        int d = ((wx - c) % world_w + world_w + world_w / 2) % world_w - world_w / 2;
+        wx = c + d;
+    }
+    *px = (int)((wx - cam_x) * zoom);
+    *py = (int)((ty * TILE_WORLD - cam_y) * zoom);
+}
+
+// Step from (ax, ay) to (bx, by) as a compass move, or false if not adjacent.
+static bool adjacent_dir(int ax, int ay, int bx, int by, MoveDir *dir)
+{
+    int mw = 40, mh = 40;
+    get_map_dimensions(&mw, &mh);
+    int dx = bx - ax, dy = by - ay;
+    if (map_wraps_x()) { if (dx > mw / 2) dx -= mw; if (dx < -mw / 2) dx += mw; }
+    if (map_wraps_y()) { if (dy > mh / 2) dy -= mh; if (dy < -mh / 2) dy += mh; }
+    if ((dx == 0 && dy == 0) || abs(dx) > 1 || abs(dy) > 1) return false;
+    static const MoveDir table[3][3] = {
+        { MOVE_DIR_NORTHWEST, MOVE_DIR_NORTH, MOVE_DIR_NORTHEAST },
+        { MOVE_DIR_WEST,      MOVE_DIR_NORTH, MOVE_DIR_EAST },
+        { MOVE_DIR_SOUTHWEST, MOVE_DIR_SOUTH, MOVE_DIR_SOUTHEAST },
+    };
+    *dir = table[dy + 1][dx + 1];
+    return true;
+}
+
+// ---- Popup menus ----
+enum { POPUP_NONE, POPUP_UNIT, POPUP_CONFIRM_DISBAND, POPUP_STACK, POPUP_MENU };
+// Popup item ids beyond UnitActionKind.
+#define PID_SKIP        100
+#define PID_DESELECT    101
+#define PID_DISBAND_ASK 102
+#define PID_OPEN_CITY   (-100)
+#define PID_YES         1
+#define PID_NO          0
+enum { MENU_RESEARCH = 1, MENU_RATES, MENU_GOVERNMENT, MENU_DIPLOMACY, MENU_SAVE, MENU_CLOSE };
+
+static void popup_add(PopupMenu *m, int id, const char *label, bool enabled)
+{
+    if (m->n >= POPUP_MAX) return;
+    m->id[m->n] = id;
+    snprintf(m->label[m->n], sizeof(m->label[0]), "%s", label);
+    m->enabled[m->n] = enabled;
+    m->n++;
+}
+
+static void build_unit_popup(PopupMenu *m, const UnitInfo *u)
+{
+    memset(m, 0, sizeof(*m));
+    snprintf(m->title, sizeof(m->title), "%s", u->name);
+    static const struct { int kind; const char *label; } items[] = {
+        { UNIT_ACTION_FOUND_CITY, "Build City" },
+        { UNIT_ACTION_JOIN_CITY,  "Join City" },
+        { UNIT_ACTION_ROAD,       "Build Road" },
+        { UNIT_ACTION_IRRIGATE,   "Irrigate" },
+        { UNIT_ACTION_MINE,       "Mine" },
+        { UNIT_ACTION_FORTIFY,    "Fortify" },
+        { UNIT_ACTION_SENTRY,     "Sentry" },
+        { UNIT_ACTION_EXPLORE,    "Explore" },
+        { UNIT_ACTION_WAKE,       "Cancel Orders" },
+    };
+    for (int i = 0; i < (int)(sizeof(items) / sizeof(items[0])); i++) {
+        if (u->actions & (1u << items[i].kind)) popup_add(m, items[i].kind, items[i].label, true);
+    }
+    popup_add(m, PID_SKIP, "Wait", true);
+    popup_add(m, PID_DESELECT, "Done", true);
+    popup_add(m, PID_DISBAND_ASK, "Disband", true);
+}
+
+static void open_game_menu(PopupMenu *m)
+{
+    memset(m, 0, sizeof(*m));
+    snprintf(m->title, sizeof(m->title), "Menu");
+    popup_add(m, MENU_RESEARCH,   "Research", true);
+    popup_add(m, MENU_RATES,      "Tax Rates", true);
+    popup_add(m, MENU_GOVERNMENT, "Government", true);
+    popup_add(m, MENU_DIPLOMACY,  "Diplomacy", true);
+    popup_add(m, MENU_SAVE,       "Save Game", true);
+    popup_add(m, MENU_CLOSE,      "Close", true);
+    popup_layout(m, HUD_MENU_X, HUD_Y - 10);
+    m->x = 2;
 }
 
 int main(int argc, char* argv[])
@@ -237,19 +354,35 @@ int main(int argc, char* argv[])
     int cam_y = 0;
     int zoom_idx = ZOOM_DEFAULT;
     float zoom = k_zoom_levels[zoom_idx];
-    int prev_sel_x = -1, prev_sel_y = -1; // camera follows the cursor when it moves
+    int prev_sel_x = -1, prev_sel_y = -1; // camera follows a commanded unit as it moves
     CivInfo map_civ_info;                 // status-bar snapshot, refreshed while !busy
     bool have_map_civ = false;
-    // D-Pad repeat for the map cursor: first repeat after 14 frames, then every 4.
-    hidSetRepeatParameters(14, 4);
+
+    // Map-screen stylus / popup state.
+    PopupMenu popup;
+    memset(&popup, 0, sizeof(popup));
+    int popup_kind = POPUP_NONE;
+    int popup_choice = -1;           // item tapped this frame, handled while !busy
+    bool t_active = false, t_dragging = false, t_consumed = false;
+    int t_x0 = 0, t_y0 = 0, t_cam_x0 = 0, t_cam_y0 = 0;
+    bool tap_pending = false;        // a map tap to resolve while !busy
+    bool want_unit_popup = false;    // open the commanded unit's orders
+    bool want_next_unit = false;     // select the next unit needing orders
+    int advance_from = -1;           // unit just given orders (skip it once)
+    int skip_ids[64];                // "Wait"ed units this turn
+    int nskip = 0;
+    int last_turn = -1;
+    int turn_select_frames = 0;      // keep trying to pick a first unit at turn start
+    int done_frames = 0;             // frames the commanded unit has had no moves left
+    bool all_moved = false;
+    int pending_goto_x = -1, pending_goto_y = -1; // first tap of a two-tap route
+    UnitInfo unit_info;
+    memset(&unit_info, 0, sizeof(unit_info));
+    static UnitBrief stack[16];
+    int stack_n = 0;
     int sel_x = -1, sel_y = -1;          // currently selected map tile (-1 = none)
     int selected_unit_id = -1;           // pov unit selected for movement (-1 = none)
-    int last_touch_px = -1, last_touch_py = -1; // last raw stylus position
 
-    // Goto-target sub-mode (handoff.md §2c): true from a GOTO action-bar tap
-    // until the next map tap (destination) or a cancel (B, or re-tapping the
-    // armed unit). Suppresses normal D-Pad unit control while active.
-    bool ui_goto_armed = false;
     // Cached read-model snapshot of the armed unit's pending goto
     // destination (get_unit_goto_tile(), handoff.md §2b), refreshed only in
     // the !busy block below - same "hold last value across a busy frame"
@@ -308,7 +441,7 @@ int main(int argc, char* argv[])
         hidScanInput();
         u32 kDown = hidKeysDown();
         u32 kHeld = hidKeysHeld();
-        u32 kRepeat = hidKeysDownRepeat();
+        u32 kUp = hidKeysUp();
 
         // Mode as it was at the START of this frame. The modal touch handler
         // gates on this (not the live ui_mode) so that the same tap which
@@ -392,59 +525,32 @@ int main(int argc, char* argv[])
         // A button: end the current turn (advance the game). Suppressed
         // inside a modal so a long turn step can't strand the panel behind
         // the busy overlay (handoff.md §7.3) - close the modal first.
+        // ---------------- Map screen (UI_MAP) buttons ----------------
         if (ui_mode == UI_MAP && (kDown & KEY_START) && !(kHeld & KEY_SELECT)) {
             fc3ds_server_request_end_turn();
+            popup_kind = POPUP_NONE;
+            pending_goto_x = pending_goto_y = -1;
         }
 
         // ZL/ZR (New 3DS) zoom the map, keeping the view centre fixed.
         if (ui_mode == UI_MAP && (kDown & (KEY_ZL | KEY_ZR))) {
             int nz = zoom_idx + ((kDown & KEY_ZR) ? 1 : 0) - ((kDown & KEY_ZL) ? 1 : 0);
-            if (nz < 0) nz = 0;
-            if (nz >= ZOOM_COUNT) nz = ZOOM_COUNT - 1;
-            if (nz != zoom_idx) {
-                int ccx = cam_x + view_w_world(zoom) / 2, ccy = cam_y + view_h_world(zoom) / 2;
-                zoom_idx = nz;
-                zoom = k_zoom_levels[zoom_idx];
-                cam_x = ccx - view_w_world(zoom) / 2;
-                cam_y = ccy - view_h_world(zoom) / 2;
-            }
+            set_zoom(nz, &zoom_idx, &zoom, &cam_x, &cam_y);
         }
 
-        // SELECT: re-center the camera on your own units. A manual recovery
-        // for the "stared at black fog" case - if auto-center ever misses (or
-        // you pan off into unexplored territory), this snaps back to unit[0].
-        // Gated on !fc3ds_server_is_busy(): find_pov_unit_tile() reads live
-        // Freeciv state (pov->units, unit_tile()) directly, and this runs
-        // BEFORE this frame's fc3ds_server_pump()/busy snapshot below - an
-        // ungated call here can race the server thread mid-mutation (e.g. a
-        // SELECT press during/just after world-gen), which plausibly
-        // explains "SELECT doesn't help" reports on a freshly generated
-        // world (hardware finding 2026-07-11, handoff.md) - every other
-        // in-process game-state read in this file is gated the same way.
-        if (ui_mode == UI_MAP && (kDown & KEY_SELECT) && !fc3ds_server_is_busy()) {
-            int cx, cy;
-            if (find_pov_unit_tile(&cx, &cy)) {
-                center_on_tile(cx, cy, zoom, &cam_x, &cam_y);
-                sel_x = cx; sel_y = cy;
-                prev_sel_x = cx; prev_sel_y = cy;
-            }
-        }
-
-        // L/R: reach the civ-level control panels from the map. B closes
-        // whichever modal is open (handled per-mode below).
-        if (ui_mode == UI_MAP && (kDown & KEY_L)) {
+        // L/R: straight to the research / tax panels.
+        if (ui_mode == UI_MAP && popup_kind == POPUP_NONE && (kDown & KEY_L)) {
             ui_mode = UI_RESEARCH;
             ui_scroll = 0;
             ui_tech_tree_view = false;
         }
-        if (ui_mode == UI_MAP && (kDown & KEY_R)) {
+        if (ui_mode == UI_MAP && popup_kind == POPUP_NONE && (kDown & KEY_R)) {
             ui_mode = UI_RATES;
             ui_scroll = 0;
         }
 
         circlePosition pos;
         hidCircleRead(&pos);
-        bool move_cursor = false;
 
         if (ui_mode == UI_CITY || ui_mode == UI_RESEARCH || ui_mode == UI_GOVERNMENT
             || ui_mode == UI_DIPLOMACY) {
@@ -502,13 +608,8 @@ int main(int argc, char* argv[])
             }
         } else if (ui_mode == UI_RATES) {
             if (kDown & KEY_B) ui_mode = UI_MAP;
-        } else if (selected_unit_id >= 0 && ui_goto_armed) {
-            // Goto-target sub-mode: D-Pad moves the cursor to the destination,
-            // A sends the unit there (handled with the A press below), B cancels.
-            if (kDown & KEY_B) {
-                ui_goto_armed = false;
-            }
-            move_cursor = true;
+        } else if (popup_kind != POPUP_NONE) {
+            if (kDown & KEY_B) popup_kind = POPUP_NONE;
         } else if (selected_unit_id >= 0) {
             // A unit is selected: D-Pad orders a one-tile move instead of
             // panning. Edge-triggered (kDown, not kHeld) so holding the
@@ -564,45 +665,29 @@ int main(int argc, char* argv[])
                 freeciv_request_unit_move(selected_unit_id, horiz_is_right ? MOVE_DIR_EAST : MOVE_DIR_WEST);
             }
 
-            // B: Fortify/Sentry toggle. X: context action (Found City for a
-            // Settler, else Build Road/Irrigate/Mine for a Worker). Y:
-            // Disband. All no-ops if the selected unit doesn't support them.
-            if (kDown & KEY_B) freeciv_request_unit_action(selected_unit_id, UNIT_ACTION_FORTIFY_SENTRY);
-            if (kDown & KEY_X) freeciv_request_unit_action(selected_unit_id, UNIT_ACTION_CONTEXT);
-            if (kDown & KEY_Y) freeciv_request_unit_action(selected_unit_id, UNIT_ACTION_DISBAND);
-        } else {
-            move_cursor = true; // nothing armed: D-Pad moves the map cursor
-        }
-
-        // Map cursor (the selected tile): one tile per press, repeating while held.
-        if (move_cursor && !fc3ds_server_is_busy() && get_game_turn() > 0) {
-            int dx = ((kRepeat & KEY_DRIGHT) ? 1 : 0) - ((kRepeat & KEY_DLEFT) ? 1 : 0);
-            int dy = ((kRepeat & KEY_DDOWN) ? 1 : 0) - ((kRepeat & KEY_DUP) ? 1 : 0);
-            if (dx || dy) {
-                int mw = 40, mh = 40;
-                get_map_dimensions(&mw, &mh);
-                if (sel_x < 0) {
-                    sel_x = (cam_x + view_w_world(zoom) / 2) / TILE_WORLD;
-                    sel_y = (cam_y + view_h_world(zoom) / 2) / TILE_WORLD;
-                } else {
-                    sel_x += dx;
-                    sel_y += dy;
-                }
-                if (map_wraps_x()) sel_x = ((sel_x % mw) + mw) % mw;
-                else if (sel_x < 0) sel_x = 0; else if (sel_x >= mw) sel_x = mw - 1;
-                if (map_wraps_y()) sel_y = ((sel_y % mh) + mh) % mh;
-                else if (sel_y < 0) sel_y = 0; else if (sel_y >= mh) sel_y = mh - 1;
+            // A: this unit's orders menu. X: next unit. B: let go of it
+            // (or drop a planned route first).
+            if (kDown & KEY_A) want_unit_popup = true;
+            if (kDown & KEY_X) want_next_unit = true;
+            if (kDown & KEY_B) {
+                if (pending_goto_x >= 0) pending_goto_x = pending_goto_y = -1;
+                else selected_unit_id = -1;
             }
+        } else {
+            // Nothing commanded: D-Pad scrolls, A/X jump to the next unit
+            // that needs orders.
+            int sp = (int)(3 / zoom) + 1;
+            if (kHeld & KEY_DUP)    cam_y -= sp;
+            if (kHeld & KEY_DDOWN)  cam_y += sp;
+            if (kHeld & KEY_DLEFT)  cam_x -= sp;
+            if (kHeld & KEY_DRIGHT) cam_x += sp;
+            if (kDown & (KEY_A | KEY_X)) want_next_unit = true;
         }
 
-        // Circle Pad analog panning (deadzone of 15) - always active on the
-        // map, even with a unit selected, so the camera can still be
-        // repositioned. Speed is in screen pixels, so it feels the same at
-        // every zoom level.
+        // Circle Pad scrolls the map at any time (speed in screen pixels).
         if (ui_mode == UI_MAP) {
             if (abs(pos.dx) > 15) cam_x += (int)(pos.dx / 24 / zoom);
             if (abs(pos.dy) > 15) cam_y -= (int)(pos.dy / 24 / zoom);
-            clamp_camera(zoom, &cam_x, &cam_y);
         }
 
         // Let the server take one step if any input above queued work (end
@@ -616,105 +701,62 @@ int main(int argc, char* argv[])
 
         if (save_toast_frames > 0) save_toast_frames--;
 
-        // A on the map acts on the cursor tile: in goto mode it sends the unit
-        // there; with a unit armed it releases it; otherwise it opens your city
-        // or takes command of your unit on that tile.
-        if (!busy && ui_mode == UI_MAP && ui_mode_frame_start == UI_MAP && (kDown & KEY_A)
-            && sel_x >= 0 && sel_y >= 0) {
-            if (ui_goto_armed && selected_unit_id >= 0) {
-                int ux = -1, uy = -1;
-                find_unit_tile_by_id(selected_unit_id, &ux, &uy);
-                if (ux != sel_x || uy != sel_y) {
-                    freeciv_request_unit_goto(selected_unit_id, sel_x, sel_y);
-                }
-                ui_goto_armed = false;
-            } else if (selected_unit_id >= 0) {
-                selected_unit_id = -1;
-            } else {
-                TileInfo t;
-                get_tile_info(sel_x, sel_y, &t);
-                if (t.city_owner >= 0 && is_pov_unit_owner(t.city_owner)) {
-                    ui_mode = UI_CITY;
-                    ui_city_id = t.city_id;
-                    ui_scroll = 0;
-                    ui_garrison_sel = 0;
-                    ui_worklist_queue_mode = false;
-                } else if (t.unit_id >= 0 && is_pov_unit_owner(t.unit_owner)) {
-                    selected_unit_id = t.unit_id;
-                }
-            }
-        }
-
-        // Bottom-screen touch on the map screen: the action bar (right edge),
-        // the button row, and the minimap (tap or drag to look anywhere).
-        if (!busy && ui_mode == UI_MAP && ui_mode_frame_start == UI_MAP && (kHeld & KEY_TOUCH)) {
-            touchPosition touch;
-            hidTouchRead(&touch);
-            int px = touch.px, py = touch.py;
-            last_touch_px = px;
-            last_touch_py = py;
-            bool tap = (kDown & KEY_TOUCH) != 0;
-
-            if (px >= ACTIONBAR_X) {
-                if (tap) {
-                    if (py >= ACTIONBAR_RES_Y && py < ACTIONBAR_RES_Y + ACTIONBAR_BTN_H) {
-                        ui_mode = UI_RESEARCH;
-                        ui_scroll = 0;
-                        ui_tech_tree_view = false;
-                    } else if (py >= ACTIONBAR_RATES_Y && py < ACTIONBAR_RATES_Y + ACTIONBAR_BTN_H) {
-                        ui_mode = UI_RATES;
-                        ui_scroll = 0;
-                    } else if (py >= ACTIONBAR_GOV_Y && py < ACTIONBAR_GOV_Y + ACTIONBAR_BTN_H) {
-                        ui_mode = UI_GOVERNMENT;
-                        ui_scroll = 0;
-                    } else if (py >= ACTIONBAR_DIPL_Y && py < ACTIONBAR_DIPL_Y + ACTIONBAR_BTN_H) {
-                        ui_mode = UI_DIPLOMACY;
-                        ui_scroll = 0;
-                        ui_dipl_stage = 1;
-                    } else if (py >= ACTIONBAR_SAVE_Y && py < ACTIONBAR_SAVE_Y + ACTIONBAR_BTN_H) {
-                        freeciv_request_save_game();
-                        save_toast_frames = SAVE_TOAST_FRAMES;
-                        save_in_flight = true;
-                    } else if (py >= ACTIONBAR_GOTO_Y && py < ACTIONBAR_GOTO_Y + ACTIONBAR_BTN_H) {
-                        if (selected_unit_id >= 0) ui_goto_armed = !ui_goto_armed;
-                    }
-                }
-            } else if (py >= BOTBTN_Y) {
-                if (tap) {
-                    if (px >= BOTBTN_END_X && px < BOTBTN_END_X + BOTBTN_END_W) {
-                        fc3ds_server_request_end_turn();
-                    } else if (px >= BOTBTN_ZOUT_X && px < BOTBTN_ZOUT_X + BOTBTN_ZOOM_W && zoom_idx > 0) {
-                        int ccx = cam_x + view_w_world(zoom) / 2, ccy = cam_y + view_h_world(zoom) / 2;
-                        zoom = k_zoom_levels[--zoom_idx];
-                        cam_x = ccx - view_w_world(zoom) / 2;
-                        cam_y = ccy - view_h_world(zoom) / 2;
-                    } else if (px >= BOTBTN_ZIN_X && px < BOTBTN_ZIN_X + BOTBTN_ZOOM_W && zoom_idx < ZOOM_COUNT - 1) {
-                        int ccx = cam_x + view_w_world(zoom) / 2, ccy = cam_y + view_h_world(zoom) / 2;
-                        zoom = k_zoom_levels[++zoom_idx];
-                        cam_x = ccx - view_w_world(zoom) / 2;
-                        cam_y = ccy - view_h_world(zoom) / 2;
-                    } else if (px >= BOTBTN_UNIT_X && px < BOTBTN_UNIT_X + BOTBTN_UNIT_W) {
-                        int cx, cy;
-                        if (find_pov_unit_tile(&cx, &cy)) {
-                            center_on_tile(cx, cy, zoom, &cam_x, &cam_y);
-                            sel_x = cx; sel_y = cy;
-                            prev_sel_x = cx; prev_sel_y = cy;
+        // ---------------- Map screen stylus ----------------
+        // Popups and HUD buttons react on touch-down; on the map itself a
+        // drag scrolls and a tap (released without dragging) acts on the tile.
+        if (ui_mode == UI_MAP && ui_mode_frame_start == UI_MAP) {
+            if (kDown & KEY_TOUCH) {
+                touchPosition touch;
+                hidTouchRead(&touch);
+                t_active = true;
+                t_dragging = false;
+                t_consumed = false;
+                t_x0 = touch.px; t_y0 = touch.py;
+                t_cam_x0 = cam_x; t_cam_y0 = cam_y;
+                int popup_kind_was = popup_kind;
+                if (popup_kind != POPUP_NONE) {
+                    int hit = popup_hit_test(&popup, t_x0, t_y0);
+                    if (hit >= 0) popup_choice = hit;          // handled below while !busy
+                    else if (hit == -1) popup_kind = POPUP_NONE; // tapped outside: close
+                    // Outside a unit's orders menu, the tap still counts on the
+                    // map, so a neighbouring square moves the unit straight away.
+                    t_consumed = !(hit == -1 && popup_kind_was == POPUP_UNIT);
+                } else {
+                    int h = hud_hit_test(t_x0, t_y0);
+                    if (h != HUD_NONE) {
+                        t_consumed = true;
+                        if (h == HUD_MENU) {
+                            open_game_menu(&popup);
+                            popup_kind = POPUP_MENU;
+                        } else if (h == HUD_NEXT) {
+                            want_next_unit = true;
+                        } else if (h == HUD_ZOUT) {
+                            set_zoom(zoom_idx - 1, &zoom_idx, &zoom, &cam_x, &cam_y);
+                        } else if (h == HUD_ZIN) {
+                            set_zoom(zoom_idx + 1, &zoom_idx, &zoom, &cam_x, &cam_y);
+                        } else if (h == HUD_END) {
+                            fc3ds_server_request_end_turn();
+                            pending_goto_x = pending_goto_y = -1;
                         }
                     }
                 }
-            } else {
-                int tx, ty;
-                if (minimap_hit_test(px, py, &tx, &ty)) {
-                    center_on_tile(tx, ty, zoom, &cam_x, &cam_y);
-                    clamp_camera(zoom, &cam_x, &cam_y);
-                    // Move the cursor too, unless it is glued to an armed unit.
-                    if (selected_unit_id < 0 || ui_goto_armed) {
-                        sel_x = tx; sel_y = ty;
-                        prev_sel_x = tx; prev_sel_y = ty;
-                    }
+            }
+            if (t_active && (kHeld & KEY_TOUCH) && !t_consumed) {
+                touchPosition touch;
+                hidTouchRead(&touch);
+                int dx = touch.px - t_x0, dy = touch.py - t_y0;
+                if (!t_dragging && abs(dx) + abs(dy) > 8) t_dragging = true;
+                if (t_dragging) {
+                    cam_x = t_cam_x0 - (int)(dx / zoom);
+                    cam_y = t_cam_y0 - (int)(dy / zoom);
                 }
             }
+            if (t_active && (kUp & KEY_TOUCH)) {
+                if (!t_consumed && !t_dragging) tap_pending = true; // handled below while !busy
+                t_active = false;
+            }
         }
+        if (ui_mode == UI_MAP) clamp_camera(zoom, &cam_x, &cam_y);
 
         // Touch inside a modal panel: a single tap (kDown, not kHeld) hits
         // a list row or a footer button. Rects here must match what
@@ -877,53 +919,249 @@ int main(int argc, char* argv[])
         // the invariant in fc3ds_server.h. While busy, cam/sel/sel_info
         // simply keep last frame's values.
         if (!busy) {
-            // Keep the selection glued to its unit as queued moves land on
-            // the server thread.
+            // The commanded unit: refresh its details; drop it if it's gone.
             if (selected_unit_id >= 0) {
-                int ux, uy;
-                if (find_unit_tile_by_id(selected_unit_id, &ux, &uy)) {
-                    if (!ui_goto_armed) {
-                        sel_x = ux;
-                        sel_y = uy;
-                    }
+                get_unit_info(selected_unit_id, &unit_info);
+                if (!unit_info.valid || !unit_info.mine) {
+                    selected_unit_id = -1;
+                    if (popup_kind == POPUP_UNIT || popup_kind == POPUP_CONFIRM_DISBAND) popup_kind = POPUP_NONE;
                 } else {
-                    selected_unit_id = -1; // unit no longer exists
-                    ui_goto_armed = false;
+                    sel_x = unit_info.x;
+                    sel_y = unit_info.y;
                 }
+            }
+            if (selected_unit_id < 0) {
+                unit_info.valid = false;
+                pending_goto_x = pending_goto_y = -1;
             }
             if (!get_unit_goto_tile(selected_unit_id, &ui_goto_x, &ui_goto_y)) {
                 ui_goto_x = ui_goto_y = -1;
             }
 
-            // Auto-center the camera on the pov player's own first unit, ONCE,
-            // as soon as it exists, and arm it for D-Pad movement. Units are
-            // placed a little after the map is generated (and different
-            // players' units can appear on different frames, pov's not
-            // necessarily first), so keep retrying every non-busy frame until
-            // find_pov_unit_tile() succeeds specifically for pov - not just
-            // any player's unit. No give-up fallback: landing on an AI's tile
-            // is useless (un-armed, and outside pov's fog of war so it renders
-            // as solid black) - worse than waiting the extra second or two for
-            // pov's own units, which every civ always eventually gets.
-            static bool camera_centered = false;
-            if (!camera_centered) {
-                int cx = -1, cy = -1;
-                if (find_pov_unit_tile(&cx, &cy)) {
-                    center_on_tile(cx, cy, zoom, &cam_x, &cam_y);
-                    sel_x = cx; sel_y = cy; // select it so the HUD shows your unit
-                    prev_sel_x = cx; prev_sel_y = cy;
-                    camera_centered = true;
+            // A new turn: clear "Wait" marks and pick the first unit to move.
+            int turn_now = get_game_turn();
+            if (turn_now > 0 && turn_now != last_turn) {
+                last_turn = turn_now;
+                nskip = 0;
+                turn_select_frames = 600;
+                popup_kind = POPUP_NONE;
+                pending_goto_x = pending_goto_y = -1;
+            }
+            if (turn_select_frames > 0) {
+                turn_select_frames--;
+                if (selected_unit_id < 0 && ui_mode == UI_MAP) {
+                    want_next_unit = true;
+                    advance_from = -1;
+                }
+            }
 
-                    // selected_unit_id must always track sel_x/sel_y's unit, or
-                    // the "D-Pad: move" hint (keyed off the selected tile) would
-                    // desync from whether D-Pad actually moves anything.
-                    TileInfo centered;
-                    get_tile_info(cx, cy, &centered);
-                    if (centered.unit_id >= 0 && is_pov_unit_owner(centered.unit_owner)) {
-                        selected_unit_id = centered.unit_id;
+            // A tapped popup item.
+            if (popup_choice >= 0 && popup_kind != POPUP_NONE && popup_choice < popup.n) {
+                int id = popup.id[popup_choice];
+                int kind = popup_kind;
+                popup_kind = POPUP_NONE;
+                if (kind == POPUP_UNIT && selected_unit_id >= 0) {
+                    if (id == PID_SKIP) {
+                        if (nskip < 64) skip_ids[nskip++] = selected_unit_id;
+                        advance_from = selected_unit_id;
+                        selected_unit_id = -1;
+                        want_next_unit = true;
+                    } else if (id == PID_DESELECT) {
+                        selected_unit_id = -1;
+                    } else if (id == PID_DISBAND_ASK) {
+                        memset(&popup, 0, sizeof(popup));
+                        snprintf(popup.title, sizeof(popup.title), "Disband %s?", unit_info.name);
+                        popup_add(&popup, PID_YES, "Disband", true);
+                        popup_add(&popup, PID_NO, "Keep", true);
+                        int ux, uy;
+                        tile_to_screen(unit_info.x, unit_info.y, cam_x, cam_y, zoom, &ux, &uy);
+                        popup_layout(&popup, ux + (int)(15 * zoom), uy + (int)(15 * zoom));
+                        popup_kind = POPUP_CONFIRM_DISBAND;
+                    } else {
+                        freeciv_request_unit_action(selected_unit_id, (UnitActionKind)id);
+                        if (id != UNIT_ACTION_WAKE) {
+                            advance_from = selected_unit_id;
+                            selected_unit_id = -1;
+                            want_next_unit = true;
+                        }
+                    }
+                } else if (kind == POPUP_CONFIRM_DISBAND && selected_unit_id >= 0) {
+                    if (id == PID_YES) {
+                        freeciv_request_unit_action(selected_unit_id, UNIT_ACTION_DISBAND);
+                        advance_from = selected_unit_id;
+                        selected_unit_id = -1;
+                        want_next_unit = true;
+                    }
+                } else if (kind == POPUP_STACK) {
+                    if (id == PID_OPEN_CITY) {
+                        TileInfo t;
+                        get_tile_info(sel_x, sel_y, &t);
+                        if (t.city_id >= 0) {
+                            ui_mode = UI_CITY;
+                            ui_city_id = t.city_id;
+                            ui_scroll = 0;
+                            ui_garrison_sel = 0;
+                            ui_worklist_queue_mode = false;
+                        }
+                    } else {
+                        selected_unit_id = id;
+                        get_unit_info(selected_unit_id, &unit_info);
+                        if (unit_info.valid && unit_info.idle) want_unit_popup = true;
+                    }
+                } else if (kind == POPUP_MENU) {
+                    switch (id) {
+                    case MENU_RESEARCH:   ui_mode = UI_RESEARCH; ui_scroll = 0; ui_tech_tree_view = false; break;
+                    case MENU_RATES:      ui_mode = UI_RATES; ui_scroll = 0; break;
+                    case MENU_GOVERNMENT: ui_mode = UI_GOVERNMENT; ui_scroll = 0; break;
+                    case MENU_DIPLOMACY:  ui_mode = UI_DIPLOMACY; ui_scroll = 0; ui_dipl_stage = 1; break;
+                    case MENU_SAVE:
+                        freeciv_request_save_game();
+                        save_toast_frames = SAVE_TOAST_FRAMES;
+                        save_in_flight = true;
+                        break;
+                    default: break;
                     }
                 }
             }
+            popup_choice = -1;
+
+            // A tap on the map.
+            if (tap_pending && ui_mode == UI_MAP && get_game_turn() > 0) {
+                int tx, ty;
+                if (screen_to_tile(t_x0, t_y0, cam_x, cam_y, zoom, &tx, &ty)) {
+                    TileInfo t;
+                    get_tile_info(tx, ty, &t);
+                    UnitBrief here[16];
+                    int hn = get_tile_units(tx, ty, here, 16);
+                    int mine_n = 0;
+                    for (int i = 0; i < hn; i++) if (is_pov_unit_owner(here[i].owner)) mine_n++;
+                    bool own_city = t.city_owner >= 0 && is_pov_unit_owner(t.city_owner);
+                    bool select_here = true;
+
+                    if (selected_unit_id >= 0 && unit_info.valid) {
+                        MoveDir dir;
+                        select_here = false;
+                        if (tx == unit_info.x && ty == unit_info.y) {
+                            if (mine_n > 1 || own_city) select_here = true; // pick from the stack
+                            else want_unit_popup = true;
+                        } else if (adjacent_dir(unit_info.x, unit_info.y, tx, ty, &dir)) {
+                            freeciv_request_unit_move(selected_unit_id, dir);
+                            pending_goto_x = pending_goto_y = -1;
+                        } else if (mine_n > 0 && !own_city) {
+                            select_here = true;          // switch to that unit
+                        } else if (tx == pending_goto_x && ty == pending_goto_y) {
+                            freeciv_request_unit_goto(selected_unit_id, tx, ty);
+                            pending_goto_x = pending_goto_y = -1;
+                        } else {
+                            pending_goto_x = tx;         // first tap marks the route
+                            pending_goto_y = ty;
+                        }
+                    }
+                    if (select_here) {
+                        sel_x = tx; sel_y = ty;
+                        prev_sel_x = tx; prev_sel_y = ty;
+                        pending_goto_x = pending_goto_y = -1;
+                        int sx, sy;
+                        tile_to_screen(tx, ty, cam_x, cam_y, zoom, &sx, &sy);
+                        int ax = sx + (int)(15 * zoom), ay = sy + (int)(15 * zoom);
+                        if (mine_n > 1 || (own_city && mine_n > 0)) {
+                            memset(&popup, 0, sizeof(popup));
+                            snprintf(popup.title, sizeof(popup.title), "%s", own_city ? t.city_name : "Units here");
+                            if (own_city) popup_add(&popup, PID_OPEN_CITY, "Open City", true);
+                            for (int i = 0; i < hn && popup.n < POPUP_MAX; i++) {
+                                if (!is_pov_unit_owner(here[i].owner)) continue;
+                                char lbl[24];
+                                snprintf(lbl, sizeof(lbl), "%s%s", here[i].name, here[i].can_move ? "" : " *");
+                                popup_add(&popup, here[i].id, lbl, true);
+                            }
+                            popup_layout(&popup, ax, ay);
+                            popup_kind = POPUP_STACK;
+                            selected_unit_id = -1;
+                        } else if (own_city) {
+                            ui_mode = UI_CITY;
+                            ui_city_id = t.city_id;
+                            ui_scroll = 0;
+                            ui_garrison_sel = 0;
+                            ui_worklist_queue_mode = false;
+                            selected_unit_id = -1;
+                        } else if (mine_n == 1) {
+                            // Your unit: command it and show its orders.
+                            selected_unit_id = here[0].id;
+                            want_unit_popup = true;
+                        } else {
+                            selected_unit_id = -1;       // just looking
+                        }
+                    }
+                }
+            }
+            tap_pending = false;
+
+            // The commanded unit has used up its moves (or is following a
+            // route): after a short pause, move on to the next unit.
+            if (selected_unit_id >= 0 && unit_info.valid && popup_kind == POPUP_NONE
+                && (unit_info.moves_left == 0 || unit_info.has_orders)) {
+                if (++done_frames >= 25) {
+                    advance_from = selected_unit_id;
+                    selected_unit_id = -1;
+                    want_next_unit = true;
+                }
+            } else {
+                done_frames = 0;
+            }
+
+            // Next unit needing orders.
+            if (want_next_unit && ui_mode == UI_MAP) {
+                int skip_tmp[65];
+                int ns = 0;
+                for (int i = 0; i < nskip; i++) skip_tmp[ns++] = skip_ids[i];
+                if (advance_from >= 0) skip_tmp[ns++] = advance_from;
+                int nid, nx, ny;
+                int after = advance_from >= 0 ? advance_from : selected_unit_id;
+                if (find_next_idle_unit(after, skip_tmp, ns, &nid, &nx, &ny)) {
+                    selected_unit_id = nid;
+                    get_unit_info(nid, &unit_info);
+                    sel_x = nx; sel_y = ny;
+                    int spx, spy;
+                    tile_to_screen(nx, ny, cam_x, cam_y, zoom, &spx, &spy);
+                    if (spx < 0 || spy < 0 || spx > SCREEN_WIDTH_BOT - 20 || spy > HUD_Y - 20)
+                        center_on_tile(nx, ny, zoom, &cam_x, &cam_y); // far away: jump there
+                    else
+                        ensure_tile_visible(nx, ny, zoom, &cam_x, &cam_y);
+                    prev_sel_x = nx; prev_sel_y = ny;
+                    pending_goto_x = pending_goto_y = -1;
+                    popup_kind = POPUP_NONE;
+                    turn_select_frames = 0;
+                    all_moved = false;
+                } else if (turn_select_frames == 0) {
+                    all_moved = true;
+                }
+                advance_from = -1;
+            }
+            want_next_unit = false;
+
+            // The commanded unit's orders menu.
+            if (want_unit_popup && selected_unit_id >= 0 && ui_mode == UI_MAP) {
+                get_unit_info(selected_unit_id, &unit_info);
+                if (unit_info.valid) {
+                    build_unit_popup(&popup, &unit_info);
+                    int ux, uy;
+                    tile_to_screen(unit_info.x, unit_info.y, cam_x, cam_y, zoom, &ux, &uy);
+                    popup_layout(&popup, ux + (int)(15 * zoom), uy + (int)(15 * zoom));
+                    popup_kind = POPUP_UNIT;
+                }
+            }
+            want_unit_popup = false;
+
+            // Are any units still waiting for orders? (End Turn lights up.)
+            static int moved_refresh = 0;
+            if (ui_mode == UI_MAP && get_game_turn() > 0 && ++moved_refresh >= 20) {
+                int a1, a2, a3;
+                moved_refresh = 0;
+                all_moved = !find_next_idle_unit(-1, skip_ids, nskip, &a1, &a2, &a3);
+            }
+
+            // The units on the selected tile, for the top screen.
+            stack_n = (sel_x >= 0) ? get_tile_units(sel_x, sel_y, stack, 16) : 0;
 
             // One-shot POV diagnostic: log who the client thinks "you" are
             // and whether the camera found your units, the first frame the
@@ -942,8 +1180,8 @@ int main(int argc, char* argv[])
                 pov_logged = true;
             }
 
-            // The camera follows the cursor (and an armed unit) when it moves.
-            if (sel_x >= 0 && (sel_x != prev_sel_x || sel_y != prev_sel_y)) {
+            // The camera follows a commanded unit as it moves.
+            if (selected_unit_id >= 0 && sel_x >= 0 && (sel_x != prev_sel_x || sel_y != prev_sel_y)) {
                 ensure_tile_visible(sel_x, sel_y, zoom, &cam_x, &cam_y);
                 prev_sel_x = sel_x;
                 prev_sel_y = sel_y;
@@ -1109,9 +1347,37 @@ int main(int argc, char* argv[])
                 break;
             case UI_MAP:
             default:
-                render_top_map(have_sel ? &sel_info : NULL, sel_x, sel_y, selected_unit_id,
-                               ui_goto_armed, cam_x, cam_y, zoom, ui_goto_x, ui_goto_y,
-                               have_map_civ ? &map_civ_info : NULL);
+{
+                TopInfo ti;
+                memset(&ti, 0, sizeof(ti));
+                ti.civ = have_map_civ ? &map_civ_info : NULL;
+                ti.tile = have_sel ? &sel_info : NULL;
+                ti.tile_x = sel_x; ti.tile_y = sel_y;
+                ti.unit = (selected_unit_id >= 0 && unit_info.valid) ? &unit_info : NULL;
+                ti.stack = stack; ti.stack_n = stack_n;
+                ti.cam_x = cam_x; ti.cam_y = cam_y; ti.zoom = zoom;
+                if (popup_kind == POPUP_UNIT) {
+                    ti.hint = "Tap an order, or tap outside the menu to close it.";
+                } else if (popup_kind == POPUP_STACK) {
+                    ti.hint = "Tap a unit to command it.";
+                } else if (popup_kind != POPUP_NONE) {
+                    ti.hint = "Tap a choice, or tap outside the menu to close it.";
+                } else if (pending_goto_x >= 0) {
+                    ti.hint = "Tap the marked tile again to send the unit there.  B: cancel";
+                    ti.hint_color = C2D_Color32(0xFF, 0xC0, 0x40, 0xFF);
+                } else if (selected_unit_id >= 0 && unit_info.valid) {
+                    ti.hint = unit_info.moves_left > 0
+                        ? "Tap a square next to it to move, farther for a route. Tap it: orders."
+                        : "No moves left. Tap it for orders, or Next.";
+                    ti.hint_color = C2D_Color32(0xFF, 0xF0, 0x80, 0xFF);
+                } else if (all_moved) {
+                    ti.hint = "Every unit has its orders - tap End Turn (or START).";
+                    ti.hint_color = C2D_Color32(0x90, 0xE8, 0x90, 0xFF);
+                } else {
+                    ti.hint = "Tap a unit to command it. Drag to scroll. Next / A: next unit.";
+                }
+                render_top_info(&ti);
+            }
                 break;
             }
             if (show_busy_indicator) render_busy_indicator(SCREEN_WIDTH_TOP);
@@ -1144,9 +1410,16 @@ int main(int argc, char* argv[])
                 break;
             case UI_MAP:
             default:
-                render_bottom_map(have_sel ? &sel_info : NULL, sel_x, sel_y, selected_unit_id,
-                                  cam_x, cam_y, zoom, zoom_idx, ZOOM_COUNT);
-                render_action_bar();
+{
+                int gx = pending_goto_x >= 0 ? pending_goto_x : ui_goto_x;
+                int gy = pending_goto_x >= 0 ? pending_goto_y : ui_goto_y;
+                bool armed = selected_unit_id >= 0 && unit_info.valid;
+                render_bottom_map(cam_x, cam_y, zoom, sel_x, sel_y,
+                                  armed ? unit_info.x : -1, armed ? unit_info.y : -1,
+                                  armed && unit_info.moves_left > 0, gx, gy,
+                                  popup_kind != POPUP_NONE ? &popup : NULL,
+                                  zoom_idx > 0, zoom_idx < ZOOM_COUNT - 1, all_moved);
+            }
                 if (save_toast_frames > 0) render_toast("Saved");
                 break;
             }

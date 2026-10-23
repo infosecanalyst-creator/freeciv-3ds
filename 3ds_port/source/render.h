@@ -12,44 +12,74 @@ void render_deinit(void);
 
 // ---- Map screens (UI_MAP) ----
 //
-// The world map is drawn on the 400x240 top screen at one of several zoom
-// levels; the bottom screen holds a touch minimap, the selected tile's
-// readout, a button row and the action bar.
+// DS-style layout: the bottom screen is the play surface (stylus map, unit
+// popup menus, HUD buttons); the top screen only displays information -
+// status, minimap, research and whatever the stylus last selected.
 //
 // Draws the map with world-pixel camera (cam_x, cam_y) at `scale` (1.0 = the
 // tileset's native 30px tiles) into a view_w x view_h screen area.
 void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
                      int sel_x, int sel_y, bool sel_armed, int goto_x, int goto_y);
 
-// Top screen: the map plus a status bar (turn/gold/research) and a controls
-// line. civ may be NULL.
-void render_top_map(const TileInfo *sel, int sel_x, int sel_y, int armed_unit_id,
-                    bool goto_armed, int cam_x, int cam_y, float scale,
-                    int goto_x, int goto_y, const CivInfo *civ);
+// A popup menu on the bottom screen (unit orders, stack picker, game menu).
+#define POPUP_MAX     16
+#define POPUP_ITEM_W  100
+#define POPUP_ITEM_H  24
+#define POPUP_TITLE_H 18
+typedef struct {
+    int  n;
+    int  id[POPUP_MAX];           // caller's meaning (action kind, unit id, ...)
+    char label[POPUP_MAX][24];
+    bool enabled[POPUP_MAX];
+    char title[40];
+    int  x, y, w, h, cols;        // set by popup_layout()
+} PopupMenu;
+// Places the popup beside the anchor point, kept on screen above the HUD.
+void popup_layout(PopupMenu *m, int anchor_x, int anchor_y);
+// Index of the enabled item under (px, py); -2 inside the popup but not on an
+// item; -1 outside.
+int popup_hit_test(const PopupMenu *m, int px, int py);
 
-// Bottom screen: minimap (tap/drag to look anywhere), tile readout, buttons.
-void render_bottom_map(const TileInfo *sel, int sel_x, int sel_y, int armed_unit_id,
-                       int cam_x, int cam_y, float scale, int zoom_idx, int zoom_count);
+// Bottom-screen HUD button row.
+#define HUD_Y       212
+#define HUD_MENU_X  2
+#define HUD_MENU_W  58
+#define HUD_NEXT_X  63
+#define HUD_NEXT_W  58
+#define HUD_ZOUT_X  124
+#define HUD_ZIN_X   164
+#define HUD_ZOOM_W  37
+#define HUD_END_X   204
+#define HUD_END_W   114
+enum { HUD_NONE, HUD_BAR, HUD_MENU, HUD_NEXT, HUD_ZOUT, HUD_ZIN, HUD_END };
+int hud_hit_test(int px, int py);
 
-// Maps a bottom-screen touch on the minimap to a tile; false if (px, py) is
-// outside the minimap or it isn't ready yet.
-bool minimap_hit_test(int px, int py, int *tx, int *ty);
+// Bottom screen. unit_x/unit_y is the commanded unit's tile (-1 if none);
+// popup may be NULL. all_moved highlights End Turn.
+void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,
+                       int unit_x, int unit_y, bool unit_can_move, int goto_x, int goto_y,
+                       const PopupMenu *popup, bool can_zoom_out, bool can_zoom_in, bool all_moved);
 
-// Bottom-screen layout, shared by drawing and touch hit-testing. The action
-// bar (ACTIONBAR_*, below) keeps the right-hand 32px column.
-#define MINIMAP_X      2
-#define MINIMAP_Y      2
-#define MINIMAP_W      284
-#define MINIMAP_H      150
-#define BOTBTN_Y       206
-#define BOTBTN_H       30
-#define BOTBTN_END_X   2
-#define BOTBTN_END_W   98
-#define BOTBTN_ZOUT_X  104
-#define BOTBTN_ZIN_X   156
-#define BOTBTN_ZOOM_W  48
-#define BOTBTN_UNIT_X  208
-#define BOTBTN_UNIT_W  78
+// Top screen contents.
+typedef struct {
+    const CivInfo   *civ;         // may be NULL
+    const TileInfo  *tile;        // selected tile, may be NULL
+    int              tile_x, tile_y;
+    const UnitInfo  *unit;        // commanded/inspected unit, may be NULL
+    const UnitBrief *stack;       // units on the selected tile
+    int              stack_n;
+    const char      *hint;        // controls line at the bottom
+    u32              hint_color;  // 0 = default
+    int              cam_x, cam_y;
+    float            zoom;
+} TopInfo;
+void render_top_info(const TopInfo *ti);
+
+// Top-screen minimap rect.
+#define MINIMAP_X      6
+#define MINIMAP_Y      26
+#define MINIMAP_W      190
+#define MINIMAP_H      126
 
 // Which headline render_processing_overlay() shows - the server-thread step
 // that's making the app "busy" this frame. PROC_SAVING exists because an

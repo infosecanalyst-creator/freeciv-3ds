@@ -33,6 +33,7 @@
 #include "diptreaty.h"
 #include "savemain.h"
 #include "pf_tools.h"
+#include "movement.h"
 #include <string.h>
 #include <stdlib.h>
 #include <dirent.h>
@@ -554,6 +555,132 @@ static void do_context_action(struct player *pov, struct unit *punit)
     }
 }
 
+static const enum extra_cause k_work_causes[3] = { EC_ROAD, EC_IRRIGATION, EC_MINE };
+static const enum unit_activity k_work_acts[3] = { ACTIVITY_GEN_ROAD, ACTIVITY_IRRIGATE, ACTIVITY_MINE };
+
+// Road/irrigation/mine target the unit could start on its tile now, or NULL.
+static struct extra_type *work_target(struct player *pov, struct unit *punit, int i)
+{
+    struct extra_type *t = next_extra_for_tile(unit_tile(punit), k_work_causes[i], pov, punit);
+    if (t && can_unit_do_activity_targeted(&(wld.map), punit, k_work_acts[i],
+                                           activity_default_action(k_work_acts[i]), t)) {
+        return t;
+    }
+    return NULL;
+}
+
+static unsigned unit_action_mask(struct player *pov, struct unit *punit)
+{
+    unsigned m = (1u << UNIT_ACTION_DISBAND);
+    const struct civ_map *nmap = &(wld.map);
+    struct tile *ptile = unit_tile(punit);
+    if (punit->activity != ACTIVITY_FORTIFIED && punit->activity != ACTIVITY_FORTIFYING
+        && can_unit_do_activity(nmap, punit, ACTIVITY_FORTIFYING, activity_default_action(ACTIVITY_FORTIFYING))) {
+        m |= 1u << UNIT_ACTION_FORTIFY;
+    }
+    if (punit->activity != ACTIVITY_SENTRY
+        && can_unit_do_activity(nmap, punit, ACTIVITY_SENTRY, activity_default_action(ACTIVITY_SENTRY))) {
+        m |= 1u << UNIT_ACTION_SENTRY;
+    }
+    if (punit->activity != ACTIVITY_EXPLORE
+        && can_unit_do_activity(nmap, punit, ACTIVITY_EXPLORE, activity_default_action(ACTIVITY_EXPLORE))) {
+        m |= 1u << UNIT_ACTION_EXPLORE;
+    }
+    if (work_target(pov, punit, 0)) m |= 1u << UNIT_ACTION_ROAD;
+    if (work_target(pov, punit, 1)) m |= 1u << UNIT_ACTION_IRRIGATE;
+    if (work_target(pov, punit, 2)) m |= 1u << UNIT_ACTION_MINE;
+    if (is_action_enabled_unit_on_tile(nmap, ACTION_FOUND_CITY, punit, ptile, NULL)) {
+        m |= 1u << UNIT_ACTION_FOUND_CITY;
+    }
+    struct city *pcity = tile_city(ptile);
+    if (pcity && is_action_enabled_unit_on_city(nmap, ACTION_JOIN_CITY, punit, pcity)) {
+        m |= 1u << UNIT_ACTION_JOIN_CITY;
+    }
+    if (punit->activity != ACTIVITY_IDLE || unit_has_orders(punit)) {
+        m |= 1u << UNIT_ACTION_WAKE;
+    }
+    return m;
+}
+
+void get_unit_info(int unit_id, UnitInfo *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->id = unit_id;
+    if (map_is_empty() || unit_id < 0) return;
+    struct unit *punit = game_unit_by_number(unit_id);
+    struct player *pov = get_pov_player();
+    if (!punit || !unit_tile(punit)) return;
+    const struct unit_type *ut = unit_type_get(punit);
+    out->valid = true;
+    out->owner = player_index(unit_owner(punit));
+    out->mine = pov && unit_owner(punit) == pov;
+    fc_strlcpy(out->name, utype_name_translation(ut), sizeof(out->name));
+    fc_strlcpy(out->rule_name, utype_rule_name(ut), sizeof(out->rule_name));
+    out->hp = punit->hp;
+    out->hp_max = ut->hp;
+    out->attack = ut->attack_strength;
+    out->defense = ut->defense_strength;
+    out->firepower = ut->firepower;
+    out->veteran = punit->veteran;
+    out->moves_left = punit->moves_left;
+    fc_strlcpy(out->moves, move_points_text(punit->moves_left, TRUE), sizeof(out->moves));
+    out->has_orders = unit_has_orders(punit);
+    fc_strlcpy(out->activity, out->has_orders ? "Under orders" : get_activity_text(punit->activity),
+               sizeof(out->activity));
+    out->idle = punit->activity == ACTIVITY_IDLE && !out->has_orders;
+    struct city *home = game_city_by_number(punit->homecity);
+    if (home) fc_strlcpy(out->home, city_name_get(home), sizeof(out->home));
+    index_to_native_pos(&out->x, &out->y, tile_index(unit_tile(punit)));
+    if (out->mine) out->actions = unit_action_mask(pov, punit);
+}
+
+int get_tile_units(int x, int y, UnitBrief *out, int max)
+{
+    if (map_is_empty() || max <= 0) return 0;
+    struct tile *ptile = port_native_tile(x, y);
+    struct player *pov = get_pov_player();
+    if (!ptile || !ptile->units) return 0;
+    int n = 0;
+    for (int pass = 0; pass < 2; pass++) {
+        unit_list_iterate(ptile->units, punit) {
+            bool mine = pov && unit_owner(punit) == pov;
+            if ((pass == 0) != mine || n >= max) continue;
+            UnitBrief *b = &out[n++];
+            b->id = punit->id;
+            b->owner = player_index(unit_owner(punit));
+            fc_strlcpy(b->name, unit_name_translation(punit), sizeof(b->name));
+            fc_strlcpy(b->rule_name, unit_rule_name(punit), sizeof(b->rule_name));
+            b->can_move = punit->moves_left > 0 && punit->activity == ACTIVITY_IDLE && !unit_has_orders(punit);
+        } unit_list_iterate_end;
+    }
+    return n;
+}
+
+bool find_next_idle_unit(int after_id, const int *skip, int nskip, int *id, int *x, int *y)
+{
+    if (map_is_empty()) return false;
+    struct player *pov = get_pov_player();
+    if (!pov) return false;
+    int n = unit_list_size(pov->units);
+    if (n == 0) return false;
+    int start = 0;
+    for (int i = 0; i < n; i++) {
+        if (unit_list_get(pov->units, i)->id == after_id) { start = i + 1; break; }
+    }
+    for (int k = 0; k < n; k++) {
+        struct unit *punit = unit_list_get(pov->units, (start + k) % n);
+        if (!punit || punit->moves_left <= 0 || punit->activity != ACTIVITY_IDLE
+            || unit_has_orders(punit) || !unit_tile(punit)) continue;
+        bool skipped = false;
+        for (int j = 0; j < nskip; j++) if (skip[j] == punit->id) { skipped = true; break; }
+        if (skipped) continue;
+        *id = punit->id;
+        index_to_native_pos(x, y, tile_index(unit_tile(punit)));
+        return true;
+    }
+    return false;
+}
+
 void freeciv3ds_process_pending_actions(void)
 {
     if (map_is_empty()) {
@@ -660,6 +787,46 @@ void freeciv3ds_process_pending_actions(void)
                     // Direct wipe, not the action-enabler-gated Disband Unit -
                     // always available, no shield recovery. Simple MVP semantics.
                     wipe_unit(punit, ULR_DISBANDED, NULL);
+                    break;
+                case UNIT_ACTION_FORTIFY:
+                    unit_activity_handling(punit, ACTIVITY_FORTIFYING, activity_default_action(ACTIVITY_FORTIFYING));
+                    break;
+                case UNIT_ACTION_SENTRY:
+                    unit_activity_handling(punit, ACTIVITY_SENTRY, activity_default_action(ACTIVITY_SENTRY));
+                    break;
+                case UNIT_ACTION_EXPLORE:
+                    free_unit_orders(punit);
+                    unit_activity_handling(punit, ACTIVITY_EXPLORE, activity_default_action(ACTIVITY_EXPLORE));
+                    break;
+                case UNIT_ACTION_ROAD:
+                case UNIT_ACTION_IRRIGATE:
+                case UNIT_ACTION_MINE: {
+                    int i = cmd.b - UNIT_ACTION_ROAD;
+                    struct extra_type *t = work_target(pov, punit, i);
+                    if (t) {
+                        unit_activity_handling_targeted(punit, k_work_acts[i], &t,
+                                                        activity_default_action(k_work_acts[i]));
+                    }
+                    break;
+                }
+                case UNIT_ACTION_FOUND_CITY:
+                    if (is_action_enabled_unit_on_tile(&(wld.map), ACTION_FOUND_CITY, punit, unit_tile(punit), NULL)) {
+                        unit_do_action(pov, punit->id, tile_index(unit_tile(punit)), 0,
+                                       city_name_suggestion(pov, unit_tile(punit)), ACTION_FOUND_CITY);
+                    }
+                    break;
+                case UNIT_ACTION_JOIN_CITY: {
+                    struct city *pcity = tile_city(unit_tile(punit));
+                    if (pcity && is_action_enabled_unit_on_city(&(wld.map), ACTION_JOIN_CITY, punit, pcity)) {
+                        unit_do_action(pov, punit->id, pcity->id, 0, "", ACTION_JOIN_CITY);
+                    }
+                    break;
+                }
+                case UNIT_ACTION_WAKE:
+                    free_unit_orders(punit);
+                    unit_activity_handling(punit, ACTIVITY_IDLE, ACTION_NONE);
+                    break;
+                default:
                     break;
                 }
             }

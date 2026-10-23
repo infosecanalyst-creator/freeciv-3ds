@@ -40,8 +40,52 @@ typedef enum {
     UNIT_ACTION_CONTEXT,
     // Immediately destroys the unit (no shield recovery - a direct wipe,
     // not the ruleset action-enabler-gated Disband Unit).
-    UNIT_ACTION_DISBAND
+    UNIT_ACTION_DISBAND,
+    // Single-purpose actions offered by the touch unit menu (each is a no-op
+    // if the unit can't do it there - get_unit_info() reports which apply).
+    UNIT_ACTION_FORTIFY,
+    UNIT_ACTION_SENTRY,
+    UNIT_ACTION_ROAD,
+    UNIT_ACTION_IRRIGATE,
+    UNIT_ACTION_MINE,
+    UNIT_ACTION_EXPLORE,
+    UNIT_ACTION_FOUND_CITY,
+    UNIT_ACTION_JOIN_CITY,
+    UNIT_ACTION_WAKE,        // cancel orders / current activity
+    UNIT_ACTION_COUNT
 } UnitActionKind;
+
+// Everything the top screen shows about one unit, plus which
+// UnitActionKind values apply right now (bit (1 << kind) in `actions`).
+typedef struct {
+    bool valid;
+    int  id;
+    int  owner;              // player index
+    bool mine;               // owned by the pov player
+    char name[48];           // translated unit type name
+    char rule_name[48];      // ruleset name (sprite lookup)
+    int  hp, hp_max;
+    int  attack, defense, firepower;
+    int  veteran;            // 0 = green
+    char moves[24];          // "2", "1 1/3", ...
+    int  moves_left;         // move fragments, 0 = done for this turn
+    char activity[32];       // "Idle", "Fortified", "Mine", ...
+    bool idle;               // ACTIVITY_IDLE and no orders
+    bool has_orders;
+    char home[48];           // home city name, "" if none
+    int  x, y;               // native tile
+    unsigned actions;        // bitmask of UnitActionKind
+} UnitInfo;
+
+// One unit in a tile's stack (for picking which one to command).
+typedef struct {
+    int  id;
+    int  owner;
+    char name[48];           // translated
+    char rule_name[48];
+    bool can_move;           // moves left and idle
+} UnitBrief;
+
 
 // Snapshot of what occupies a single map tile, read from the in-process
 // Freeciv server state. Owner fields are player indices, or -1 if absent.
@@ -364,6 +408,13 @@ void freeciv_request_diplomacy_accept(int counterpart);
 // false if the pov player has no units yet (e.g. not placed this frame) or
 // no pov player exists.
 bool find_pov_unit_tile(int *x, int *y);
+// Fills *out for unit_id (out->valid=false if it no longer exists).
+void get_unit_info(int unit_id, UnitInfo *out);
+// The units on tile (x, y), pov's first; returns how many were written.
+int get_tile_units(int x, int y, UnitBrief *out, int max);
+// The next pov unit after after_id (in unit-list order, wrapping) that is
+// idle with moves left and not in skip[0..nskip); false if none.
+bool find_next_idle_unit(int after_id, const int *skip, int nskip, int *id, int *x, int *y);
 
 // Find the current tile of the unit with the given server-side id. Returns
 // false (leaving *x/*y untouched) if the unit no longer exists.
