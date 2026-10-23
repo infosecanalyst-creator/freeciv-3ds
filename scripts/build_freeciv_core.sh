@@ -28,8 +28,8 @@ cd freeciv
 mkdir -p build-native
 (
 	cd build-native
-	../configure --enable-client=no --enable-server --disable-nls --disable-icu \
-		--enable-fcdb=no --enable-fcmp=no --without-readline >/dev/null
+	../configure --enable-ack-legacy --enable-client=no --enable-server --disable-nls --disable-icu \
+		--enable-fcdb=no --enable-fcmp=no --without-readline
 	make -s -C dependencies/lua-5.5
 	make -s -C dependencies/tolua-5.2
 )
