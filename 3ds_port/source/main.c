@@ -953,14 +953,16 @@ int main(int argc, char* argv[])
                     if (idx >= 0 && ui_tech_tree[idx].state == 1) {
                         freeciv_request_set_research(ui_tech_tree[idx].tech);
                     } else if (idx < 0 && py >= PANEL_FOOTER_Y) {
-                        ui_mode = UI_MAP;
+                        if (px < 160) { ui_tech_tree_view = false; ui_scroll = 0; } // "List view"
+                        else ui_mode = UI_MAP;
                     }
                 } else {
                     int row = hit_test_scroll_list(py, ui_scroll, ui_tech_count);
                     if (row >= 0) {
                         freeciv_request_set_research(ui_tech_opts[row].tech);
                     } else if (py >= PANEL_FOOTER_Y) {
-                        ui_mode = UI_MAP;
+                        if (px < 160) { ui_tech_tree_view = true; ui_scroll = 0; } // "Tree view"
+                        else ui_mode = UI_MAP;
                     }
                 }
             } else if (ui_mode == UI_GOVERNMENT) {
