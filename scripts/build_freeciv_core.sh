@@ -48,7 +48,9 @@ export PKG_CONFIG_PATH="$DEVKITPRO/portlibs/3ds/lib/pkgconfig" PKG_CONFIG_LIBDIR
 mkdir -p build-3ds
 (
 	cd build-3ds
-	../configure --host=arm-none-eabi --enable-client=no --enable-server \
+	# gcc 15 defaults to C23, where autoconf's stdbool probe wrongly fails and
+	# Freeciv would #define bool as unsigned int, clashing with the client.
+	ac_cv_header_stdbool_h=yes ../configure --host=arm-none-eabi --enable-client=no --enable-server \
 		--disable-shared --enable-static --disable-nls --disable-icu \
 		--enable-sys-tolua-cmd="$TOLUA" --enable-ack-legacy --disable-ipv6 \
 		--without-iconv --enable-fcdb=no --enable-fcmp=no --without-readline
