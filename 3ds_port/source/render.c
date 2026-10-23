@@ -236,6 +236,32 @@ void render_init(void)
     C2D_TextOptimize(&s_txt_y_flat_list);
 }
 
+// ---- Stereo 3D (top screen) ----
+// eye: -1 left, +1 right, 0 mono. A layer at depth d > 0 floats in front of
+// the screen by shifting the two eyes' images apart.
+static int s_eye;
+static float s_stereo;
+
+void render_set_stereo(int eye, float amount)
+{
+    s_eye = eye;
+    s_stereo = amount;
+    C2D_ViewReset();
+}
+
+static void layer(float depth)
+{
+    C2D_ViewReset();
+    if (s_eye) C2D_ViewTranslate(-s_eye * s_stereo * depth, 0);
+}
+
+// Black or white, whichever reads better on `bg` (ABGR).
+static u32 contrast_text(u32 bg)
+{
+    int r = bg & 0xFF, g = (bg >> 8) & 0xFF, b = (bg >> 16) & 0xFF;
+    return (r * 299 + g * 587 + b * 114) / 1000 > 140 ? C2D_Color32(0x10, 0x10, 0x10, 0xFF) : 0xFFFFFFFF;
+}
+
 // Distinct per-player colors (index 0..). -1 -> neutral gray.
 static u32 owner_color(int idx)
 {
@@ -684,7 +710,8 @@ void render_top_info(const TopInfo *ti)
         draw_text(5, 1, 0.52f, white, "Generating world...");
     }
 
-    // Left: minimap and research.
+    // Left: minimap and research (slightly in front).
+    layer(2.5f);
     draw_minimap(ti->cam_x, ti->cam_y, 320.0f / (TILE_PX * ti->zoom), (240.0f - (240 - HUD_Y)) / (TILE_PX * ti->zoom),
                  ti->tile_x, ti->tile_y);
     if (ti->civ && ti->civ->research_name[0]) {
@@ -704,7 +731,8 @@ void render_top_info(const TopInfo *ti)
         draw_text(MINIMAP_X, y + 39, 0.42f, soft, line);
     }
 
-    // Right: what's selected.
+    // Right: what's selected (in front; the portrait most of all).
+    layer(4.0f);
     const float CX = 206, CW = 190;
     C2D_DrawRectSolid(CX - 4, 24, 0.0f, CW + 6, 196, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
     if (ti->unit && ti->unit->valid) {
@@ -712,8 +740,10 @@ void render_top_info(const TopInfo *ti)
         C2D_DrawRectSolid(CX - 4, 24, 0.01f, 4, 196, owner_color(u->owner));
         // Unit portrait, double size.
         C2D_DrawRectSolid(CX + 2, 30, 0.01f, 64, 64, C2D_Color32(0x1C, 0x28, 0x3A, 0xFF));
+        layer(7.0f);
         C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, get_unit_sprite(u->rule_name)),
                         CX + 4, 32, 0.02f, NULL, 2.0f, 2.0f);
+        layer(4.0f);
         draw_text(CX + 72, 30, 0.6f, white, u->name);
         if (u->veteran > 0) {
             snprintf(line, sizeof(line), "Veteran %d", u->veteran);
@@ -796,7 +826,8 @@ void render_top_info(const TopInfo *ti)
         draw_text(CX + 2, 66, 0.45f, label, "Drag to scroll the map.");
     }
 
-    // Hint line.
+    // Hint line (on the screen plane).
+    layer(0.0f);
     C2D_DrawRectSolid(0, 240 - 17, 0.0f, 400, 17, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
     if (ti->hint) draw_text(5, 240 - 16, 0.45f, ti->hint_color ? ti->hint_color : soft, ti->hint);
 }
@@ -1061,7 +1092,7 @@ static void draw_city_banners(void)
         C2D_DrawRectSolid(x - 1, y - 1, 0.80f, w + 2, h + 2, oc);
         C2D_DrawRectSolid(x, y, 0.801f, w, h, C2D_Color32(0x0C, 0x12, 0x1E, 0xE8));
         C2D_DrawRectSolid(x, y, 0.802f, sw + 6, h, oc);
-        font_draw(sz, x + 3, y - 1.5f, 0.803f, 0.42f, C2D_Color32(0x10, 0x10, 0x10, 0xFF));
+        font_draw(sz, x + 3, y - 1.5f, 0.803f, 0.42f, contrast_text(oc));
         font_draw(b->name, x + sw + 10, y - 1.5f, 0.803f, 0.42f, 0xFFFFFFFF);
     }
 }
@@ -1407,9 +1438,10 @@ void render_city_top(const CityInfo *info, int garrison_sel)
     snprintf(line, sizeof(line), "Size %d", info->size);
     float sw = text_width(line, 0.55f);
     C2D_DrawRectSolid(392 - sw - 12, 6, 0.01f, sw + 12, 20, oc);
-    draw_text_z(392 - sw - 6, 4, 0.02f, 0.55f, C2D_Color32(0x10, 0x10, 0x10, 0xFF), line);
+    draw_text_z(392 - sw - 6, 4, 0.02f, 0.55f, contrast_text(oc), line);
 
     // Left column: yields, growth, production.
+    layer(2.5f);
     float x = 12, y = 42;
     struct { const char *n; int v; u32 c; } yv[6] = {
         { "Food", info->surplus[0], food }, { "Shields", info->surplus[1], shld },
@@ -1417,13 +1449,13 @@ void render_city_top(const CityInfo *info, int garrison_sel)
         { "Luxury", info->surplus[4], C2D_Color32(0xE0, 0x90, 0xE0, 0xFF) }, { "Science", info->surplus[5], C2D_Color32(0x70, 0xB8, 0xFF, 0xFF) },
     };
     for (int i = 0; i < 6; i++) {
-        float cx = x + (i % 3) * 78, cy = y + (i / 3) * 20;
+        float cx = x + (i % 2) * 116, cy = y - 4 + (i / 2) * 16;
         C2D_DrawRectSolid(cx, cy + 5, 0.0f, 8, 8, yv[i].c);
         snprintf(line, sizeof(line), "%s %+d", yv[i].n, yv[i].v);
         draw_text(cx + 12, cy, 0.45f, soft, line);
     }
 
-    y = 90;
+    y = 94;
     draw_text(x, y, 0.45f, label, "Growth");
     snprintf(line, sizeof(line), "%d/%d", info->food_stock, info->food_needed);
     draw_text(x + 160, y, 0.45f, soft, line);
@@ -1432,7 +1464,7 @@ void render_city_top(const CityInfo *info, int garrison_sel)
     else snprintf(line, sizeof(line), "Not growing");
     draw_text(x, y + 25, 0.42f, info->grow_turns >= 0 ? soft : C2D_Color32(0xE0, 0x80, 0x60, 0xFF), line);
 
-    y = 140;
+    y = 142;
     draw_text(x, y, 0.45f, label, "Building");
     draw_text(x, y + 15, 0.55f, white, info->producing[0] ? info->producing : "?");
     progress_bar(x, y + 37, 224, 6, info->prod_cost > 0 ? (float)info->shield_stock / info->prod_cost : 0, shld);
@@ -1445,6 +1477,7 @@ void render_city_top(const CityInfo *info, int garrison_sel)
     }
 
     // Right column: units in the city (L/R picks, Y leads it out).
+    layer(4.0f);
     float rx = 252;
     C2D_DrawRectSolid(rx - 6, 38, 0.0f, 152, 172, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
     snprintf(line, sizeof(line), "Units here (%d)", info->garrison_count);
@@ -1470,6 +1503,7 @@ void render_city_top(const CityInfo *info, int garrison_sel)
         }
     }
 
+    layer(0.0f);
     C2D_DrawRectSolid(0, 240 - 17, 0.0f, 400, 17, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
     draw_text(5, 240 - 16, 0.45f, soft, info->garrison_count > 0
               ? "Tap what to build below.  L/R: pick a unit   Y: lead it out   B: close"

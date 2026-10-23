@@ -419,6 +419,8 @@ int main(int argc, char* argv[])
 
     // Create screens
     C3D_RenderTarget* top = C2D_CreateScreenTarget(GFX_TOP, GFX_LEFT);
+    C3D_RenderTarget* top_right = C2D_CreateScreenTarget(GFX_TOP, GFX_RIGHT);
+    gfxSet3D(true); // the right eye is only drawn while the 3D slider is up
     C3D_RenderTarget* bottom = C2D_CreateScreenTarget(GFX_BOTTOM, GFX_LEFT);
 
     AppState app_state = APP_START_MENU;
@@ -628,14 +630,17 @@ int main(int argc, char* argv[])
 
             C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 
-            C2D_TargetClear(top, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
-            C2D_SceneBegin(top);
-            C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_TOP, true);
             char ng_summary[160];
             snprintf(ng_summary, sizeof(ng_summary), "%s map (about %d,000 tiles), %d rival%s, %s AI.",
                      k_size_names[ng_size], k_size_tiles[ng_size], ng_rivals, ng_rivals == 1 ? "" : "s",
                      k_skill_names[ng_skill]);
-            render_new_game_top(isNew3DS, app_state == APP_NEW_GAME ? ng_summary : "Choose New Game or Load Game below.");
+            for (int eye = 0; eye < (osGet3DSliderState() > 0.02f ? 2 : 1); eye++) {
+                C3D_RenderTarget *tgt = eye ? top_right : top;
+                C2D_TargetClear(tgt, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
+                C2D_SceneBegin(tgt);
+                C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_TOP, true);
+                render_new_game_top(isNew3DS, app_state == APP_NEW_GAME ? ng_summary : "Choose New Game or Load Game below.");
+            }
 
             C2D_TargetClear(bottom, C2D_Color32(0x10, 0x10, 0x10, 0xFF));
             C2D_SceneBegin(bottom);
@@ -1486,20 +1491,27 @@ int main(int argc, char* argv[])
                                      : save_in_flight            ? PROC_SAVING
                                                                   : PROC_TURN;
 
-            C2D_TargetClear(top, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
-            C2D_SceneBegin(top);
-            C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_TOP, true);
-            render_processing_overlay(SCREEN_WIDTH_TOP, SCREEN_HEIGHT_TOP, reason);
+            for (int eye = 0; eye < (osGet3DSliderState() > 0.02f ? 2 : 1); eye++) {
+                C3D_RenderTarget *tgt = eye ? top_right : top;
+                C2D_TargetClear(tgt, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
+                C2D_SceneBegin(tgt);
+                C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_TOP, true);
+                render_processing_overlay(SCREEN_WIDTH_TOP, SCREEN_HEIGHT_TOP, reason);
+            }
 
             C2D_TargetClear(bottom, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
             C2D_SceneBegin(bottom);
             C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_BOTTOM, true);
             render_processing_overlay(SCREEN_WIDTH_BOT, SCREEN_HEIGHT_BOT, reason);
         } else {
-            // Black behind the map (unexplored land), dark navy behind the panels.
-            C2D_TargetClear(top, ui_mode == UI_MAP ? C2D_Color32(0, 0, 0, 0xFF)
-                                                   : C2D_Color32(0x18, 0x24, 0x38, 0xFF));
-            C2D_SceneBegin(top);
+            // Top screen, once per eye while the 3D slider is up.
+            float slider = osGet3DSliderState();
+            int eyes = slider > 0.02f ? 2 : 1;
+            for (int eye = 0; eye < eyes; eye++) {
+            C3D_RenderTarget *tgt = eye ? top_right : top;
+            C2D_TargetClear(tgt, C2D_Color32(0x18, 0x24, 0x38, 0xFF));
+            C2D_SceneBegin(tgt);
+            render_set_stereo(eyes == 2 ? (eye ? 1 : -1) : 0, slider * 1.2f);
             // Force the tilted landscape projection. C2D_SceneSize swaps w/h
             // when tilt=true and expects the PORTRAIT framebuffer dims
             // (240x400 top, 240x320 bottom) to hit its cached, correct
@@ -1558,6 +1570,8 @@ int main(int argc, char* argv[])
                 break;
             }
             if (show_busy_indicator) render_busy_indicator(SCREEN_WIDTH_TOP);
+            render_set_stereo(0, 0);
+            } // eyes
 
             C2D_TargetClear(bottom, C2D_Color32(0x10, 0x10, 0x10, 0xFF)); // Dark gray
             C2D_SceneBegin(bottom);

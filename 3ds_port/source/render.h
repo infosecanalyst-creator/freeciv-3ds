@@ -75,6 +75,10 @@ typedef struct {
 } TopInfo;
 void render_top_info(const TopInfo *ti);
 
+// Stereo 3D for the top screen: call before drawing each eye (eye -1 left,
+// +1 right, 0 mono; amount = pixels of separation per unit of depth).
+void render_set_stereo(int eye, float amount);
+
 // Top-screen minimap rect.
 #define MINIMAP_X      6
 #define MINIMAP_Y      26
