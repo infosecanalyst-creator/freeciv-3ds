@@ -10,24 +10,46 @@ extern C2D_SpriteSheet g_spriteSheet;
 void render_init(void);
 void render_deinit(void);
 
-// sel is the info for the currently selected tile (may be NULL if none selected).
-// armed_unit_id is the unit D-Pad/B/X/Y currently act on, or -1 if none - the
-// source of truth for the "Selected" hint, independent of which unit happens
-// to be listed first at the tile (may differ, e.g. after the armed unit is
-// consumed by an action but another of the player's units remains there).
-// touch_px/touch_py is the last raw touch position (-1 if none) for debugging.
-// goto_armed is true while main.c is waiting for the next map tap to supply
-// a goto destination (handoff.md §2c) - swaps the control hint accordingly.
-void render_top_screen(const TileInfo *sel, int sel_x, int sel_y, int armed_unit_id,
-                       int touch_px, int touch_py, bool goto_armed, int cam_x, int cam_y);
+// ---- Map screens (UI_MAP) ----
+//
+// The world map is drawn on the 400x240 top screen at one of several zoom
+// levels; the bottom screen holds a touch minimap, the selected tile's
+// readout, a button row and the action bar.
+//
+// Draws the map with world-pixel camera (cam_x, cam_y) at `scale` (1.0 = the
+// tileset's native 30px tiles) into a view_w x view_h screen area.
+void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
+                     int sel_x, int sel_y, bool sel_armed, int goto_x, int goto_y);
 
-// sel_x/sel_y is the selected tile, or -1 for none.
-// touch_px/touch_py draws a crosshair at the last raw touch point (-1 = none).
-// goto_x/goto_y (or -1) is the armed unit's pending goto destination
-// (get_unit_goto_tile(), handoff.md §2b) - drawn as a target marker on top
-// of the live map.
-void render_bottom_screen(int cam_x, int cam_y, int sel_x, int sel_y,
-                          int touch_px, int touch_py, int goto_x, int goto_y);
+// Top screen: the map plus a status bar (turn/gold/research) and a controls
+// line. civ may be NULL.
+void render_top_map(const TileInfo *sel, int sel_x, int sel_y, int armed_unit_id,
+                    bool goto_armed, int cam_x, int cam_y, float scale,
+                    int goto_x, int goto_y, const CivInfo *civ);
+
+// Bottom screen: minimap (tap/drag to look anywhere), tile readout, buttons.
+void render_bottom_map(const TileInfo *sel, int sel_x, int sel_y, int armed_unit_id,
+                       int cam_x, int cam_y, float scale, int zoom_idx, int zoom_count);
+
+// Maps a bottom-screen touch on the minimap to a tile; false if (px, py) is
+// outside the minimap or it isn't ready yet.
+bool minimap_hit_test(int px, int py, int *tx, int *ty);
+
+// Bottom-screen layout, shared by drawing and touch hit-testing. The action
+// bar (ACTIONBAR_*, below) keeps the right-hand 32px column.
+#define MINIMAP_X      2
+#define MINIMAP_Y      2
+#define MINIMAP_W      284
+#define MINIMAP_H      150
+#define BOTBTN_Y       206
+#define BOTBTN_H       30
+#define BOTBTN_END_X   2
+#define BOTBTN_END_W   98
+#define BOTBTN_ZOUT_X  104
+#define BOTBTN_ZIN_X   156
+#define BOTBTN_ZOOM_W  48
+#define BOTBTN_UNIT_X  208
+#define BOTBTN_UNIT_W  78
 
 // Which headline render_processing_overlay() shows - the server-thread step
 // that's making the app "busy" this frame. PROC_SAVING exists because an

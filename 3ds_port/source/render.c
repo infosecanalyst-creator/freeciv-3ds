@@ -449,173 +449,212 @@ static void draw_hollow_rect(float x, float y, float w, float h, float thickness
     C2D_DrawRectSolid(x + w - thickness, y, 0.5f, thickness, h, color);
 }
 
-void render_top_screen(const TileInfo *sel, int sel_x, int sel_y, int armed_unit_id,
-                       int touch_px, int touch_py, bool goto_armed, int cam_x, int cam_y)
+// ---- Minimap (bottom screen, UI_MAP) ----
+// Fits the whole map uniformly into the MINIMAP_* rect (render.h).
+static bool minimap_layout(float *dest_x, float *dest_y, float *S)
+{
+    if (!s_minimap_initialized || s_map_w <= 0 || s_map_h <= 0) return false;
+    float sx = (float)MINIMAP_W / s_map_w, sy = (float)MINIMAP_H / s_map_h;
+    *S = sx < sy ? sx : sy;
+    *dest_x = MINIMAP_X + (MINIMAP_W - s_map_w * *S) / 2.0f;
+    *dest_y = MINIMAP_Y + (MINIMAP_H - s_map_h * *S) / 2.0f;
+    return true;
+}
+
+bool minimap_hit_test(int px, int py, int *tx, int *ty)
+{
+    float dx, dy, S;
+    if (!minimap_layout(&dx, &dy, &S)) return false;
+    int x = (int)floorf((px - dx) / S), y = (int)floorf((py - dy) / S);
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x >= s_map_w) x = s_map_w - 1;
+    if (y >= s_map_h) y = s_map_h - 1;
+    if (px < MINIMAP_X || px >= MINIMAP_X + MINIMAP_W || py < MINIMAP_Y || py >= MINIMAP_Y + MINIMAP_H)
+        return false;
+    *tx = x; *ty = y;
+    return true;
+}
+
+static void draw_minimap(int cam_x, int cam_y, float view_w_tiles, float view_h_tiles,
+                         int sel_x, int sel_y)
+{
+    float dest_x, dest_y, S;
+    C2D_DrawRectSolid(MINIMAP_X, MINIMAP_Y, 0.0f, MINIMAP_W, MINIMAP_H, C2D_Color32(8, 12, 18, 255));
+    if (!minimap_layout(&dest_x, &dest_y, &S)) return;
+
+    // Per-tile rects, run-length-encoded per row (a mostly uniform row - ocean,
+    // or unexplored - collapses to a few rects). See the s_minimap_colors note.
+    for (int ty = 0; ty < s_map_h; ty++) {
+        int rx = 0;
+        while (rx < s_map_w) {
+            u32 c = s_minimap_colors[ty * s_map_w + rx];
+            int run = 1;
+            while (rx + run < s_map_w && s_minimap_colors[ty * s_map_w + rx + run] == c) run++;
+            C2D_DrawRectSolid(dest_x + rx * S, dest_y + ty * S, 0.1f, run * S + 0.5f, S + 0.5f, c);
+            rx += run;
+        }
+    }
+
+    // The part of the world the top screen shows.
+    float cx = (float)cam_x / TILE_PX, cy = (float)cam_y / TILE_PX;
+    if (map_wraps_x()) {
+        cx = fmodf(cx, (float)s_map_w);
+        if (cx < 0.0f) cx += s_map_w;
+    }
+    if (cy < 0.0f) cy = 0.0f;
+    if (cy + view_h_tiles > s_map_h) cy = s_map_h - view_h_tiles;
+    if (!map_wraps_x()) {
+        if (cx < 0.0f) cx = 0.0f;
+        if (cx + view_w_tiles > s_map_w) cx = s_map_w - view_w_tiles;
+    }
+    float vw = view_w_tiles, vh = view_h_tiles;
+    if (vw > s_map_w) vw = s_map_w;
+    if (vh > s_map_h) { vh = s_map_h; cy = 0; }
+    u32 fc = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
+    if (map_wraps_x() && cx + vw > s_map_w) {
+        float first = s_map_w - cx;
+        draw_hollow_rect(dest_x + cx * S, dest_y + cy * S, first * S, vh * S, 1.5f, fc);
+        draw_hollow_rect(dest_x, dest_y + cy * S, (vw - first) * S, vh * S, 1.5f, fc);
+    } else {
+        draw_hollow_rect(dest_x + cx * S, dest_y + cy * S, vw * S, vh * S, 1.5f, fc);
+    }
+    if (sel_x >= 0 && sel_y >= 0) {
+        float m = S < 3 ? 3 : S;
+        C2D_DrawRectSolid(dest_x + (sel_x + 0.5f) * S - m / 2, dest_y + (sel_y + 0.5f) * S - m / 2,
+                          0.55f, m, m, C2D_Color32(0xFF, 0xF0, 0x30, 0xFF));
+    }
+}
+
+// A translucent strip across a screen, for HUD text over the map.
+static void hud_strip(float y, float w, float h)
+{
+    C2D_DrawRectSolid(0, y, 0.88f, w, h, C2D_Color32(0x08, 0x0C, 0x14, 0xC8));
+}
+
+void render_top_map(const TileInfo *sel, int sel_x, int sel_y, int armed_unit_id,
+                    bool goto_armed, int cam_x, int cam_y, float scale,
+                    int goto_x, int goto_y, const CivInfo *civ)
 {
     C2D_TextBufClear(g_textBuf);
-
-    u32 white = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
-    u32 dim   = C2D_Color32(0xC0, 0xCE, 0xDC, 0xFF);
-    u32 label = C2D_Color32(0x8C, 0xA0, 0xB4, 0xFF);
-
-    char line[96];
-    int turn = get_game_turn();
-
-    // Scan slice of minimap
     update_minimap_slice(5);
 
-    // --- Title bar ---
-    C2D_DrawRectSolid(0, 0, 0.0f, 400, 30, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
-    C2D_DrawRectSolid(0, 30, 0.0f, 400, 2,  C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
-    C2D_DrawText(&s_txt_title, C2D_WithColor, 8, 5, 0.0f, 0.85f, 0.85f, white);
+    render_map_view(cam_x, cam_y, scale, 400, 240, sel_x, sel_y, armed_unit_id >= 0, goto_x, goto_y);
+
+    const float Z = 0.92f;
+    u32 white = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
+    u32 gold  = C2D_Color32(0xFF, 0xD8, 0x60, 0xFF);
+    u32 soft  = C2D_Color32(0xB8, 0xC8, 0xDC, 0xFF);
+    char line[128];
+
+    // Status bar: turn, gold, research.
+    hud_strip(0, 400, 17);
+    int turn = get_game_turn();
     if (turn > 0) {
         snprintf(line, sizeof(line), "Turn %d", turn);
-        draw_text(310, 8, 0.6f, white, line);
-    }
-
-    // --- Turn / status line (in the body, where it is reliably visible) ---
-    if (turn > 0) {
-        snprintf(line, sizeof(line), "Turn %d", turn);
-    } else {
-        snprintf(line, sizeof(line), "Generating world...");
-    }
-    draw_text(8, 40, 0.7f, white, line);
-
-    // --- Selected tile panel ---
-    C2D_DrawText(&s_txt_sel_tile_label, C2D_WithColor, 8, 68, 0.0f, 0.6f, 0.6f, label);
-    if (sel && sel_x >= 0) {
-        snprintf(line, sizeof(line), "(%d, %d)", sel_x, sel_y);
-        draw_text(150, 68, 0.6f, dim, line);
-
-        float y = 96;
-        if (sel->city_owner >= 0) {
-            snprintf(line, sizeof(line), "City: %s  (size %d, P%d)",
-                     sel->city_name[0] ? sel->city_name : "?",
-                     sel->city_size, sel->city_owner);
-            draw_text(8, y, 0.6f, owner_color(sel->city_owner), line);
-            y += 26;
-        }
-        if (sel->unit_owner >= 0) {
-            snprintf(line, sizeof(line), "Unit: %s  x%d (P%d)",
-                     sel->unit_name[0] ? sel->unit_name : "?",
-                     sel->num_units, sel->unit_owner);
-            draw_text(8, y, 0.6f, owner_color(sel->unit_owner), line);
-            y += 26;
-
-            if (armed_unit_id >= 0) {
-                // Keep each line clear of the minimap panel's left edge (x=228):
-                // the actions are split across the lines rather than one long row
-                // (the old single "B: Fortify/Sentry  X: Action  Y: Disband" ran
-                // under the map).
-                u32 selected = C2D_Color32(0xFF, 0xE0, 0x60, 0xFF);
-                C2D_DrawText(&s_txt_selected_dpad_move, C2D_WithColor, 8, y, 0.0f, 0.55f, 0.55f, selected);
-                y += 20;
-                C2D_DrawText(&s_txt_selected_actions_hint, C2D_WithColor, 8, y, 0.0f, 0.5f, 0.5f, selected);
-                y += 20;
-                C2D_DrawText(&s_txt_goto_button_hint, C2D_WithColor, 8, y, 0.0f, 0.5f, 0.5f, selected);
-                y += 22;
+        draw_text_z(4, 1, Z, 0.5f, white, line);
+        if (civ) {
+            snprintf(line, sizeof(line), "Gold %d", civ->gold);
+            draw_text_z(72, 1, Z, 0.5f, gold, line);
+            if (civ->research_name[0]) {
+                if (civ->research_turns >= 0)
+                    snprintf(line, sizeof(line), "%s %d/%d (%dt)", civ->research_name,
+                             civ->bulbs, civ->bulbs_needed, civ->research_turns);
+                else
+                    snprintf(line, sizeof(line), "%s %d/%d", civ->research_name,
+                             civ->bulbs, civ->bulbs_needed);
+                draw_text_z(150, 1, Z, 0.5f, soft, line);
             }
         }
-        if (sel->city_owner < 0 && sel->unit_owner < 0) {
-            C2D_DrawText(&s_txt_empty, C2D_WithColor, 8, y, 0.0f, 0.6f, 0.6f, dim);
-        }
-    } else {
-        C2D_DrawText(&s_txt_tap_map_hint, C2D_WithColor, 8, 96, 0.0f, 0.55f, 0.55f, label);
     }
 
-    // --- Controls hint ---
+    // Controls line for the current state.
+    hud_strip(240 - 16, 400, 16);
+    const char *hint;
+    u32 hc = soft;
     if (goto_armed) {
-        // Overrides the normal hint entirely while armed (handoff.md §2c) -
-        // this is the only input that matters until the next map tap lands.
-        u32 warn = C2D_Color32(0xFF, 0xD0, 0x40, 0xFF);
-        C2D_DrawText(&s_txt_goto_destination_hint, C2D_WithColor, 8, 200, 0.0f, 0.55f, 0.55f, warn);
-        C2D_DrawText(&s_txt_goto_cancel_hint, C2D_WithColor, 8, 218, 0.0f, 0.5f, 0.5f, warn);
+        hint = "GOTO: D-Pad picks the target   A: go there   B: cancel";
+        hc = C2D_Color32(0xFF, 0xC0, 0x40, 0xFF);
+    } else if (armed_unit_id >= 0) {
+        hint = "D-Pad: move  B: fortify  X: action  Y: disband  A: release";
+        hc = C2D_Color32(0xFF, 0xF0, 0x80, 0xFF);
+    } else if (sel && sel->city_owner >= 0 && is_pov_unit_owner(sel->city_owner)) {
+        hint = "A: open city   START: end turn   ZL/ZR: zoom   L/R: science/tax";
+    } else if (sel && sel->unit_owner >= 0 && is_pov_unit_owner(sel->unit_owner)) {
+        hint = "A: command unit   START: end turn   ZL/ZR: zoom   L/R: science/tax";
     } else {
-        C2D_DrawText(&s_txt_controls_hint_1, C2D_WithColor, 8, 200, 0.0f, 0.5f, 0.5f, label);
-        C2D_DrawText(&s_txt_controls_hint_2, C2D_WithColor, 8, 218, 0.0f, 0.5f, 0.5f, label);
+        hint = "D-Pad: cursor  Circle: pan  ZL/ZR: zoom  SELECT: units  START: end";
     }
+    draw_text_z(4, 240 - 15, Z, 0.45f, hc, hint);
+}
 
-    // --- Minimap drawing ---
-    if (s_minimap_initialized) {
-        // Minimap panel box. Kept to the right of x=228 so it clears the persistent
-        // left-column text ("Selected tile (NN, NN)" value ends ~x220, the "Unit: ..."
-        // line ends ~x210) — earlier it started at x=180 and the map grey overlapped
-        // that text. Map is scaled uniformly to fit inside PANEL_W x PANEL_H and
-        // centered in the box.
-        const float PANEL_X = 228.0f, PANEL_Y = 40.0f, PANEL_W = 168.0f, PANEL_H = 180.0f;
-        float scale_x = PANEL_W / s_map_w;
-        float scale_y = PANEL_H / s_map_h;
-        float S = scale_x < scale_y ? scale_x : scale_y;
-        if (S < 1.0f) S = 1.0f;
+void render_bottom_map(const TileInfo *sel, int sel_x, int sel_y, int armed_unit_id,
+                       int cam_x, int cam_y, float scale, int zoom_idx, int zoom_count)
+{
+    draw_minimap(cam_x, cam_y, 400.0f / (TILE_PX * scale), 240.0f / (TILE_PX * scale), sel_x, sel_y);
 
-        float dest_x = PANEL_X + (PANEL_W - s_map_w * S) / 2.0f;
-        float dest_y = PANEL_Y + (PANEL_H - s_map_h * S) / 2.0f;
+    u32 white = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
+    u32 dim   = C2D_Color32(0xB0, 0xBE, 0xCC, 0xFF);
+    char line[96];
+    static const char *terrain_names[] = { "Ocean", "Grassland", "Plains", "Desert", "Tundra",
+        "Swamp", "Jungle", "Hills", "Forest", "Mountains", "Arctic" };
 
-        // Draw solid background to clearly show map edges
-        C2D_DrawRectSolid(dest_x, dest_y, 0.0f, s_map_w * S, s_map_h * S, C2D_Color32(20, 30, 40, 255));
-
-        // Draw the map as per-tile rects, run-length-encoded per row: merge a run of
-        // consecutive same-colour tiles into one wide rect (a mostly-uniform row -
-        // ocean, or unexplored - collapses to a handful of rects). Same coordinate
-        // system as the viewfinder below, so they align by construction. A tile rect
-        // is drawn 1px oversized (ceilf) to avoid seams from fractional S.
-        float tile_px = ceilf(S);
-        for (int ty = 0; ty < s_map_h; ty++) {
-            int rx = 0;
-            while (rx < s_map_w) {
-                u32 c = s_minimap_colors[ty * s_map_w + rx];
-                int run = 1;
-                while (rx + run < s_map_w &&
-                       s_minimap_colors[ty * s_map_w + rx + run] == c) {
-                    run++;
-                }
-                C2D_DrawRectSolid(dest_x + rx * S, dest_y + ty * S, 0.1f,
-                                  run * S + (tile_px - S), tile_px, c);
-                rx += run;
+    // Selected tile readout.
+    float y = MINIMAP_Y + MINIMAP_H + 3;
+    if (sel && sel_x >= 0) {
+        if (sel->visibility == 0) {
+            snprintf(line, sizeof(line), "(%d,%d) unexplored", sel_x, sel_y);
+            draw_text(4, y, 0.5f, dim, line);
+        } else {
+            const char *tn = (sel->terrain >= 0 && sel->terrain <= TERRAIN_ARCTIC) ? terrain_names[sel->terrain] : "?";
+            snprintf(line, sizeof(line), "(%d,%d) %s%s%s%s", sel_x, sel_y, tn,
+                     sel->has_river ? ", river" : "",
+                     sel->has_rail ? ", railroad" : sel->has_road ? ", road" : "",
+                     sel->has_mine ? ", mine" : sel->has_farmland ? ", farmland" : sel->has_irrigation ? ", irrigated" : "");
+            draw_text(4, y, 0.5f, dim, line);
+            y += 17;
+            if (sel->city_owner >= 0) {
+                snprintf(line, sizeof(line), "%s (size %d)", sel->city_name[0] ? sel->city_name : "City", sel->city_size);
+                draw_text(4, y, 0.55f, owner_color(sel->city_owner), line);
+                y += 17;
+            }
+            if (sel->unit_owner >= 0 && sel->visibility == 2) {
+                if (sel->num_units > 1)
+                    snprintf(line, sizeof(line), "%s +%d more%s", sel->unit_name[0] ? sel->unit_name : "Unit",
+                             sel->num_units - 1, armed_unit_id >= 0 ? "  [selected]" : "");
+                else
+                    snprintf(line, sizeof(line), "%s%s", sel->unit_name[0] ? sel->unit_name : "Unit",
+                             armed_unit_id >= 0 ? "  [selected]" : "");
+                draw_text(4, y, 0.55f, owner_color(sel->unit_owner), line);
             }
         }
-
-        // Draw camera frustum
-        float viewport_w_tiles = 320.0f / 30.0f;
-        float viewport_h_tiles = 240.0f / 30.0f;
-
-        float tile_cam_x = (float)cam_x / 30.0f;
-        float tile_cam_y = (float)cam_y / 30.0f;
-
-        if (map_wraps_x()) {
-            tile_cam_x = fmodf(tile_cam_x, (float)s_map_w);
-            if (tile_cam_x < 0.0f) tile_cam_x += s_map_w;
-        } else {
-            if (tile_cam_x < 0.0f) tile_cam_x = 0.0f;
-            if (tile_cam_x + viewport_w_tiles > s_map_w) tile_cam_x = s_map_w - viewport_w_tiles;
-        }
-
-        if (map_wraps_y()) {
-            tile_cam_y = fmodf(tile_cam_y, (float)s_map_h);
-            if (tile_cam_y < 0.0f) tile_cam_y += s_map_h;
-        } else {
-            if (tile_cam_y < 0.0f) tile_cam_y = 0.0f;
-            if (tile_cam_y + viewport_h_tiles > s_map_h) tile_cam_y = s_map_h - viewport_h_tiles;
-        }
-
-        u32 frustum_color = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
-
-        if (map_wraps_x() && (tile_cam_x + viewport_w_tiles > s_map_w)) {
-            float first_w_tiles = (float)s_map_w - tile_cam_x;
-            float second_w_tiles = viewport_w_tiles - first_w_tiles;
-
-            draw_hollow_rect(dest_x + tile_cam_x * S, dest_y + tile_cam_y * S,
-                             first_w_tiles * S, viewport_h_tiles * S, 1.5f, frustum_color);
-            draw_hollow_rect(dest_x, dest_y + tile_cam_y * S,
-                             second_w_tiles * S, viewport_h_tiles * S, 1.5f, frustum_color);
-        } else {
-            draw_hollow_rect(dest_x + tile_cam_x * S, dest_y + tile_cam_y * S,
-                             viewport_w_tiles * S, viewport_h_tiles * S, 1.5f, frustum_color);
-        }
+    } else {
+        draw_text(4, y, 0.5f, dim, "Tap the minimap to look around.");
     }
 
-    (void)touch_px; (void)touch_py;
+    // Button row.
+    u32 bg = C2D_Color32(0x2C, 0x50, 0x80, 0xFF), bgd = C2D_Color32(0x24, 0x30, 0x40, 0xFF);
+    u32 border = C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF);
+    struct { int x, w; const char *t; bool on; } btn[] = {
+        { BOTBTN_END_X,  BOTBTN_END_W,  "End Turn", true },
+        { BOTBTN_ZOUT_X, BOTBTN_ZOOM_W, "-",        zoom_idx > 0 },
+        { BOTBTN_ZIN_X,  BOTBTN_ZOOM_W, "+",        zoom_idx < zoom_count - 1 },
+        { BOTBTN_UNIT_X, BOTBTN_UNIT_W, "Units",    true },
+    };
+    for (int i = 0; i < 4; i++) {
+        C2D_DrawRectSolid(btn[i].x, BOTBTN_Y, 0.0f, btn[i].w, BOTBTN_H, btn[i].on ? bg : bgd);
+        C2D_DrawRectSolid(btn[i].x, BOTBTN_Y, 0.0f, btn[i].w, 2, border);
+        float sc = btn[i].t[1] ? 0.55f : 0.8f;
+        float tw = 0, th = 0;
+        C2D_Text t;
+        C2D_TextParse(&t, g_textBuf, btn[i].t);
+        C2D_TextOptimize(&t);
+        C2D_TextGetDimensions(&t, sc, sc, &tw, &th);
+        C2D_DrawText(&t, C2D_WithColor, btn[i].x + (btn[i].w - tw) / 2, BOTBTN_Y + (BOTBTN_H - th) / 2 + 1,
+                     0.0f, sc, sc, btn[i].on ? white : dim);
+    }
 }
+
 // Neighbour lookups for coastline / terrain-edge matching. Coordinates are
 // native; on a wrapping axis an out-of-range x/y is a real neighbour across the
 // seam (get_tile_type wraps it), so only a *non-wrapping* edge is "off the map".
@@ -792,70 +831,79 @@ static int get_resource_sprite(const char *graphic_str)
     return -1;
 }
 
-static void draw_ocean_cell(int draw_x, int draw_y, int dx, int dy, int b0, int b1, int b2, const int* sprites)
+// Scale of the map currently being drawn (1.0 = the tileset's native 30px
+// tiles). Set by render_map_view() for its helpers below.
+static float s_ms = 1.0f;
+
+static void draw_ocean_cell(float draw_x, float draw_y, int dx, int dy, int b0, int b1, int b2, const int* sprites)
 {
     int idx = (b2 << 2) | (b1 << 1) | b0;
     C2D_Image img = C2D_SpriteSheetGetImage(g_spriteSheet, sprites[idx]);
-    C2D_DrawImageAt(img, draw_x + dx, draw_y + dy, 0.49f, NULL, 1.0f, 1.0f);
+    C2D_DrawImageAt(img, draw_x + dx * s_ms, draw_y + dy * s_ms, 0.49f, NULL, s_ms, s_ms);
 }
 
-static void draw_tile_entities(const TileInfo *info, int draw_x, int draw_y)
+static void draw_tile_entities(const TileInfo *info, float draw_x, float draw_y)
 {
     // City takes visual priority over a stacked unit.
+    const float S = s_ms;
     if (info->city_owner >= 0) {
         C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_city_idx),
-                        draw_x, draw_y, 0.6f, NULL, 1.0f, 1.0f);
-        C2D_DrawRectSolid(draw_x + 11, draw_y - 3, 0.65f, 8, 5,
+                        draw_x, draw_y, 0.6f, NULL, S, S);
+        C2D_DrawRectSolid(draw_x + 11 * S, draw_y - 3 * S, 0.65f, 8 * S, 5 * S,
                           owner_color(info->city_owner));
     } else if (info->unit_owner >= 0) {
         int sprite_idx = get_unit_sprite(info->unit_name);
         C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprite_idx),
-                        draw_x, draw_y, 0.6f, NULL, 1.0f, 1.0f);
-        C2D_DrawRectSolid(draw_x + 11, draw_y - 3, 0.65f, 8, 5,
+                        draw_x, draw_y, 0.6f, NULL, S, S);
+        C2D_DrawRectSolid(draw_x + 11 * S, draw_y - 3 * S, 0.65f, 8 * S, 5 * S,
                           owner_color(info->unit_owner));
+        if (info->num_units > 1) {
+            // Stack marker: a small "+" badge, so a stack reads as more than one unit.
+            C2D_DrawRectSolid(draw_x + 22 * S, draw_y + 1 * S, 0.66f, 7 * S, 7 * S, C2D_Color32(0, 0, 0, 0xC0));
+            C2D_DrawRectSolid(draw_x + 23 * S, draw_y + 4 * S, 0.67f, 5 * S, 1 * S + 0.5f, 0xFFFFFFFF);
+            C2D_DrawRectSolid(draw_x + 25 * S, draw_y + 2 * S, 0.67f, 1 * S + 0.5f, 5 * S, 0xFFFFFFFF);
+        }
     }
 }
 
-static void draw_selection(int draw_x, int draw_y)
+// The cursor / selected tile: a yellow frame, kept at least 2 screen px thick
+// at every zoom level.
+static void draw_selection(float draw_x, float draw_y, bool armed)
 {
-    u32 hi = C2D_Color32(0xFF, 0xF0, 0x30, 0xFF); // yellow border
-    float z = 0.7f;
-    C2D_DrawRectSolid(draw_x,              draw_y,              z, TILE_PX, 2, hi); // top
-    C2D_DrawRectSolid(draw_x,              draw_y + TILE_PX-2,  z, TILE_PX, 2, hi); // bottom
-    C2D_DrawRectSolid(draw_x,              draw_y,              z, 2, TILE_PX, hi); // left
-    C2D_DrawRectSolid(draw_x + TILE_PX-2,  draw_y,              z, 2, TILE_PX, hi); // right
+    u32 hi = armed ? C2D_Color32(0xFF, 0xF0, 0x30, 0xFF) : C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
+    float z = 0.7f, T = TILE_PX * s_ms, b = 2.0f;
+    C2D_DrawRectSolid(draw_x,         draw_y,         z, T, b, hi); // top
+    C2D_DrawRectSolid(draw_x,         draw_y + T - b, z, T, b, hi); // bottom
+    C2D_DrawRectSolid(draw_x,         draw_y,         z, b, T, hi); // left
+    C2D_DrawRectSolid(draw_x + T - b, draw_y,         z, b, T, hi); // right
 }
 
-// Pending-goto target marker (handoff.md §2c/2b) - a small diamond centered
-// on the destination tile. z=0.75 is above draw_selection()/unit sprites
-// (both 0.6-0.7f, the highest this per-tile loop otherwise reaches) so it's
-// never hidden by them when the goto target happens to also be the
-// selected tile or share it with a unit - this loop's z values are already
-// proven on hardware to layer correctly in ascending order (see the
-// terrain/overlay stack above), unlike the toast overlay's separate
-// draw-after-the-fact case (STATUS.md Resolved) which needed 0.9 to beat
-// this whole loop from outside it.
-static void draw_goto_marker(int draw_x, int draw_y)
+// Pending-goto target marker - a small cross centered on the destination tile,
+// above the selection frame and unit sprites (z 0.75).
+static void draw_goto_marker(float draw_x, float draw_y)
 {
     u32 c = C2D_Color32(0xFF, 0xA0, 0x20, 0xFF); // orange
     float z = 0.75f;
-    int cx = draw_x + TILE_PX / 2, cy = draw_y + TILE_PX / 2;
+    float cx = draw_x + TILE_PX * s_ms / 2, cy = draw_y + TILE_PX * s_ms / 2;
     C2D_DrawRectSolid(cx - 5, cy - 2, z, 10, 4, c);
     C2D_DrawRectSolid(cx - 2, cy - 5, z, 4, 10, c);
 }
 
-void render_bottom_screen(int cam_x, int cam_y, int sel_x, int sel_y,
-                          int touch_px, int touch_py, int goto_x, int goto_y)
+void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
+                     int sel_x, int sel_y, bool sel_armed, int goto_x, int goto_y)
 {
     if (!g_spriteSheet) return;
 
     // While the server is still generating the map, show a status message
     // instead of the empty mock grid (which looked like a broken all-ocean map).
     if (get_game_turn() <= 0) {
-        draw_text(70, 105, 0.7f, C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF),
+        draw_text(view_w / 2 - 90, view_h / 2 - 15, 0.7f, C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF),
                   "Generating world...");
         return;
     }
+    s_ms = scale;
+    const float S = scale;
+    const float T = TILE_PX * S; // on-screen tile size
 
     int map_w = 40, map_h = 40;
     get_map_dimensions(&map_w, &map_h);
@@ -897,20 +945,32 @@ void render_bottom_screen(int cam_x, int cam_y, int sel_x, int sel_y,
     // the one on screen. world_w (1440 for 48 tiles) >> screen (320), so each
     // tile shows at most once. Without this a unit/city right at the seam
     // looked "boxed in by a false hard border" (STATUS.md O5).
+    // Only the tile rows/columns that can be on screen are walked: at the
+    // widest zoom the view holds ~27x16 tiles out of a map of thousands.
     const bool wrapx = map_wraps_x();
     const int world_w = map_w * TILE_PX;
-    for (int y = 0; y < map_h; y++) {
-        for (int x = 0; x < map_w; x++) {
-            // Overhead square grid: tile (x,y) occupies [x*30, y*30]..[+30,+30].
-            int draw_x = x * TILE_PX - cam_x;
-            int draw_y = y * TILE_PX - cam_y;
+    int ty0 = (int)floorf((float)cam_y / TILE_PX) - 1;
+    int ty1 = (int)floorf((cam_y + view_h / S) / TILE_PX) + 1;
+    int tx0 = (int)floorf((float)cam_x / TILE_PX) - 1;
+    int tx1 = (int)floorf((cam_x + view_w / S) / TILE_PX) + 1;
+    if (ty0 < 0) ty0 = 0;
+    if (ty1 > map_h - 1) ty1 = map_h - 1;
+    if (!wrapx) {
+        if (tx0 < 0) tx0 = 0;
+        if (tx1 > map_w - 1) tx1 = map_w - 1;
+    } else if (tx1 - tx0 >= map_w) {
+        tx1 = tx0 + map_w - 1;
+    }
+    for (int y = ty0; y <= ty1; y++) {
+        for (int xi = tx0; xi <= tx1; xi++) {
+            // On a wrapping map xi runs past the seam; x is the native column.
+            int x = wrapx ? ((xi % map_w) + map_w) % map_w : xi;
+            (void)world_w;
+            // Overhead square grid: tile (x,y) occupies [x*30, y*30]..[+30,+30] world px.
+            float draw_x = (xi * TILE_PX - cam_x) * S;
+            float draw_y = (y * TILE_PX - cam_y) * S;
 
-            if (wrapx) {
-                draw_x = ((draw_x % world_w) + world_w) % world_w; // [0, world_w)
-                if (draw_x >= 320) draw_x -= world_w;              // visible on the left instead
-            }
-
-            if (draw_x <= -TILE_PX || draw_x >= 320 || draw_y <= -TILE_PX || draw_y >= 240) {
+            if (draw_x <= -T || draw_x >= view_w || draw_y <= -T || draw_y >= view_h) {
                 continue;
             }
 
@@ -942,9 +1002,9 @@ void render_bottom_screen(int cam_x, int cam_y, int sel_x, int sel_y,
                 // Whole-tile coastline curve on top of the corner texture fill.
                 int whole_idx = (!N) | ((!E) << 1) | ((!S) << 2) | ((!W) << 3);
                 C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, coast_l1_sprites[whole_idx]),
-                                draw_x, draw_y, 0.493f, NULL, 1.0f, 1.0f);
+                                draw_x, draw_y, 0.493f, NULL, S, S);
             } else if (info.terrain == TERRAIN_GRASSLAND) {
-                C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grassland_idx), draw_x, draw_y, 0.5f, NULL, 1.0f, 1.0f);
+                C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grassland_idx), draw_x, draw_y, 0.5f, NULL, S, S);
             } else {
                 int N  = is_same_terrain(x, y - 1, map_w, map_h, info.terrain);
                 int S  = is_same_terrain(x, y + 1, map_w, map_h, info.terrain);
@@ -952,16 +1012,16 @@ void render_bottom_screen(int cam_x, int cam_y, int sel_x, int sel_y,
                 int W  = is_same_terrain(x - 1, y, map_w, map_h, info.terrain);
                 int match_idx = N | (E << 1) | (S << 2) | (W << 3);
                 int sprite_idx = terrain_match_sprites[info.terrain][match_idx];
-                C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprite_idx), draw_x, draw_y, 0.5f, NULL, 1.0f, 1.0f);
+                C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprite_idx), draw_x, draw_y, 0.5f, NULL, S, S);
             }
 
             // Draw overlays on top of the terrain (except on raw ocean tiles)
             if (info.terrain != TERRAIN_OCEAN) {
                 // 1. Irrigation / Farmland
                 if (info.has_farmland) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_farmland_idx), draw_x, draw_y, 0.51f, NULL, 1.0f, 1.0f);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_farmland_idx), draw_x, draw_y, 0.51f, NULL, S, S);
                 } else if (info.has_irrigation) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_irrigation_idx), draw_x, draw_y, 0.51f, NULL, 1.0f, 1.0f);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_irrigation_idx), draw_x, draw_y, 0.51f, NULL, S, S);
                 }
 
                 // 2. River
@@ -971,7 +1031,7 @@ void render_bottom_screen(int cam_x, int cam_y, int sel_x, int sel_y,
                     int rE = has_river_at(x + 1, y);
                     int rW = has_river_at(x - 1, y);
                     int r_idx = rN | (rE << 1) | (rS << 2) | (rW << 3);
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, river_sprites[r_idx]), draw_x, draw_y, 0.52f, NULL, 1.0f, 1.0f);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, river_sprites[r_idx]), draw_x, draw_y, 0.52f, NULL, S, S);
                 }
 
                 // 3. Roads / Railroads / Maglevs
@@ -981,58 +1041,58 @@ void render_bottom_screen(int cam_x, int cam_y, int sel_x, int sel_y,
                     int mE = has_maglev_at(x + 1, y);
                     int mW = has_maglev_at(x - 1, y);
                     int m_idx = mN | (mE << 1) | (mS << 2) | (mW << 3);
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, maglev_sprites[m_idx]), draw_x, draw_y, 0.53f, NULL, 1.0f, 1.0f);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, maglev_sprites[m_idx]), draw_x, draw_y, 0.53f, NULL, S, S);
                 } else if (info.has_rail) {
                     int rN = has_rail_at(x, y - 1);
                     int rS = has_rail_at(x, y + 1);
                     int rE = has_rail_at(x + 1, y);
                     int rW = has_rail_at(x - 1, y);
                     int r_idx = rN | (rE << 1) | (rS << 2) | (rW << 3);
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, rail_sprites[r_idx]), draw_x, draw_y, 0.53f, NULL, 1.0f, 1.0f);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, rail_sprites[r_idx]), draw_x, draw_y, 0.53f, NULL, S, S);
                 } else if (info.has_road) {
                     int rN = has_road_at(x, y - 1);
                     int rS = has_road_at(x, y + 1);
                     int rE = has_road_at(x + 1, y);
                     int rW = has_road_at(x - 1, y);
                     int r_idx = rN | (rE << 1) | (rS << 2) | (rW << 3);
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, road_sprites[r_idx]), draw_x, draw_y, 0.53f, NULL, 1.0f, 1.0f);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, road_sprites[r_idx]), draw_x, draw_y, 0.53f, NULL, S, S);
                 }
 
                 // 4. Mine
                 if (info.has_mine) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_mine_idx), draw_x, draw_y, 0.54f, NULL, 1.0f, 1.0f);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_mine_idx), draw_x, draw_y, 0.54f, NULL, S, S);
                 }
 
                 // 5. Resource / Special
                 if (info.resource_tag[0]) {
                     int res_sprite = get_resource_sprite(info.resource_tag);
                     if (res_sprite >= 0) {
-                        C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, res_sprite), draw_x, draw_y, 0.55f, NULL, 1.0f, 1.0f);
+                        C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, res_sprite), draw_x, draw_y, 0.55f, NULL, S, S);
                     }
                 }
 
                 // 6. Goody Hut / Village
                 if (info.has_village) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_village_idx), draw_x, draw_y, 0.56f, NULL, 1.0f, 1.0f);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_village_idx), draw_x, draw_y, 0.56f, NULL, S, S);
                 }
 
                 // 7. Pollution / Fallout
                 if (info.has_pollution) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_pollution_idx), draw_x, draw_y, 0.57f, NULL, 1.0f, 1.0f);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_pollution_idx), draw_x, draw_y, 0.57f, NULL, S, S);
                 } else if (info.has_fallout) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_fallout_idx), draw_x, draw_y, 0.57f, NULL, 1.0f, 1.0f);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_fallout_idx), draw_x, draw_y, 0.57f, NULL, S, S);
                 }
             }
 
             // Draw Fog of War overlay (tx.fog) if known unseen (fogged)
             if (info.visibility == 1) {
-                C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_fog_idx), draw_x, draw_y, 0.58f, NULL, 1.0f, 1.0f);
+                C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_tx_fog_idx), draw_x, draw_y, 0.58f, NULL, S, S);
             }
 
             // Draw Darkness overlay if any neighbor is unknown
             if (info.darkness_idx > 0) {
                 int darkness_sprite = darkness_sprites[info.darkness_idx];
-                C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, darkness_sprite), draw_x, draw_y, 0.59f, NULL, 1.0f, 1.0f);
+                C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, darkness_sprite), draw_x, draw_y, 0.59f, NULL, S, S);
             }
 
             // Draw borders
@@ -1042,16 +1102,16 @@ void render_bottom_screen(int cam_x, int cam_y, int sel_x, int sel_y,
                 C2D_PlainImageTint(&tint, bcolor, 1.0f);
                 
                 if (info.border_n) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_n_idx), draw_x, draw_y, 0.6f, &tint, 1.0f, 1.0f);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_n_idx), draw_x, draw_y, 0.6f, &tint, S, S);
                 }
                 if (info.border_s) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_s_idx), draw_x, draw_y, 0.6f, &tint, 1.0f, 1.0f);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_s_idx), draw_x, draw_y, 0.6f, &tint, S, S);
                 }
                 if (info.border_e) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_e_idx), draw_x, draw_y, 0.6f, &tint, 1.0f, 1.0f);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_e_idx), draw_x, draw_y, 0.6f, &tint, S, S);
                 }
                 if (info.border_w) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_w_idx), draw_x, draw_y, 0.6f, &tint, 1.0f, 1.0f);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_w_idx), draw_x, draw_y, 0.6f, &tint, S, S);
                 }
             }
 
@@ -1061,12 +1121,12 @@ void render_bottom_screen(int cam_x, int cam_y, int sel_x, int sel_y,
             } else {
                 // Under Fog of War (visibility == 1), we still draw city centers but no units
                 if (info.city_owner != -1) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_city_idx), draw_x, draw_y, 0.7f, NULL, 1.0f, 1.0f);
+                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_city_idx), draw_x, draw_y, 0.7f, NULL, S, S);
                 }
             }
 
             if (x == sel_x && y == sel_y) {
-                draw_selection(draw_x, draw_y);
+                draw_selection(draw_x, draw_y, sel_armed);
             }
             if (x == goto_x && y == goto_y) {
                 draw_goto_marker(draw_x, draw_y);
@@ -1074,7 +1134,20 @@ void render_bottom_screen(int cam_x, int cam_y, int sel_x, int sel_y,
         }
     }
 
-    (void)touch_px; (void)touch_py;
+    // The cursor on an unexplored (black) tile still needs to be visible.
+    if (sel_x >= 0 && sel_y >= 0) {
+        TileInfo si;
+        get_tile_info(sel_x, sel_y, &si);
+        if (si.visibility == 0) {
+            int wx = sel_x * TILE_PX;
+            if (wrapx) {
+                // the copy of the column at or just right of the view's left edge
+                int d = ((wx - cam_x + TILE_PX) % world_w + world_w) % world_w - TILE_PX;
+                wx = cam_x + d;
+            }
+            draw_selection((wx - cam_x) * S, (sel_y * TILE_PX - cam_y) * S, sel_armed);
+        }
+    }
 }
 
 // Garrison rows visible at once on the top-screen readout before falling

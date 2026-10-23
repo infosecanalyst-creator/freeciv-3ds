@@ -116,6 +116,63 @@ static void adjust_rate(const CivInfo *civ, bool tax_axis, int delta)
     freeciv_request_set_rates(tax, lux, new_sci);
 }
 
+// ---- Map camera (world pixels: one tile = 30px at zoom 1.0) ----
+static const float k_zoom_levels[] = { 0.5f, 0.75f, 1.0f, 1.5f, 2.0f };
+#define ZOOM_COUNT ((int)(sizeof(k_zoom_levels) / sizeof(k_zoom_levels[0])))
+#define ZOOM_DEFAULT 2
+#define TILE_WORLD 30
+
+static int view_w_world(float s) { return (int)(SCREEN_WIDTH_TOP / s); }
+static int view_h_world(float s) { return (int)(SCREEN_HEIGHT_TOP / s); }
+
+// Centre the top-screen view on tile (tx, ty).
+static void center_on_tile(int tx, int ty, float s, int *cam_x, int *cam_y)
+{
+    *cam_x = tx * TILE_WORLD + TILE_WORLD / 2 - view_w_world(s) / 2;
+    *cam_y = ty * TILE_WORLD + TILE_WORLD / 2 - view_h_world(s) / 2;
+}
+
+// Keep the camera inside the map vertically (and horizontally unless the map
+// wraps), allowing half a screen of slack past each edge.
+static void clamp_camera(float s, int *cam_x, int *cam_y)
+{
+    int mw = 40, mh = 40;
+    get_map_dimensions(&mw, &mh);
+    int vw = view_w_world(s), vh = view_h_world(s);
+    int lo_y = -vh / 2, hi_y = mh * TILE_WORLD - vh / 2;
+    if (*cam_y < lo_y) *cam_y = lo_y;
+    if (*cam_y > hi_y) *cam_y = hi_y;
+    if (!map_wraps_x()) {
+        int lo_x = -vw / 2, hi_x = mw * TILE_WORLD - vw / 2;
+        if (*cam_x < lo_x) *cam_x = lo_x;
+        if (*cam_x > hi_x) *cam_x = hi_x;
+    }
+}
+
+// Scroll just enough that tile (tx, ty) sits inside the view with a margin
+// of about one tile clear of the HUD strips.
+static void ensure_tile_visible(int tx, int ty, float s, int *cam_x, int *cam_y)
+{
+    int mw = 40, mh = 40;
+    get_map_dimensions(&mw, &mh);
+    int vw = view_w_world(s), vh = view_h_world(s);
+    int mx = TILE_WORLD, my_top = TILE_WORLD + (int)(18 / s), my_bot = TILE_WORLD + (int)(17 / s);
+    if (mx * 2 + TILE_WORLD > vw) mx = (vw - TILE_WORLD) / 2;
+    if (my_top + my_bot + TILE_WORLD > vh) my_top = my_bot = (vh - TILE_WORLD) / 2;
+    int wx = tx * TILE_WORLD, wy = ty * TILE_WORLD;
+    if (map_wraps_x()) {
+        // the copy of the column nearest the view's centre
+        int world_w = mw * TILE_WORLD, c = *cam_x + vw / 2;
+        int d = ((wx - c) % world_w + world_w + world_w / 2) % world_w - world_w / 2;
+        wx = c + d;
+    }
+    if (wx < *cam_x + mx) *cam_x = wx - mx;
+    if (wx + TILE_WORLD > *cam_x + vw - mx) *cam_x = wx + TILE_WORLD - vw + mx;
+    if (wy < *cam_y + my_top) *cam_y = wy - my_top;
+    if (wy + TILE_WORLD > *cam_y + vh - my_bot) *cam_y = wy + TILE_WORLD - vh + my_bot;
+    clamp_camera(s, cam_x, cam_y);
+}
+
 int main(int argc, char* argv[])
 {
     // Redirect output to SD card to catch fatal errors
@@ -178,6 +235,13 @@ int main(int argc, char* argv[])
 
     int cam_x = 0;
     int cam_y = 0;
+    int zoom_idx = ZOOM_DEFAULT;
+    float zoom = k_zoom_levels[zoom_idx];
+    int prev_sel_x = -1, prev_sel_y = -1; // camera follows the cursor when it moves
+    CivInfo map_civ_info;                 // status-bar snapshot, refreshed while !busy
+    bool have_map_civ = false;
+    // D-Pad repeat for the map cursor: first repeat after 14 frames, then every 4.
+    hidSetRepeatParameters(14, 4);
     int sel_x = -1, sel_y = -1;          // currently selected map tile (-1 = none)
     int selected_unit_id = -1;           // pov unit selected for movement (-1 = none)
     int last_touch_px = -1, last_touch_py = -1; // last raw stylus position
@@ -191,14 +255,6 @@ int main(int argc, char* argv[])
     // the !busy block below - same "hold last value across a busy frame"
     // contract as sel_x/sel_y. -1 = no pending route.
     int ui_goto_x = -1, ui_goto_y = -1;
-    // True for the rest of a touch-down gesture once the goto-target branch
-    // below has consumed its kDown edge (issued a goto or canceled). Without
-    // this, the *next* held frame of the SAME physical tap - kDown already
-    // false, but kHeld still true - falls through to the normal tile-arm
-    // branch below (since ui_goto_armed just went false) and immediately
-    // disarms the unit on the (typically empty) destination tile, discarding
-    // the goto's own selection before it can ever be read back.
-    bool touch_consumed_this_press = false;
 
     // Snapshot of the selected tile for the HUD. Persists across frames
     // where the server is busy (see fc3ds_server_is_busy() below) and the
@@ -252,6 +308,7 @@ int main(int argc, char* argv[])
         hidScanInput();
         u32 kDown = hidKeysDown();
         u32 kHeld = hidKeysHeld();
+        u32 kRepeat = hidKeysDownRepeat();
 
         // Mode as it was at the START of this frame. The modal touch handler
         // gates on this (not the live ui_mode) so that the same tap which
@@ -261,7 +318,9 @@ int main(int argc, char* argv[])
         // stale build list.
         UiMode ui_mode_frame_start = ui_mode;
 
-        if (kDown & KEY_START) {
+        // Quit: START on the start menu, SELECT+START in a game (START alone
+        // ends the turn there). HOME -> Close also works at any time.
+        if ((kDown & KEY_START) && (app_state != APP_GAME || (kHeld & KEY_SELECT))) {
             break; // fc3ds_server_shutdown() (below, after the loop) does the rest
         }
 
@@ -333,8 +392,22 @@ int main(int argc, char* argv[])
         // A button: end the current turn (advance the game). Suppressed
         // inside a modal so a long turn step can't strand the panel behind
         // the busy overlay (handoff.md §7.3) - close the modal first.
-        if (ui_mode == UI_MAP && (kDown & KEY_A)) {
+        if (ui_mode == UI_MAP && (kDown & KEY_START) && !(kHeld & KEY_SELECT)) {
             fc3ds_server_request_end_turn();
+        }
+
+        // ZL/ZR (New 3DS) zoom the map, keeping the view centre fixed.
+        if (ui_mode == UI_MAP && (kDown & (KEY_ZL | KEY_ZR))) {
+            int nz = zoom_idx + ((kDown & KEY_ZR) ? 1 : 0) - ((kDown & KEY_ZL) ? 1 : 0);
+            if (nz < 0) nz = 0;
+            if (nz >= ZOOM_COUNT) nz = ZOOM_COUNT - 1;
+            if (nz != zoom_idx) {
+                int ccx = cam_x + view_w_world(zoom) / 2, ccy = cam_y + view_h_world(zoom) / 2;
+                zoom_idx = nz;
+                zoom = k_zoom_levels[zoom_idx];
+                cam_x = ccx - view_w_world(zoom) / 2;
+                cam_y = ccy - view_h_world(zoom) / 2;
+            }
         }
 
         // SELECT: re-center the camera on your own units. A manual recovery
@@ -351,9 +424,9 @@ int main(int argc, char* argv[])
         if (ui_mode == UI_MAP && (kDown & KEY_SELECT) && !fc3ds_server_is_busy()) {
             int cx, cy;
             if (find_pov_unit_tile(&cx, &cy)) {
-                cam_x = cx * 30 + 15 - 160;
-                cam_y = cy * 30 + 15 - 120;
+                center_on_tile(cx, cy, zoom, &cam_x, &cam_y);
                 sel_x = cx; sel_y = cy;
+                prev_sel_x = cx; prev_sel_y = cy;
             }
         }
 
@@ -371,6 +444,7 @@ int main(int argc, char* argv[])
 
         circlePosition pos;
         hidCircleRead(&pos);
+        bool move_cursor = false;
 
         if (ui_mode == UI_CITY || ui_mode == UI_RESEARCH || ui_mode == UI_GOVERNMENT
             || ui_mode == UI_DIPLOMACY) {
@@ -429,12 +503,12 @@ int main(int argc, char* argv[])
         } else if (ui_mode == UI_RATES) {
             if (kDown & KEY_B) ui_mode = UI_MAP;
         } else if (selected_unit_id >= 0 && ui_goto_armed) {
-            // Goto-target sub-mode (handoff.md §2c): the next map tap below
-            // supplies the destination, so D-Pad move/action input is
-            // suppressed here - only B cancels back to plain unit control.
+            // Goto-target sub-mode: D-Pad moves the cursor to the destination,
+            // A sends the unit there (handled with the A press below), B cancels.
             if (kDown & KEY_B) {
                 ui_goto_armed = false;
             }
+            move_cursor = true;
         } else if (selected_unit_id >= 0) {
             // A unit is selected: D-Pad orders a one-tile move instead of
             // panning. Edge-triggered (kDown, not kHeld) so holding the
@@ -497,18 +571,38 @@ int main(int argc, char* argv[])
             if (kDown & KEY_X) freeciv_request_unit_action(selected_unit_id, UNIT_ACTION_CONTEXT);
             if (kDown & KEY_Y) freeciv_request_unit_action(selected_unit_id, UNIT_ACTION_DISBAND);
         } else {
-            if (kHeld & KEY_DUP)    cam_y -= 2;
-            if (kHeld & KEY_DDOWN)  cam_y += 2;
-            if (kHeld & KEY_DLEFT)  cam_x -= 2;
-            if (kHeld & KEY_DRIGHT) cam_x += 2;
+            move_cursor = true; // nothing armed: D-Pad moves the map cursor
+        }
+
+        // Map cursor (the selected tile): one tile per press, repeating while held.
+        if (move_cursor && !fc3ds_server_is_busy() && get_game_turn() > 0) {
+            int dx = ((kRepeat & KEY_DRIGHT) ? 1 : 0) - ((kRepeat & KEY_DLEFT) ? 1 : 0);
+            int dy = ((kRepeat & KEY_DDOWN) ? 1 : 0) - ((kRepeat & KEY_DUP) ? 1 : 0);
+            if (dx || dy) {
+                int mw = 40, mh = 40;
+                get_map_dimensions(&mw, &mh);
+                if (sel_x < 0) {
+                    sel_x = (cam_x + view_w_world(zoom) / 2) / TILE_WORLD;
+                    sel_y = (cam_y + view_h_world(zoom) / 2) / TILE_WORLD;
+                } else {
+                    sel_x += dx;
+                    sel_y += dy;
+                }
+                if (map_wraps_x()) sel_x = ((sel_x % mw) + mw) % mw;
+                else if (sel_x < 0) sel_x = 0; else if (sel_x >= mw) sel_x = mw - 1;
+                if (map_wraps_y()) sel_y = ((sel_y % mh) + mh) % mh;
+                else if (sel_y < 0) sel_y = 0; else if (sel_y >= mh) sel_y = mh - 1;
+            }
         }
 
         // Circle Pad analog panning (deadzone of 15) - always active on the
         // map, even with a unit selected, so the camera can still be
-        // repositioned. No effect while a modal is open (map isn't drawn).
+        // repositioned. Speed is in screen pixels, so it feels the same at
+        // every zoom level.
         if (ui_mode == UI_MAP) {
-            if (abs(pos.dx) > 15) cam_x += pos.dx / 32;
-            if (abs(pos.dy) > 15) cam_y -= pos.dy / 32;
+            if (abs(pos.dx) > 15) cam_x += (int)(pos.dx / 24 / zoom);
+            if (abs(pos.dy) > 15) cam_y -= (int)(pos.dy / 24 / zoom);
+            clamp_camera(zoom, &cam_x, &cam_y);
         }
 
         // Let the server take one step if any input above queued work (end
@@ -522,126 +616,101 @@ int main(int argc, char* argv[])
 
         if (save_toast_frames > 0) save_toast_frames--;
 
-        // Touch: pick a map tile. Overhead square grid => exact mapping.
-        // Update while the stylus is held so dragging re-selects and the
-        // debug crosshair tracks the pen. Skipped while busy - reads live
-        // game state (get_tile_info) that's unsafe to touch mid-step.
-        if (!busy && ui_mode == UI_MAP && (kHeld & KEY_TOUCH)) {
+        // A on the map acts on the cursor tile: in goto mode it sends the unit
+        // there; with a unit armed it releases it; otherwise it opens your city
+        // or takes command of your unit on that tile.
+        if (!busy && ui_mode == UI_MAP && ui_mode_frame_start == UI_MAP && (kDown & KEY_A)
+            && sel_x >= 0 && sel_y >= 0) {
+            if (ui_goto_armed && selected_unit_id >= 0) {
+                int ux = -1, uy = -1;
+                find_unit_tile_by_id(selected_unit_id, &ux, &uy);
+                if (ux != sel_x || uy != sel_y) {
+                    freeciv_request_unit_goto(selected_unit_id, sel_x, sel_y);
+                }
+                ui_goto_armed = false;
+            } else if (selected_unit_id >= 0) {
+                selected_unit_id = -1;
+            } else {
+                TileInfo t;
+                get_tile_info(sel_x, sel_y, &t);
+                if (t.city_owner >= 0 && is_pov_unit_owner(t.city_owner)) {
+                    ui_mode = UI_CITY;
+                    ui_city_id = t.city_id;
+                    ui_scroll = 0;
+                    ui_garrison_sel = 0;
+                    ui_worklist_queue_mode = false;
+                } else if (t.unit_id >= 0 && is_pov_unit_owner(t.unit_owner)) {
+                    selected_unit_id = t.unit_id;
+                }
+            }
+        }
+
+        // Bottom-screen touch on the map screen: the action bar (right edge),
+        // the button row, and the minimap (tap or drag to look anywhere).
+        if (!busy && ui_mode == UI_MAP && ui_mode_frame_start == UI_MAP && (kHeld & KEY_TOUCH)) {
             touchPosition touch;
             hidTouchRead(&touch);
-            last_touch_px = touch.px;
-            last_touch_py = touch.py;
+            int px = touch.px, py = touch.py;
+            last_touch_px = px;
+            last_touch_py = py;
+            bool tap = (kDown & KEY_TOUCH) != 0;
 
-            if (kDown & KEY_TOUCH) {
-                touch_consumed_this_press = false; // fresh press
-            }
-
-            // Action bar (handoff.md §2) lives on the bottom-screen right
-            // edge and is checked FIRST, before any tile-select/arm logic,
-            // so a tap on the strip never also arms a unit on the tile
-            // underneath it. Edge-triggered (kDown) so opening a panel
-            // doesn't re-fire every frame the stylus stays down.
-            bool in_actionbar = touch.px >= ACTIONBAR_X && touch.px < ACTIONBAR_X + ACTIONBAR_BTN_W;
-            if (in_actionbar) {
-                if (kDown & KEY_TOUCH) {
-                    if (touch.py >= ACTIONBAR_RES_Y && touch.py < ACTIONBAR_RES_Y + ACTIONBAR_BTN_H) {
+            if (px >= ACTIONBAR_X) {
+                if (tap) {
+                    if (py >= ACTIONBAR_RES_Y && py < ACTIONBAR_RES_Y + ACTIONBAR_BTN_H) {
                         ui_mode = UI_RESEARCH;
                         ui_scroll = 0;
                         ui_tech_tree_view = false;
-                    } else if (touch.py >= ACTIONBAR_RATES_Y && touch.py < ACTIONBAR_RATES_Y + ACTIONBAR_BTN_H) {
+                    } else if (py >= ACTIONBAR_RATES_Y && py < ACTIONBAR_RATES_Y + ACTIONBAR_BTN_H) {
                         ui_mode = UI_RATES;
                         ui_scroll = 0;
-                    } else if (touch.py >= ACTIONBAR_GOV_Y && touch.py < ACTIONBAR_GOV_Y + ACTIONBAR_BTN_H) {
+                    } else if (py >= ACTIONBAR_GOV_Y && py < ACTIONBAR_GOV_Y + ACTIONBAR_BTN_H) {
                         ui_mode = UI_GOVERNMENT;
                         ui_scroll = 0;
-                    } else if (touch.py >= ACTIONBAR_DIPL_Y && touch.py < ACTIONBAR_DIPL_Y + ACTIONBAR_BTN_H) {
+                    } else if (py >= ACTIONBAR_DIPL_Y && py < ACTIONBAR_DIPL_Y + ACTIONBAR_BTN_H) {
                         ui_mode = UI_DIPLOMACY;
                         ui_scroll = 0;
                         ui_dipl_stage = 1;
-                    } else if (touch.py >= ACTIONBAR_SAVE_Y && touch.py < ACTIONBAR_SAVE_Y + ACTIONBAR_BTN_H) {
+                    } else if (py >= ACTIONBAR_SAVE_Y && py < ACTIONBAR_SAVE_Y + ACTIONBAR_BTN_H) {
                         freeciv_request_save_game();
                         save_toast_frames = SAVE_TOAST_FRAMES;
                         save_in_flight = true;
-                    } else if (touch.py >= ACTIONBAR_GOTO_Y && touch.py < ACTIONBAR_GOTO_Y + ACTIONBAR_BTN_H) {
-                        // Only meaningful with a unit armed - a no-op tap
-                        // otherwise, same as the SAV/etc buttons never
-                        // checking preconditions either (handoff.md §2c).
-                        if (selected_unit_id >= 0) {
-                            ui_goto_armed = true;
+                    } else if (py >= ACTIONBAR_GOTO_Y && py < ACTIONBAR_GOTO_Y + ACTIONBAR_BTN_H) {
+                        if (selected_unit_id >= 0) ui_goto_armed = !ui_goto_armed;
+                    }
+                }
+            } else if (py >= BOTBTN_Y) {
+                if (tap) {
+                    if (px >= BOTBTN_END_X && px < BOTBTN_END_X + BOTBTN_END_W) {
+                        fc3ds_server_request_end_turn();
+                    } else if (px >= BOTBTN_ZOUT_X && px < BOTBTN_ZOUT_X + BOTBTN_ZOOM_W && zoom_idx > 0) {
+                        int ccx = cam_x + view_w_world(zoom) / 2, ccy = cam_y + view_h_world(zoom) / 2;
+                        zoom = k_zoom_levels[--zoom_idx];
+                        cam_x = ccx - view_w_world(zoom) / 2;
+                        cam_y = ccy - view_h_world(zoom) / 2;
+                    } else if (px >= BOTBTN_ZIN_X && px < BOTBTN_ZIN_X + BOTBTN_ZOOM_W && zoom_idx < ZOOM_COUNT - 1) {
+                        int ccx = cam_x + view_w_world(zoom) / 2, ccy = cam_y + view_h_world(zoom) / 2;
+                        zoom = k_zoom_levels[++zoom_idx];
+                        cam_x = ccx - view_w_world(zoom) / 2;
+                        cam_y = ccy - view_h_world(zoom) / 2;
+                    } else if (px >= BOTBTN_UNIT_X && px < BOTBTN_UNIT_X + BOTBTN_UNIT_W) {
+                        int cx, cy;
+                        if (find_pov_unit_tile(&cx, &cy)) {
+                            center_on_tile(cx, cy, zoom, &cam_x, &cam_y);
+                            sel_x = cx; sel_y = cy;
+                            prev_sel_x = cx; prev_sel_y = cy;
                         }
                     }
                 }
-            } else if (ui_goto_armed) {
-                // Goto-target sub-mode: the next map tap is the destination
-                // (handoff.md §2c). Edge-triggered (kDown) so dragging the
-                // stylus across several tiles doesn't fire multiple gotos.
-                // Tapping the armed unit's own tile again cancels instead of
-                // issuing a (meaningless) goto-to-self.
-                if (kDown & KEY_TOUCH) {
-                    int wx = (int)touch.px + cam_x;
-                    int wy = (int)touch.py + cam_y;
-                    int tx = (int)floorf(wx / 30.0f);
-                    int ty = (int)floorf(wy / 30.0f);
-                    int mw = 40, mh = 40;
-                    get_map_dimensions(&mw, &mh);
-                    // Native coords: fold a seam-crossing tap back onto the map.
-                    if (map_wraps_x()) tx = ((tx % mw) + mw) % mw;
-                    if (map_wraps_y()) ty = ((ty % mh) + mh) % mh;
-                    if (tx >= 0 && ty >= 0 && tx < mw && ty < mh) {
-                        TileInfo touched;
-                        get_tile_info(tx, ty, &touched);
-                        if (touched.unit_id == selected_unit_id) {
-                            ui_goto_armed = false; // re-tapped the armed unit: cancel
-                        } else {
-                            freeciv_request_unit_goto(selected_unit_id, tx, ty);
-                            ui_goto_armed = false;
-                            sel_x = tx;
-                            sel_y = ty;
-                        }
-                        // Otherwise the very next held frame of this same
-                        // physical tap - kDown now false, ui_goto_armed now
-                        // false too - would fall into the plain tile-arm
-                        // branch below and immediately disarm the unit on
-                        // what's typically an empty destination tile.
-                        touch_consumed_this_press = true;
-                    }
-                }
-            } else if (!touch_consumed_this_press) {
-                int wx = (int)touch.px + cam_x; // world pixel under the stylus
-                int wy = (int)touch.py + cam_y;
-                int tx = (int)floorf(wx / 30.0f);
-                int ty = (int)floorf(wy / 30.0f);
-                int mw = 40, mh = 40;
-                get_map_dimensions(&mw, &mh);
-                // Native coords: fold a seam-crossing tap back onto the map.
-                if (map_wraps_x()) tx = ((tx % mw) + mw) % mw;
-                if (map_wraps_y()) ty = ((ty % mh) + mh) % mh;
-                if (tx >= 0 && ty >= 0 && tx < mw && ty < mh) {
-                    sel_x = tx;
-                    sel_y = ty;
-
-                    // A pov-owned city tile opens the city screen - takes
-                    // priority over unit-arming on a tile that has both, since
-                    // units are moved from the map and cities are managed from
-                    // their own screen (handoff.md §3.4). Anything else (empty,
-                    // enemy, a bare pov unit) falls through to the existing
-                    // unit-arm/disarm rule - a single interaction mode, no
-                    // separate cancel control needed.
-                    TileInfo touched;
-                    get_tile_info(tx, ty, &touched);
-                    if (touched.city_owner >= 0 && is_pov_unit_owner(touched.city_owner)) {
-                        ui_mode = UI_CITY;
-                        ui_city_id = touched.city_id;
-                        ui_scroll = 0;
-                        ui_garrison_sel = 0;
-                        ui_worklist_queue_mode = false;
-                        selected_unit_id = -1;
-                        ui_goto_armed = false;
-                    } else if (touched.unit_id >= 0 && is_pov_unit_owner(touched.unit_owner)) {
-                        selected_unit_id = touched.unit_id;
-                    } else {
-                        selected_unit_id = -1;
-                        ui_goto_armed = false;
+            } else {
+                int tx, ty;
+                if (minimap_hit_test(px, py, &tx, &ty)) {
+                    center_on_tile(tx, ty, zoom, &cam_x, &cam_y);
+                    clamp_camera(zoom, &cam_x, &cam_y);
+                    // Move the cursor too, unless it is glued to an armed unit.
+                    if (selected_unit_id < 0 || ui_goto_armed) {
+                        sel_x = tx; sel_y = ty;
+                        prev_sel_x = tx; prev_sel_y = ty;
                     }
                 }
             }
@@ -813,8 +882,10 @@ int main(int argc, char* argv[])
             if (selected_unit_id >= 0) {
                 int ux, uy;
                 if (find_unit_tile_by_id(selected_unit_id, &ux, &uy)) {
-                    sel_x = ux;
-                    sel_y = uy;
+                    if (!ui_goto_armed) {
+                        sel_x = ux;
+                        sel_y = uy;
+                    }
                 } else {
                     selected_unit_id = -1; // unit no longer exists
                     ui_goto_armed = false;
@@ -838,10 +909,9 @@ int main(int argc, char* argv[])
             if (!camera_centered) {
                 int cx = -1, cy = -1;
                 if (find_pov_unit_tile(&cx, &cy)) {
-                    // Center the 30px tile in the 320x240 bottom screen.
-                    cam_x = cx * 30 + 15 - 160;
-                    cam_y = cy * 30 + 15 - 120;
+                    center_on_tile(cx, cy, zoom, &cam_x, &cam_y);
                     sel_x = cx; sel_y = cy; // select it so the HUD shows your unit
+                    prev_sel_x = cx; prev_sel_y = cy;
                     camera_centered = true;
 
                     // selected_unit_id must always track sel_x/sel_y's unit, or
@@ -870,6 +940,21 @@ int main(int argc, char* argv[])
                        nm, pidx, (int)ai, nu, (int)found, dx, dy, cam_x, cam_y);
                 fflush(stdout);
                 pov_logged = true;
+            }
+
+            // The camera follows the cursor (and an armed unit) when it moves.
+            if (sel_x >= 0 && (sel_x != prev_sel_x || sel_y != prev_sel_y)) {
+                ensure_tile_visible(sel_x, sel_y, zoom, &cam_x, &cam_y);
+                prev_sel_x = sel_x;
+                prev_sel_y = sel_y;
+            }
+
+            // Status-bar numbers (gold, research), refreshed a few times a second.
+            static int civ_refresh = 0;
+            if (ui_mode == UI_MAP && get_game_turn() > 0 && (!have_map_civ || ++civ_refresh >= 15)) {
+                get_civ_info(&map_civ_info);
+                have_map_civ = true;
+                civ_refresh = 0;
             }
 
             // Snapshot the selected tile's state for the HUD.
@@ -1022,8 +1107,9 @@ int main(int argc, char* argv[])
                 break;
             case UI_MAP:
             default:
-                render_top_screen(have_sel ? &sel_info : NULL, sel_x, sel_y, selected_unit_id,
-                                  last_touch_px, last_touch_py, ui_goto_armed, cam_x, cam_y);
+                render_top_map(have_sel ? &sel_info : NULL, sel_x, sel_y, selected_unit_id,
+                               ui_goto_armed, cam_x, cam_y, zoom, ui_goto_x, ui_goto_y,
+                               have_map_civ ? &map_civ_info : NULL);
                 break;
             }
             if (show_busy_indicator) render_busy_indicator(SCREEN_WIDTH_TOP);
@@ -1056,8 +1142,8 @@ int main(int argc, char* argv[])
                 break;
             case UI_MAP:
             default:
-                render_bottom_screen(cam_x, cam_y, sel_x, sel_y,
-                                     last_touch_px, last_touch_py, ui_goto_x, ui_goto_y);
+                render_bottom_map(have_sel ? &sel_info : NULL, sel_x, sel_y, selected_unit_id,
+                                  cam_x, cam_y, zoom, zoom_idx, ZOOM_COUNT);
                 render_action_bar();
                 if (save_toast_frames > 0) render_toast("Saved");
                 break;
