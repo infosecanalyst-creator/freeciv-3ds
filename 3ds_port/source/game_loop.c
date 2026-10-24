@@ -605,13 +605,21 @@ void freeciv3ds_event_hook(const struct packet_chat_msg *packet, int pidx)
     if (!message_wanted(e)) return;
 
     GameMessage *m = &s_msgs[s_msg_total % MESSAGE_LOG_SIZE];
-    // Strip Freeciv's [c fg=...]...[/c] / [l ...] markup.
+    // Strip Freeciv's [c fg=...]...[/c] markup. Links are self-closing tags
+    // whose visible text is their name attribute: [l tgt="city" id=5 name="Rome" /]
     int j = 0;
-    bool in_tag = false;
     for (const char *p = packet->message; *p && j < (int)sizeof(m->text) - 1; p++) {
-        if (*p == '[') { in_tag = true; continue; }
-        if (*p == ']' && in_tag) { in_tag = false; continue; }
-        if (!in_tag) m->text[j++] = *p;
+        if (*p != '[') { m->text[j++] = *p; continue; }
+        const char *end = strchr(p, ']');
+        if (!end) break;
+        if (p[1] == 'l' && p[2] == ' ') {
+            const char *nm = strstr(p, "name=\"");
+            if (nm && nm < end) {
+                for (nm += 6; *nm && *nm != '"' && nm < end && j < (int)sizeof(m->text) - 1; nm++)
+                    m->text[j++] = *nm;
+            }
+        }
+        p = end;
     }
     m->text[j] = 0;
     if (!j) return;
