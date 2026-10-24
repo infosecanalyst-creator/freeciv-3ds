@@ -1723,11 +1723,14 @@ void render_city_tiles_panel(const CityInfo *info, const CityTileInfo *tiles, in
             // One dark strip, three spaced digits; zeros are dimmed so the
             // non-zero yields stand out.
             C2D_DrawRectSolid(x + 1, y + c - 12, 0.035f, c - 3, 10, C2D_Color32(0, 0, 0, 0xA0));
+            int bias = font_get_bias(); // Large text would overflow the cell
+            font_set_bias(0);
             for (int k = 0; k < 3; k++) {
                 snprintf(d, sizeof(d), "%d", v[k] > 9 ? 9 : v[k]);
-                float dx = x + 2 + k * ((c - 4) / 3.0f);
+                float dx = x + 2 + k * 7;
                 font_draw(d, dx, y + c - 16, 0.04f, 0.34f, v[k] ? col[k] : C2D_Color32(0x70, 0x70, 0x70, 0xFF));
             }
+            font_set_bias(bias);
         }
     }
     draw_text(CITY_SPEC_X, CITY_GRID_Y, 0.42f, soft, "Tap land to work it or free it.");
