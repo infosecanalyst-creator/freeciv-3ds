@@ -581,7 +581,7 @@ static const char *k_terrain_names[] = { "Ocean", "Grassland", "Plains", "Desert
 
 void popup_layout(PopupMenu *m, int anchor_x, int anchor_y)
 {
-    m->cols = m->n > 7 ? 2 : 1;
+    m->cols = m->n > 12 ? 3 : m->n > 7 ? 2 : 1;
     int rows = (m->n + m->cols - 1) / m->cols;
     m->w = m->cols * POPUP_ITEM_W + (m->cols + 1) * 3;
     m->h = POPUP_TITLE_H + rows * (POPUP_ITEM_H + 3) + 3;
