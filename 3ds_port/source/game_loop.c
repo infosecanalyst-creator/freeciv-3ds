@@ -310,7 +310,8 @@ typedef enum {
     CMD_DIPLOMACY_ADD_CLAUSE,    // a=counterpart, b=clause_type, c=value
     CMD_DIPLOMACY_REMOVE_CLAUSE, // a=counterpart, b=clause_type, c=value
     CMD_DIPLOMACY_ACCEPT,        // a=counterpart player id
-    CMD_SAVE_GAME                // no payload; auto-named "3ds-T<turn>"
+    CMD_SAVE_GAME,               // no payload; auto-named "3ds-T<turn>"
+    CMD_UNIT_CITY_ACTION         // a=unit_id, b=action id, c=city tile index
 } PendingCmdKind;
 
 typedef struct {
@@ -444,6 +445,13 @@ void freeciv_request_diplomacy_remove_clause(int counterpart, int clause_type, i
 void freeciv_request_diplomacy_accept(int counterpart)
 {
     enqueue_cmd(CMD_DIPLOMACY_ACCEPT, counterpart, 0, 0, 0);
+}
+
+void freeciv_request_city_action(int unit_id, int action, int tx, int ty)
+{
+    if (map_is_empty()) return;
+    struct tile *t = port_native_tile(tx, ty);
+    if (t) enqueue_cmd(CMD_UNIT_CITY_ACTION, unit_id, action, tile_index(t), 0);
 }
 
 void freeciv_request_save_game(void)
@@ -668,6 +676,52 @@ void get_route_preview(int unit_id, int tx, int ty, RoutePreview *out)
     pf_map_destroy(pfm);
 }
 
+static const struct { action_id act; const char *label; } k_city_actions[] = {
+    { ACTION_HELP_WONDER,             "Help Wonder" },
+    { ACTION_TRADE_ROUTE,             "Trade Route" },
+    { ACTION_MARKETPLACE,             "Sell Goods" },
+    { ACTION_DISBAND_UNIT_RECOVER,    "Disband (shields)" },
+    { ACTION_UPGRADE_UNIT,            "Upgrade" },
+    { ACTION_HOME_CITY,               "Make Home City" },
+    { ACTION_ESTABLISH_EMBASSY_STAY,  "Embassy" },
+    { ACTION_ESTABLISH_EMBASSY,       "Embassy (stay)" },
+    { ACTION_SPY_INVESTIGATE_CITY,    "Investigate" },
+    { ACTION_INV_CITY_SPEND,          "Investigate" },
+    { ACTION_SPY_STEAL_TECH_ESC,      "Steal Tech" },
+    { ACTION_SPY_STEAL_TECH,          "Steal Tech" },
+    { ACTION_SPY_SABOTAGE_CITY_ESC,   "Sabotage" },
+    { ACTION_SPY_SABOTAGE_CITY,       "Sabotage" },
+    { ACTION_SPY_INCITE_CITY_ESC,     "Incite Revolt" },
+    { ACTION_SPY_INCITE_CITY,         "Incite Revolt" },
+    { ACTION_SPY_STEAL_GOLD_ESC,      "Steal Gold" },
+    { ACTION_SPY_STEAL_GOLD,          "Steal Gold" },
+    { ACTION_SPY_POISON_ESC,          "Poison Water" },
+    { ACTION_SPY_POISON,              "Poison Water" },
+    { ACTION_STEAL_MAPS_ESC,          "Steal Maps" },
+    { ACTION_STEAL_MAPS,              "Steal Maps" },
+};
+
+int get_city_actions(int unit_id, int tx, int ty, CityAction *out, int max)
+{
+    if (map_is_empty()) return 0;
+    struct unit *punit = game_unit_by_number(unit_id);
+    struct tile *t = port_native_tile(tx, ty);
+    struct city *pcity = t ? tile_city(t) : NULL;
+    if (!punit || !pcity) return 0;
+    int n = 0;
+    for (unsigned i = 0; i < ARRAY_SIZE(k_city_actions) && n < max; i++) {
+        if (!is_action_enabled_unit_on_city(&(wld.map), k_city_actions[i].act, punit, pcity)) continue;
+        // One entry per label (the "escape" variant is listed first and wins).
+        bool dup = false;
+        for (int j = 0; j < n; j++) if (!strcmp(out[j].label, k_city_actions[i].label)) dup = true;
+        if (dup) continue;
+        out[n].action = k_city_actions[i].act;
+        fc_strlcpy(out[n].label, k_city_actions[i].label, sizeof(out[n].label));
+        n++;
+    }
+    return n;
+}
+
 bool game_pop_sound(char *tag, int len)
 {
     if (s_sound_tail == s_sound_head) return false;
@@ -796,6 +850,10 @@ static unsigned unit_action_mask(struct player *pov, struct unit *punit)
     }
     if (punit->activity != ACTIVITY_IDLE || unit_has_orders(punit)) {
         m |= 1u << UNIT_ACTION_WAKE;
+    }
+    if (punit->activity != ACTIVITY_PILLAGE
+        && can_unit_do_activity(nmap, punit, ACTIVITY_PILLAGE, ACTION_PILLAGE)) {
+        m |= 1u << UNIT_ACTION_PILLAGE;
     }
     return m;
 }
@@ -1025,9 +1083,25 @@ void freeciv3ds_process_pending_actions(void)
                     free_unit_orders(punit);
                     unit_activity_handling(punit, ACTIVITY_IDLE, ACTION_NONE);
                     break;
+                case UNIT_ACTION_PILLAGE: {
+                    struct extra_type *t = NULL;   // NULL: the server picks what to pillage
+                    unit_activity_handling_targeted(punit, ACTIVITY_PILLAGE, &t, ACTION_PILLAGE);
+                    break;
+                }
                 default:
                     break;
                 }
+            }
+            break;
+        }
+        case CMD_UNIT_CITY_ACTION: {
+            struct unit *punit = game_unit_by_number(cmd.a);
+            struct tile *t = index_to_tile(&(wld.map), cmd.c);
+            struct city *pcity = t ? tile_city(t) : NULL;
+            if (punit && unit_owner(punit) == pov && pcity
+                && is_action_enabled_unit_on_city(&(wld.map), cmd.b, punit, pcity)) {
+                free_unit_orders(punit);
+                unit_perform_action(pov, punit->id, pcity->id, 0, "", cmd.b, ACT_REQ_PLAYER);
             }
             break;
         }

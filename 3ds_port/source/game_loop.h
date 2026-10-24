@@ -52,6 +52,7 @@ typedef enum {
     UNIT_ACTION_FOUND_CITY,
     UNIT_ACTION_JOIN_CITY,
     UNIT_ACTION_WAKE,        // cancel orders / current activity
+    UNIT_ACTION_PILLAGE,
     UNIT_ACTION_COUNT
 } UnitActionKind;
 
@@ -445,6 +446,14 @@ bool get_attack_odds(int unit_id, int tx, int ty, AttackOdds *out);
 #define ROUTE_MAX 64
 typedef struct { int n; int x[ROUTE_MAX], y[ROUTE_MAX]; int turns; bool reachable; } RoutePreview;
 void get_route_preview(int unit_id, int tx, int ty, RoutePreview *out);
+
+// ---- Actions aimed at a city (caravans, diplomats, upgrades...) ----
+typedef struct { int action; char label[32]; } CityAction;
+// What unit_id could do to the city on (tx, ty) right now - its own tile
+// (help wonder, disband for shields, upgrade, home city) or an adjacent one
+// (embassy, sabotage, trade route...). Returns how many were written.
+int get_city_actions(int unit_id, int tx, int ty, CityAction *out, int max);
+void freeciv_request_city_action(int unit_id, int action, int tx, int ty);
 // Fills *out for unit_id (out->valid=false if it no longer exists).
 void get_unit_info(int unit_id, UnitInfo *out);
 // The units on tile (x, y), pov's first; returns how many were written.

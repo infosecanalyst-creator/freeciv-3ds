@@ -244,6 +244,7 @@ enum { POPUP_NONE, POPUP_UNIT, POPUP_CONFIRM_DISBAND, POPUP_STACK, POPUP_MENU, P
 #define PID_OPEN_CITY   (-100)
 #define PID_YES         1
 #define PID_NO          0
+#define PID_CITY_ACTION 1000            // + Freeciv action id
 enum { MENU_RESEARCH = 1, MENU_RATES, MENU_GOVERNMENT, MENU_DIPLOMACY, MENU_SAVE, MENU_MUSIC, MENU_EFFECTS, MENU_CLOSE, MENU_MESSAGES };
 
 static void popup_add(PopupMenu *m, int id, const char *label, bool enabled)
@@ -269,10 +270,15 @@ static void build_unit_popup(PopupMenu *m, const UnitInfo *u)
         { UNIT_ACTION_SENTRY,     "Sentry" },
         { UNIT_ACTION_EXPLORE,    "Explore" },
         { UNIT_ACTION_WAKE,       "Cancel Orders" },
+        { UNIT_ACTION_PILLAGE,    "Pillage" },
     };
     for (int i = 0; i < (int)(sizeof(items) / sizeof(items[0])); i++) {
         if (u->actions & (1u << items[i].kind)) popup_add(m, items[i].kind, items[i].label, true);
     }
+    // In a city: help wonder, disband for shields, upgrade, home city...
+    CityAction ca[8];
+    int nca = get_city_actions(u->id, u->x, u->y, ca, 8);
+    for (int i = 0; i < nca && m->n < POPUP_MAX - 3; i++) popup_add(m, PID_CITY_ACTION + ca[i].action, ca[i].label, true);
     popup_add(m, PID_SKIP, "Wait", true);
     popup_add(m, PID_DESELECT, "Done", true);
     popup_add(m, PID_DISBAND_ASK, "Disband", true);
@@ -471,6 +477,7 @@ int main(int argc, char* argv[])
     int msg_view_n = 0;
     // Attack confirmation and route preview.
     MoveDir pending_attack_dir = MOVE_DIR_NORTH;
+    int pending_target_x = -1, pending_target_y = -1;
     AttackOdds attack_odds;
     memset(&attack_odds, 0, sizeof(attack_odds));
     RoutePreview route;
@@ -1200,6 +1207,11 @@ int main(int argc, char* argv[])
                         tile_to_screen(unit_info.x, unit_info.y, cam_x, cam_y, zoom, &ux, &uy);
                         popup_layout(&popup, ux + (int)(15 * zoom), uy + (int)(15 * zoom));
                         popup_kind = POPUP_CONFIRM_DISBAND;
+                    } else if (id >= PID_CITY_ACTION) {
+                        freeciv_request_city_action(selected_unit_id, id - PID_CITY_ACTION, unit_info.x, unit_info.y);
+                        advance_from = selected_unit_id;
+                        selected_unit_id = -1;
+                        want_next_unit = true;
                     } else {
                         freeciv_request_unit_action(selected_unit_id, (UnitActionKind)id);
                         if (id != UNIT_ACTION_WAKE) {
@@ -1210,6 +1222,8 @@ int main(int argc, char* argv[])
                     }
                 } else if (kind == POPUP_ATTACK && selected_unit_id >= 0) {
                     if (id == PID_YES) freeciv_request_unit_move(selected_unit_id, pending_attack_dir);
+                    else if (id >= PID_CITY_ACTION)
+                        freeciv_request_city_action(selected_unit_id, id - PID_CITY_ACTION, pending_target_x, pending_target_y);
                 } else if (kind == POPUP_CONFIRM_DISBAND && selected_unit_id >= 0) {
                     if (id == PID_YES) {
                         freeciv_request_unit_action(selected_unit_id, UNIT_ACTION_DISBAND);
@@ -1281,13 +1295,22 @@ int main(int argc, char* argv[])
                             else want_unit_popup = true;
                         } else if (adjacent_dir(unit_info.x, unit_info.y, tx, ty, &dir)) {
                             pending_goto_x = pending_goto_y = -1;
-                            if (get_attack_odds(selected_unit_id, tx, ty, &attack_odds)) {
-                                // Show the odds before fighting.
+                            CityAction ca[10];
+                            int nca = own_city ? 0 : get_city_actions(selected_unit_id, tx, ty, ca, 10);
+                            bool fight = get_attack_odds(selected_unit_id, tx, ty, &attack_odds);
+                            if (fight || nca > 0) {
+                                // Show the choices (and the odds) before acting.
                                 memset(&popup, 0, sizeof(popup));
-                                snprintf(popup.title, sizeof(popup.title), "vs %s: %d%% to win",
-                                         attack_odds.defender, attack_odds.win_pct);
-                                popup_add(&popup, PID_YES, attack_odds.can_attack ? "Attack" : "Not at war", attack_odds.can_attack);
+                                if (fight)
+                                    snprintf(popup.title, sizeof(popup.title), "vs %s: %d%% to win",
+                                             attack_odds.defender, attack_odds.win_pct);
+                                else
+                                    snprintf(popup.title, sizeof(popup.title), "%s", t.city_name[0] ? t.city_name : "City");
+                                for (int i = 0; i < nca; i++) popup_add(&popup, PID_CITY_ACTION + ca[i].action, ca[i].label, true);
+                                if (fight)
+                                    popup_add(&popup, PID_YES, attack_odds.can_attack ? "Attack" : "Not at war", attack_odds.can_attack);
                                 popup_add(&popup, PID_NO, "Cancel", true);
+                                pending_target_x = tx; pending_target_y = ty;
                                 int sx, sy;
                                 tile_to_screen(tx, ty, cam_x, cam_y, zoom, &sx, &sy);
                                 popup_layout(&popup, sx + (int)(15 * zoom), sy + (int)(15 * zoom));
@@ -1633,6 +1656,8 @@ int main(int argc, char* argv[])
                     ti.hint = "Tap a unit to command it.";
                 } else if (popup_kind != POPUP_NONE) {
                     ti.hint = "Tap a choice, or tap outside the menu to close it.";
+                } else if (popup_kind == POPUP_ATTACK && !attack_odds.defender[0]) {
+                    ti.hint = "Choose what your unit should do there.";
                 } else if (popup_kind == POPUP_ATTACK) {
                     static char odds_hint[96];
                     snprintf(odds_hint, sizeof(odds_hint), "%s (%d/%d HP) vs %s (%d/%d HP): %d%% chance to win.",
