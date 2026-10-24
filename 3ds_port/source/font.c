@@ -41,12 +41,21 @@ void font_exit(void)
     s_sheet = NULL;
 }
 
+static int s_bias;
+void font_set_bias(int steps) { s_bias = steps < 0 ? 0 : steps > 2 ? 2 : steps; }
+int  font_get_bias(void) { return s_bias; }
+
 static int size_index(float scale)
 {
     int px = (int)(scale * 28.0f + 0.5f);
     int best = 0;
     for (int i = 1; i < FONT_NSIZES; i++) {
         if (abs(k_font_px[i] - px) < abs(k_font_px[best] - px)) best = i;
+    }
+    // Larger text only for the small sizes (body text), so headings stay put.
+    if (s_bias && k_font_px[best] <= 16) {
+        best += s_bias;
+        while (best > 0 && k_font_px[best] > 16) best--;
     }
     return best;
 }

@@ -38,6 +38,8 @@
 #include "combat.h"
 #include "events.h"
 #include "specialist.h"
+#include "spacerace.h"
+#include "spaceship.h"
 #include "string_vector.h"
 #include <string.h>
 #include <stdlib.h>
@@ -318,7 +320,8 @@ typedef enum {
     CMD_UNIT_CITY_ACTION,        // a=unit_id, b=action id, c=city tile index
     CMD_CITY_TOGGLE_TILE,        // a=city_id, b=tile index
     CMD_CITY_CHANGE_SPECIALIST,  // a=city_id, b=from, c=to
-    CMD_CITY_SELL                // a=city_id, b=improvement id
+    CMD_CITY_SELL,               // a=city_id, b=improvement id
+    CMD_SPACESHIP_LAUNCH
 } PendingCmdKind;
 
 typedef struct {
@@ -772,6 +775,28 @@ void get_pedia_text(int kind, int id, char *out, int len)
         break;
     }
     }
+}
+
+void freeciv_request_spaceship_launch(void)
+{
+    enqueue_cmd(CMD_SPACESHIP_LAUNCH, 0, 0, 0, 0);
+}
+
+void get_spaceship_info(SpaceshipInfo *out)
+{
+    memset(out, 0, sizeof(*out));
+    struct player *pov = get_pov_player();
+    if (!pov) return;
+    const struct player_spaceship *s = &pov->spaceship;
+    out->state = s->state;
+    out->structurals = s->structurals;
+    out->components = s->components;
+    out->modules = s->modules;
+    out->population = s->population;
+    out->success_pct = (int)(s->success_rate * 100.0 + 0.5);
+    out->travel_tenths = (int)(s->travel_time * 10.0 + 0.5);
+    out->launch_year = s->launch_year;
+    out->can_launch = s->state == SSHIP_STARTED && s->success_rate > 0.0;
 }
 
 bool get_game_result(bool *won, int *score, int *turn)
@@ -1367,6 +1392,9 @@ void freeciv3ds_process_pending_actions(void)
             break;
         case CMD_CITY_SELL:
             handle_city_sell(pov, cmd.a, cmd.b);
+            break;
+        case CMD_SPACESHIP_LAUNCH:
+            handle_spaceship_launch(pov);
             break;
         case CMD_CITY_PRODUCTION:
             // Self-validating: no-ops on an illegal kind/value or a

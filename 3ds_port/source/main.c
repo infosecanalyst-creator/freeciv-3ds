@@ -65,7 +65,7 @@ void __wrap_abort(void) {
 // UI mode: drives both input routing and which render path runs each frame.
 // UI_MAP is the existing map/unit-control screen (untouched behavior);
 // UI_CITY/UI_RESEARCH/UI_RATES are the new modal panels from handoff.md.
-typedef enum { UI_MAP, UI_CITY, UI_RESEARCH, UI_RATES, UI_GOVERNMENT, UI_DIPLOMACY, UI_MESSAGES, UI_PEDIA } UiMode;
+typedef enum { UI_MAP, UI_CITY, UI_RESEARCH, UI_RATES, UI_GOVERNMENT, UI_DIPLOMACY, UI_MESSAGES, UI_PEDIA, UI_SPACESHIP } UiMode;
 
 // App-level state, one level above UiMode (handoff-nohw.md §A.3). The
 // server coroutine is created in init_freeciv() but blocks before touching
@@ -245,7 +245,7 @@ enum { POPUP_NONE, POPUP_UNIT, POPUP_CONFIRM_DISBAND, POPUP_STACK, POPUP_MENU, P
 #define PID_YES         1
 #define PID_NO          0
 #define PID_CITY_ACTION 1000            // + Freeciv action id
-enum { MENU_RESEARCH = 1, MENU_RATES, MENU_GOVERNMENT, MENU_DIPLOMACY, MENU_SAVE, MENU_MUSIC, MENU_EFFECTS, MENU_CLOSE, MENU_MESSAGES, MENU_PEDIA };
+enum { MENU_RESEARCH = 1, MENU_RATES, MENU_GOVERNMENT, MENU_DIPLOMACY, MENU_SAVE, MENU_MUSIC, MENU_EFFECTS, MENU_CLOSE, MENU_MESSAGES, MENU_PEDIA, MENU_SPACESHIP, MENU_TEXT };
 
 static void popup_add(PopupMenu *m, int id, const char *label, bool enabled)
 {
@@ -294,6 +294,8 @@ static void open_game_menu(PopupMenu *m)
     popup_add(m, MENU_DIPLOMACY,  "Diplomacy", true);
     popup_add(m, MENU_MESSAGES,   "Messages", true);
     popup_add(m, MENU_PEDIA,      "Civilopedia", true);
+    popup_add(m, MENU_SPACESHIP,  "Spaceship", true);
+    popup_add(m, MENU_TEXT,       font_get_bias() ? "Text: Large" : "Text: Normal", true);
     popup_add(m, MENU_SAVE,       "Save Game", true);
     char lbl[24];
     snprintf(lbl, sizeof(lbl), "Music: %d", audio_music_volume());
@@ -320,6 +322,8 @@ static void load_settings(void *ngp)
         while (fgets(line, sizeof(line), f)) {
             sscanf(line, "music=%d", &mv);
             sscanf(line, "effects=%d", &sv);
+            int tb;
+            if (sscanf(line, "text=%d", &tb) == 1) font_set_bias(tb);
             sscanf(line, "ng_size=%d", &s_saved_ng.size);
             sscanf(line, "ng_rivals=%d", &s_saved_ng.rivals);
             sscanf(line, "ng_skill=%d", &s_saved_ng.skill);
@@ -344,7 +348,7 @@ static void save_settings(void)
 {
     FILE *f = fopen(SETTINGS_PATH, "w");
     if (!f) return;
-    fprintf(f, "music=%d\neffects=%d\n", audio_music_volume(), audio_sfx_volume());
+    fprintf(f, "music=%d\neffects=%d\ntext=%d\n", audio_music_volume(), audio_sfx_volume(), font_get_bias());
     if (s_saved_ng.size >= 0)
         fprintf(f, "ng_size=%d\nng_rivals=%d\nng_skill=%d\nng_rules=%d\nng_land=%d\nng_barb=%d\n",
                 s_saved_ng.size, s_saved_ng.rivals, s_saved_ng.skill, s_saved_ng.rules,
@@ -520,6 +524,8 @@ int main(int argc, char* argv[])
     static PediaEntry pedia_list[160];
     int pedia_n = 0;
     static char pedia_text[4096];
+    SpaceshipInfo ship;
+    memset(&ship, 0, sizeof(ship));
     bool game_over = false, game_over_shown = false, game_won = false;
     int game_score = 0, game_end_turn = 0;
     static UnitBrief stack[16];
@@ -838,7 +844,7 @@ int main(int argc, char* argv[])
                 ui_tech_tree_view = !ui_tech_tree_view;
                 ui_scroll = 0;
             }
-        } else if (ui_mode == UI_RATES) {
+        } else if (ui_mode == UI_RATES || ui_mode == UI_SPACESHIP) {
             if (kDown & KEY_B) ui_mode = UI_MAP;
         } else if (popup_kind != POPUP_NONE) {
             if (kDown & KEY_B) popup_kind = POPUP_NONE;
@@ -1163,6 +1169,11 @@ int main(int argc, char* argv[])
                                                                 ui_diplo_info.clauses[row].value);
                     }
                 }
+            } else if (ui_mode == UI_SPACESHIP) {
+                if (py >= PANEL_FOOTER_Y) {
+                    if (px < 160) { if (ship.can_launch) freeciv_request_spaceship_launch(); }
+                    else ui_mode = UI_MAP;
+                }
             } else if (ui_mode == UI_PEDIA) {
                 if (py >= PEDIA_TAB_Y && py < PEDIA_TAB_Y + PEDIA_TAB_H) {
                     for (int k = 0; k < PEDIA_KINDS; k++)
@@ -1368,6 +1379,13 @@ int main(int argc, char* argv[])
                     case MENU_GOVERNMENT: ui_mode = UI_GOVERNMENT; ui_scroll = 0; break;
                     case MENU_DIPLOMACY:  ui_mode = UI_DIPLOMACY; ui_scroll = 0; ui_dipl_stage = 1; break;
                     case MENU_MESSAGES:   ui_mode = UI_MESSAGES; ui_scroll = 0; break;
+                    case MENU_SPACESHIP:  ui_mode = UI_SPACESHIP; break;
+                    case MENU_TEXT:
+                        font_set_bias(font_get_bias() ? 0 : 1);
+                        save_settings();
+                        open_game_menu(&popup);
+                        popup_kind = POPUP_MENU;
+                        break;
                     case MENU_PEDIA:      ui_mode = UI_PEDIA; ui_scroll = 0; pedia_sel = -1; pedia_dirty = true; break;
                     case MENU_SAVE:
                         freeciv_request_save_game();
@@ -1660,6 +1678,8 @@ int main(int argc, char* argv[])
                 }
             } else if (ui_mode == UI_RATES) {
                 get_civ_info(&ui_civ_info);
+            } else if (ui_mode == UI_SPACESHIP) {
+                get_spaceship_info(&ship);
             } else if (ui_mode == UI_PEDIA) {
                 if (pedia_dirty) {
                     pedia_n = get_pedia_list(pedia_kind, pedia_list, 160);
@@ -1781,6 +1801,9 @@ int main(int argc, char* argv[])
             case UI_DIPLOMACY:
                 render_diplomacy_top(ui_dipl_stage, ui_dipl_counterpart_name, &ui_diplo_info);
                 break;
+            case UI_SPACESHIP:
+                render_spaceship_top(&ship);
+                break;
             case UI_PEDIA:
                 render_pedia_top(pedia_sel >= 0 ? pedia_list[pedia_sel].name : "Civilopedia", pedia_text, pedia_text_scroll);
                 break;
@@ -1867,6 +1890,9 @@ int main(int argc, char* argv[])
                 break;
             case UI_GOVERNMENT:
                 render_government_panel(ui_gov_opts, ui_gov_count, ui_scroll, ui_civ_info.government_id);
+                break;
+            case UI_SPACESHIP:
+                render_spaceship_panel(&ship);
                 break;
             case UI_PEDIA:
                 render_pedia_panel(pedia_kind, pedia_list, pedia_n, ui_scroll, pedia_sel);

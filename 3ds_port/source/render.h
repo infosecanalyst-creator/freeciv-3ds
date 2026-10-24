@@ -341,6 +341,10 @@ void render_messages_top(const GameMessage *m);
 void render_pedia_panel(int kind, const PediaEntry *list, int n, int scroll, int selected);
 void render_pedia_top(const char *title, const char *text, int scroll_lines);
 
+// Spaceship (Menu > Spaceship).
+void render_spaceship_top(const SpaceshipInfo *s);
+void render_spaceship_panel(const SpaceshipInfo *s);   // [Launch] left half, [Close] right half of the footer
+
 // End of the game.
 #define GAMEOVER_BTN_Y 170
 void render_game_over_top(bool won, int score, int turn);

@@ -16,5 +16,8 @@ void font_exit(void);
 // the line box. Returns the advance width in pixels.
 float font_draw(const char *utf8, float x, float y, float z, float scale, u32 color);
 float font_width(const char *utf8, float scale);
+// Larger text: step every size up by `steps` (0 = normal).
+void font_set_bias(int steps);
+int  font_get_bias(void);
 
 #endif

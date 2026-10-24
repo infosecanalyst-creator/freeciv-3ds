@@ -2518,6 +2518,54 @@ void render_pedia_top(const char *title, const char *text, int scroll_lines)
     draw_text(5, 240 - 16, 0.45f, soft, "L/R: scroll the text   D-Pad: list   B: close");
 }
 
+void render_spaceship_top(const SpaceshipInfo *s)
+{
+    C2D_TextBufClear(g_textBuf);
+    u32 soft = C2D_Color32(0xC0, 0xCE, 0xDC, 0xFF), label = C2D_Color32(0x8C, 0xA0, 0xB4, 0xFF);
+    char line[96];
+    C2D_DrawRectSolid(0, 0, 0.0f, 400, 240, C2D_Color32(0x06, 0x08, 0x14, 0xFF));
+    // a few stars
+    for (int i = 0; i < 60; i++) {
+        int x = (i * 97 + 13) % 400, y = (i * 53 + 29) % 240;
+        C2D_DrawRectSolid(x, y, 0.0f, 1 + (i % 3 == 0), 1 + (i % 3 == 0), C2D_Color32(0xC0, 0xC8, 0xE0, 0xC0));
+    }
+    draw_text(14, 6, 0.85f, 0xFFFFFFFF, "Spaceship");
+    layer(4.0f);
+    C2D_DrawRectSolid(8, 44, 0.0f, 384, 170, C2D_Color32(0x10, 0x18, 0x26, 0xE8));
+    static const char *states[] = { "Not started", "Under construction", "On its way", "Arrived" };
+    draw_text(18, 50, 0.6f, 0xFFFFFFFF, states[s->state & 3]);
+    if (s->state == 0) {
+        draw_text(18, 80, 0.47f, soft, "Research Space Flight, then build the Apollo Program.");
+        draw_text(18, 98, 0.47f, soft, "Cities can then build Structurals, Components and");
+        draw_text(18, 116, 0.47f, soft, "Modules. Parts are fitted automatically each turn.");
+    } else {
+        snprintf(line, sizeof(line), "Structurals %d   Components %d   Modules %d", s->structurals, s->components, s->modules);
+        draw_text(18, 80, 0.5f, soft, line);
+        snprintf(line, sizeof(line), "Colonists %d", s->population);
+        draw_text(18, 102, 0.5f, soft, line);
+        snprintf(line, sizeof(line), "Chance of success: %d%%", s->success_pct);
+        draw_text(18, 124, 0.55f, s->success_pct >= 80 ? C2D_Color32(0x90, 0xE8, 0x90, 0xFF) : C2D_Color32(0xFF, 0xD0, 0x60, 0xFF), line);
+        snprintf(line, sizeof(line), "Travel time: %d.%d years", s->travel_tenths / 10, s->travel_tenths % 10);
+        draw_text(18, 148, 0.5f, soft, line);
+        if (s->state >= 2) {
+            snprintf(line, sizeof(line), "Launched in %d", s->launch_year);
+            draw_text(18, 170, 0.5f, label, line);
+        }
+    }
+    layer(0.0f);
+}
+
+void render_spaceship_panel(const SpaceshipInfo *s)
+{
+    C2D_TextBufClear(g_textBuf);
+    panel_bg("Spaceship", NULL);
+    draw_text(8, PANEL_HEADER_H + 10, 0.47f, C2D_Color32(0xA8, 0xB4, 0xC4, 0xFF),
+              s->can_launch ? "Launch when the chance of success is high enough."
+              : s->state >= 2 ? "Your ship is on its way." : "Nothing to launch yet.");
+    draw_button(4, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Launch", 0.5f, s->can_launch, s->can_launch);
+    draw_button(164, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
+}
+
 void render_game_over_top(bool won, int score, int turn)
 {
     C2D_TextBufClear(g_textBuf);

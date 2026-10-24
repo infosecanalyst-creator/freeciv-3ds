@@ -418,6 +418,19 @@ bool game_pop_sound(char *tag, int len);
 // True once the game has ended (or your civilization is gone).
 bool get_game_result(bool *won, int *score, int *turn);
 
+// ---- Spaceship ----
+typedef struct {
+    int  state;                 // 0 none, 1 building, 2 launched, 3 arrived
+    int  structurals, components, modules;
+    int  population;
+    int  success_pct;
+    int  travel_tenths;         // travel time in tenths of years
+    int  launch_year;
+    bool can_launch;
+} SpaceshipInfo;
+void get_spaceship_info(SpaceshipInfo *out);
+void freeciv_request_spaceship_launch(void);
+
 // ---- Civilopedia (ruleset help) ----
 typedef enum { PEDIA_UNITS, PEDIA_BUILDINGS, PEDIA_WONDERS, PEDIA_TECHS, PEDIA_GOVS, PEDIA_KINDS } PediaKind;
 typedef struct { int id; char name[48]; } PediaEntry;
