@@ -2402,7 +2402,7 @@ void render_new_game_top(bool is_new_3ds, const char *summary)
     u32 label = C2D_Color32(0x8C, 0xA0, 0xB4, 0xFF);
     C2D_DrawRectSolid(0, 0, 0.0f, 400, 240, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
     draw_text(16, 20, 0.9f, white, "Freeciv 3DS");
-    draw_text(16, 56, 0.5f, soft, summary);
+    draw_wrapped(summary, 16, 56, 368, 0.5f, soft, 4, 17, 0.0f);
     draw_text(16, 150, 0.45f, label, is_new_3ds
         ? "New 3DS detected: 804 MHz, room for big maps."
         : "Old 3DS detected: smaller maps keep turns quick.");

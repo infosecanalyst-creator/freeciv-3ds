@@ -707,7 +707,7 @@ int main(int argc, char* argv[])
             C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 
             char ng_summary[160];
-            snprintf(ng_summary, sizeof(ng_summary), "%s rules, %s map (about %d,000 tiles), %s,\n%d rival%s, %s AI, barbarians: %s.",
+            snprintf(ng_summary, sizeof(ng_summary), "%s rules, %s map (about %d,000 tiles), %s, %d rival%s, %s AI, barbarians: %s.",
                      k_rules_names[ng.rules], k_size_names[ng.size], k_size_tiles[ng.size], k_land_names[ng.land],
                      ng.rivals, ng.rivals == 1 ? "" : "s", k_skill_names[ng.skill], k_barb_names[ng.barb]);
             for (int eye = 0; eye < (osGet3DSliderState() > 0.02f ? 2 : 1); eye++) {
