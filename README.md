@@ -26,13 +26,27 @@ supports the Old 3DS.
 - **Unit orders menu** lists only what the unit can do right now: Build City, Join City, Build Road,
   Irrigate, Mine, Fortify, Sentry, Explore, Cancel Orders, Wait, Done, and Disband (which asks first).
   After you give orders, the next unit that needs them is selected automatically.
+- **Turn report**: what happened while the AI moved (battles, cities growing or starving, technologies,
+  first contact, treaties) on the top screen at the start of each turn, most important first. The full
+  log is under Menu > Messages; tap a message to jump to where it happened.
+- **Combat odds and routes**: tapping an enemy next to your unit shows the chance to win (and both units'
+  HP) before you commit. Marking a route draws the path and how many turns it takes.
+- **Caravans, diplomats and more**: next to a foreign city a unit is offered everything it can do there
+  (embassy, investigate, steal tech, sabotage, incite revolt, trade route, sell goods) besides Attack. In
+  a city: Help Wonder, Disband for shields, Upgrade and Make Home City. Also Pillage.
+- **Civilopedia** (Menu): every unit, building, wonder, technology and government, with stats and the
+  ruleset's help text.
 - **Map labels**: city name plates with size, owner shields, health bars for wounded units,
   activity badges (Fortified, Sentry, Working, Exploring, Goto), and dimmed units that are done.
-- **Cities**: yields, growth and production bars, and the units inside (lead one out with Y). Change
-  production, keep a build queue, and buy.
+- **Cities**: yields, growth and production bars, and the units inside (lead one out with Y). Three
+  tabs: **Build** (change production, keep a queue, buy), **Tiles** (the city's land as a grid with
+  food/shields/trade per tile; tap to put a citizen to work or free one, switch specialists) and
+  **Buildings** (sell one per turn).
 - **Civilization**: research (list and tech tree), tax rates, government and revolutions, and
   diplomacy with the AI.
-- **New Game setup**: map size, number of rivals and AI skill.
+- **New Game setup**: rules (Classic or Civ2Civ3), map size, land (islands, continents or pangaea),
+  number of rivals, AI skill and barbarians. Your choices are remembered.
+- **End of game**: victory or defeat screen with your score.
 - **Sound and music**: Freeciv's sound set (unit moves, combat, cities, technology) plus a rotation of
   CC0 medieval music. Volumes are in the Menu.
 - **Stereo 3D** on the top screen, driven by the 3D slider: panels float gently in front of the screen.
@@ -47,7 +61,7 @@ supports the Old 3DS.
 | Menu / Next / − + / End Turn | Bottom-row buttons (Menu: Research, Tax Rates, Government, Diplomacy, Save, Music, Effects) |
 | D-Pad | Move the selected unit (or scroll if none is selected) |
 | Circle Pad | Scroll |
-| A | Selected unit's orders, or the next unit |
+| A | Selected unit's orders, or the next unit (also puts the turn report away) |
 | X | Next unit |
 | B | Back, close, or cancel a route |
 | L / R | Research / Tax rates |
@@ -71,9 +85,12 @@ There is no DS version. The DS has 4 MB of RAM, far less than the Freeciv engine
 
 ## Installing
 
-Copy `freeciv3ds.3dsx` to `/3ds/` on the SD card and start it from the Homebrew Launcher. Saves go to
-`/3ds/freeciv/saves/` and settings to `/3ds/freeciv/settings.ini`. CI builds every push; the latest
-build is on the `builds` branch.
+- **CIA** (shows on the HOME menu with its own banner): install `freeciv3ds.cia` with FBI.
+- **3dsx**: copy `freeciv3ds.3dsx` to `/3ds/` and start it from the Homebrew Launcher.
+- **Over Wi-Fi**: in the Homebrew Launcher press Y, then `python3 tools/3dslink.py <3ds-ip> freeciv3ds.3dsx`.
+
+Saves go to `/3ds/freeciv/saves/` and settings to `/3ds/freeciv/settings.ini`. CI builds every push; the
+latest `.3dsx` and `.cia` are on the `builds` branch, and pushing a `v*` tag publishes a GitHub Release.
 
 ## Building
 
