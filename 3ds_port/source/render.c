@@ -855,19 +855,20 @@ void render_top_info(const TopInfo *ti)
                  ti->tile_x, ti->tile_y);
     if (ti->civ && ti->civ->research_name[0]) {
         float y = MINIMAP_Y + MINIMAP_H + 6;
-        draw_text(MINIMAP_X, y, 0.45f, label, "Researching");
-        draw_text(MINIMAP_X, y + 13, 0.5f, white, ti->civ->research_name);
+        float lb = font_get_bias() ? 2.0f : 0.0f; // Large text needs a little more room
+        draw_text(MINIMAP_X, y - lb, 0.45f, label, "Researching");
+        draw_text(MINIMAP_X, y + 13 + lb, 0.5f, white, ti->civ->research_name);
         int need = ti->civ->bulbs_needed > 0 ? ti->civ->bulbs_needed : 1;
         float frac = (float)ti->civ->bulbs / need;
         if (frac < 0) frac = 0;
         if (frac > 1) frac = 1;
-        C2D_DrawRectSolid(MINIMAP_X, y + 31, 0.0f, MINIMAP_W, 6, C2D_Color32(0x24, 0x30, 0x40, 0xFF));
-        C2D_DrawRectSolid(MINIMAP_X, y + 31, 0.01f, MINIMAP_W * frac, 6, C2D_Color32(0x50, 0xA0, 0xF0, 0xFF));
+        C2D_DrawRectSolid(MINIMAP_X, y + 31 + lb, 0.0f, MINIMAP_W, 6, C2D_Color32(0x24, 0x30, 0x40, 0xFF));
+        C2D_DrawRectSolid(MINIMAP_X, y + 31 + lb, 0.01f, MINIMAP_W * frac, 6, C2D_Color32(0x50, 0xA0, 0xF0, 0xFF));
         if (ti->civ->research_turns >= 0)
             snprintf(line, sizeof(line), "%d/%d bulbs, %d turns", ti->civ->bulbs, ti->civ->bulbs_needed, ti->civ->research_turns);
         else
             snprintf(line, sizeof(line), "%d/%d bulbs", ti->civ->bulbs, ti->civ->bulbs_needed);
-        draw_text(MINIMAP_X, y + 39, 0.42f, soft, line);
+        draw_text(MINIMAP_X, y + 39 + lb, 0.42f, soft, line);
     }
 
     // Right: what's selected (in front; the portrait most of all).
