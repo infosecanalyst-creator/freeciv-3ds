@@ -1441,7 +1441,7 @@ int main(int argc, char* argv[])
                                     snprintf(popup.title, sizeof(popup.title), "%s", t.city_name[0] ? t.city_name : "City");
                                 for (int i = 0; i < nca; i++) popup_add(&popup, PID_CITY_ACTION + ca[i].action, ca[i].label, true);
                                 if (fight)
-                                    popup_add(&popup, PID_YES, attack_odds.can_attack ? "Attack" : "Not at war", attack_odds.can_attack);
+                                    popup_add(&popup, PID_YES, attack_odds.can_attack ? "Attack" : "Can't attack", attack_odds.can_attack);
                                 popup_add(&popup, PID_NO, "Cancel", true);
                                 pending_target_x = tx; pending_target_y = ty;
                                 int sx, sy;
