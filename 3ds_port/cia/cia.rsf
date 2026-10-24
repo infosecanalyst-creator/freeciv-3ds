@@ -45,7 +45,6 @@ AccessControlInfo:
   EnableL2Cache           : true
   CanAccessCore2          : true
   SystemMode              : 64MB
-  AffinityMask            : 1
   IORegisterMapping:
    - 1ff00000-1ff7ffff
   MemoryMapping:
