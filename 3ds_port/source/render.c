@@ -557,6 +557,10 @@ static void draw_button(float x, float y, float w, float h, float z, const char 
     C2D_DrawRectSolid(x, y, z, w, h, bg);
     C2D_DrawRectSolid(x, y, z + 0.001f, w, 2, border);
     float tw = text_width(label, scale);
+    while (tw > w - 6 && scale > 0.3f) { // long labels (or Large text) shrink to fit
+        scale -= 0.02f;
+        tw = text_width(label, scale);
+    }
     draw_text_z(x + (w - tw) / 2, y + (h - 30 * scale) / 2 + 1, z + 0.002f, scale,
                 enabled ? 0xFFFFFFFF : C2D_Color32(0x80, 0x88, 0x94, 0xFF), label);
 }
