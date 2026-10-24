@@ -968,7 +968,13 @@ void render_top_info(const TopInfo *ti)
     // Hint line (on the screen plane).
     layer(0.0f);
     C2D_DrawRectSolid(0, 240 - 17, 0.0f, 400, 17, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
-    if (ti->hint) draw_text(5, 240 - 16, 0.45f, ti->hint_color ? ti->hint_color : soft, ti->hint);
+    if (ti->hint) {
+        // Shrink long hints (e.g. combat odds with long unit names) to fit the strip.
+        float hs = 0.45f, w = text_width(ti->hint, hs);
+        if (w > 390) hs = hs * 390 / w;
+        if (hs < 0.34f) hs = 0.34f;
+        draw_text(5, 240 - 16 + (0.45f - hs) * 14, hs, ti->hint_color ? ti->hint_color : soft, ti->hint);
+    }
 }
 
 // Neighbour lookups for coastline / terrain-edge matching. Coordinates are
@@ -1645,8 +1651,8 @@ void render_city_top(const CityInfo *info, int garrison_sel)
     layer(0.0f);
     C2D_DrawRectSolid(0, 240 - 17, 0.0f, 400, 17, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
     draw_text(5, 240 - 16, 0.45f, soft, info->garrison_count > 0
-              ? "Tap what to build below.  L/R: pick a unit   Y: lead it out   B: close"
-              : "Tap what to build below.   B: close");
+              ? "L/R: pick a unit   Y: lead it out   B: close"
+              : "Use the tabs below.   B: close");
 }
 
 void draw_scroll_list(int x, const ScrollRow *rows, int count)
@@ -1721,10 +1727,13 @@ void render_city_tiles_panel(const CityInfo *info, const CityTileInfo *tiles, in
             u32 col[3] = { C2D_Color32(0x90, 0xF0, 0x80, 0xFF), C2D_Color32(0xF0, 0xB0, 0x60, 0xFF),
                            C2D_Color32(0xF8, 0xE8, 0x70, 0xFF) };
             int v[3] = { t->food, t->shield, t->trade };
+            // One dark strip, three spaced digits; zeros are dimmed so the
+            // non-zero yields stand out.
+            C2D_DrawRectSolid(x + 1, y + c - 12, 0.035f, c - 3, 10, C2D_Color32(0, 0, 0, 0xA0));
             for (int k = 0; k < 3; k++) {
                 snprintf(d, sizeof(d), "%d", v[k] > 9 ? 9 : v[k]);
-                C2D_DrawRectSolid(x + 2 + k * 7, y + c - 13, 0.035f, 6, 10, C2D_Color32(0, 0, 0, 0x90));
-                font_draw(d, x + 2 + k * 7, y + c - 17, 0.04f, 0.36f, col[k]);
+                float dx = x + 2 + k * ((c - 4) / 3.0f);
+                font_draw(d, dx, y + c - 16, 0.04f, 0.34f, v[k] ? col[k] : C2D_Color32(0x70, 0x70, 0x70, 0xFF));
             }
         }
     }
@@ -1810,7 +1819,8 @@ void render_city_panel(const CityInfo *info, const BuildOption *opts, int n, int
         char nm[32];
         snprintf(nm, sizeof(nm), "%.20s", opt->name);
         draw_text_z(10, y + 1, 0.01f, 0.45f, opt->is_current ? cur : white, nm);
-        snprintf(line, sizeof(line), "%d", opt->cost);
+        if (opt->cost >= 0) snprintf(line, sizeof(line), "%d", opt->cost);
+        else snprintf(line, sizeof(line), "gold");
         draw_text_z(CITY_WORKLIST_COL_X - 12 - text_width(line, 0.42f), y + 2, 0.01f, 0.42f, soft, line);
     }
     if (n > PANEL_ROWS_VISIBLE) {

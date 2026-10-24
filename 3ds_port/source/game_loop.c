@@ -1781,7 +1781,9 @@ int get_city_buildables(int city_id, BuildOption *out, int max)
             out[n].value = improvement_number(pimprove);
             const char *iname = improvement_name_translation(pimprove);
             fc_strlcpy(out[n].name, iname ? iname : "?", sizeof(out[n].name));
-            out[n].cost = impr_build_shield_cost(pcity, pimprove);
+            // Coinage turns shields into gold; its nominal cost (999) means nothing.
+            out[n].cost = improvement_has_flag(pimprove, IF_GOLD) ? -1
+                                                                   : impr_build_shield_cost(pcity, pimprove);
             out[n].is_current = (pcity->production.kind == VUT_IMPROVEMENT
                                   && pcity->production.value.building == pimprove);
             n++;

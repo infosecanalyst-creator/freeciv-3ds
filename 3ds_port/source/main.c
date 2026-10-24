@@ -1845,7 +1845,7 @@ int main(int argc, char* argv[])
                     ti.hint_color = C2D_Color32(0xFF, 0xC0, 0x40, 0xFF);
                 } else if (selected_unit_id >= 0 && unit_info.valid) {
                     ti.hint = unit_info.moves_left > 0
-                        ? "Tap a square next to it to move, farther for a route. Tap it: orders."
+                        ? "Tap next to it: move.  Farther: route.  Tap the unit: orders."
                         : "No moves left. Tap it for orders, or Next.";
                     ti.hint_color = C2D_Color32(0xFF, 0xF0, 0x80, 0xFF);
                 } else if (all_moved) {
