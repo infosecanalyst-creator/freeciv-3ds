@@ -2274,7 +2274,9 @@ void render_diplomacy_top(int stage, const char *counterpart_name, const DiploIn
     } else {
         C2D_DrawRectSolid(8, 44, 0.0f, 384, 166, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
         draw_text(18, 48, 0.45f, label, "Talks with");
-        draw_text(18, 64, 0.7f, white, counterpart_name);
+        float ns = 0.7f; // long leader names must stop short of the badges
+        while (ns > 0.42f && text_width(counterpart_name, ns) > 228) ns -= 0.02f;
+        draw_text(18, 64 + (0.7f - ns) * 12, ns, white, counterpart_name);
         // acceptance badges
         struct { const char *who; bool yes; } b[2] = { { "You", diplo->accept_self }, { "Them", diplo->accept_other } };
         for (int i = 0; i < 2; i++) {
