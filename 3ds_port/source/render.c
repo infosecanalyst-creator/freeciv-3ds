@@ -2371,12 +2371,12 @@ void render_new_game_setup(const char *labels[SETUP_ROWS], const char *values[SE
     draw_text(8, 4, 0.6f, white, "New Game");
     for (int i = 0; i < SETUP_ROWS; i++) {
         float y = SETUP_ROW_Y0 + i * SETUP_ROW_H;
-        draw_text(10, y + 8, 0.55f, soft, labels[i]);
-        draw_button(SETUP_MINUS_X, y, SETUP_BTN_W, SETUP_BTN_H, 0.1f, "-", 0.8f, can_dec[i], false);
-        float tw = text_width(values[i], 0.55f);
+        draw_text(10, y + 1, 0.5f, soft, labels[i]);
+        draw_button(SETUP_MINUS_X, y, SETUP_BTN_W, SETUP_BTN_H, 0.1f, "-", 0.7f, can_dec[i], false);
+        float tw = text_width(values[i], 0.5f);
         float mid = (SETUP_MINUS_X + SETUP_BTN_W + SETUP_PLUS_X) / 2.0f;
-        draw_text(mid - tw / 2, y + 8, 0.55f, white, values[i]);
-        draw_button(SETUP_PLUS_X, y, SETUP_BTN_W, SETUP_BTN_H, 0.1f, "+", 0.8f, can_inc[i], false);
+        draw_text(mid - tw / 2, y + 1, 0.5f, white, values[i]);
+        draw_button(SETUP_PLUS_X, y, SETUP_BTN_W, SETUP_BTN_H, 0.1f, "+", 0.7f, can_inc[i], false);
     }
     draw_button(SETUP_BACK_X, SETUP_FOOT_Y, SETUP_FOOT_W, SETUP_FOOT_H, 0.1f, "Back", 0.6f, true, false);
     draw_button(SETUP_START_X, SETUP_FOOT_Y, SETUP_FOOT_W, SETUP_FOOT_H, 0.1f, "Start", 0.6f, true, true);
@@ -2445,6 +2445,29 @@ void render_messages_top(const GameMessage *m)
     layer(0.0f);
     C2D_DrawRectSolid(0, 240 - 17, 0.0f, 400, 17, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
     draw_text(5, 240 - 16, 0.45f, soft, "D-Pad: scroll   B: close");
+}
+
+void render_game_over_top(bool won, int score, int turn)
+{
+    C2D_TextBufClear(g_textBuf);
+    char line[64];
+    C2D_DrawRectSolid(0, 0, 0.0f, 400, 240, won ? C2D_Color32(0x14, 0x22, 0x18, 0xFF) : C2D_Color32(0x22, 0x12, 0x14, 0xFF));
+    layer(4.0f);
+    const char *title = won ? "Victory!" : "Your civilization has fallen";
+    draw_text(200 - text_width(title, 0.9f) / 2, 60, 0.9f, won ? C2D_Color32(0xFF, 0xE0, 0x60, 0xFF) : 0xFFFFFFFF, title);
+    snprintf(line, sizeof(line), "Turn %d", turn);
+    draw_text(200 - text_width(line, 0.55f) / 2, 110, 0.55f, C2D_Color32(0xC0, 0xCE, 0xDC, 0xFF), line);
+    snprintf(line, sizeof(line), "Score %d", score);
+    draw_text(200 - text_width(line, 0.7f) / 2, 136, 0.7f, 0xFFFFFFFF, line);
+    layer(0.0f);
+}
+
+void render_game_over_bottom(void)
+{
+    C2D_DrawRectSolid(0, 0, 0.0f, 320, 240, C2D_Color32(0x10, 0x16, 0x22, 0xFF));
+    draw_text(160 - text_width("The game is over.", 0.55f) / 2, 80, 0.55f, 0xFFFFFFFF, "The game is over.");
+    draw_button(10, GAMEOVER_BTN_Y, 145, 44, 0.02f, "Look at the map", 0.5f, true, false);
+    draw_button(165, GAMEOVER_BTN_Y, 145, 44, 0.02f, "Quit", 0.5f, true, true);
 }
 
 void render_load_picker(const SaveFile *files, int n, int scroll)

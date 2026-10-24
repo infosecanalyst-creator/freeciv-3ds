@@ -306,8 +306,12 @@ static void open_game_menu(PopupMenu *m)
 
 // ---- Settings (sdmc:/3ds/freeciv/settings.ini) ----
 #define SETTINGS_PATH "sdmc:/3ds/freeciv/settings.ini"
-static void load_settings(void)
+typedef struct { int size, rivals, skill, rules, land, barb; } NewGameOptsFwd;
+static NewGameOptsFwd s_saved_ng = { -1, -1, -1, -1, -1, -1 };
+
+static void load_settings(void *ngp)
 {
+    NewGameOptsFwd *ng = (NewGameOptsFwd *)ngp;
     FILE *f = fopen(SETTINGS_PATH, "r");
     int mv = 6, sv = 8;
     if (f) {
@@ -315,10 +319,24 @@ static void load_settings(void)
         while (fgets(line, sizeof(line), f)) {
             sscanf(line, "music=%d", &mv);
             sscanf(line, "effects=%d", &sv);
+            sscanf(line, "ng_size=%d", &s_saved_ng.size);
+            sscanf(line, "ng_rivals=%d", &s_saved_ng.rivals);
+            sscanf(line, "ng_skill=%d", &s_saved_ng.skill);
+            sscanf(line, "ng_rules=%d", &s_saved_ng.rules);
+            sscanf(line, "ng_land=%d", &s_saved_ng.land);
+            sscanf(line, "ng_barb=%d", &s_saved_ng.barb);
         }
         fclose(f);
     }
     audio_set_volumes(mv, sv);
+    if (ng) {
+        if (s_saved_ng.size >= 0 && s_saved_ng.size <= 3) ng->size = s_saved_ng.size;
+        if (s_saved_ng.rivals >= 1 && s_saved_ng.rivals <= 7) ng->rivals = s_saved_ng.rivals;
+        if (s_saved_ng.skill >= 0 && s_saved_ng.skill <= 3) ng->skill = s_saved_ng.skill;
+        if (s_saved_ng.rules >= 0 && s_saved_ng.rules <= 1) ng->rules = s_saved_ng.rules;
+        if (s_saved_ng.land >= 0 && s_saved_ng.land <= 2) ng->land = s_saved_ng.land;
+        if (s_saved_ng.barb >= 0 && s_saved_ng.barb <= 2) ng->barb = s_saved_ng.barb;
+    }
 }
 
 static void save_settings(void)
@@ -326,6 +344,10 @@ static void save_settings(void)
     FILE *f = fopen(SETTINGS_PATH, "w");
     if (!f) return;
     fprintf(f, "music=%d\neffects=%d\n", audio_music_volume(), audio_sfx_volume());
+    if (s_saved_ng.size >= 0)
+        fprintf(f, "ng_size=%d\nng_rivals=%d\nng_skill=%d\nng_rules=%d\nng_land=%d\nng_barb=%d\n",
+                s_saved_ng.size, s_saved_ng.rivals, s_saved_ng.skill, s_saved_ng.rules,
+                s_saved_ng.land, s_saved_ng.barb);
     fclose(f);
 }
 
@@ -352,21 +374,30 @@ static const char *k_size_names[] = { "Small", "Medium", "Large", "Huge" };
 static const int   k_size_tiles[] = { 1, 2, 4, 6 };            // thousands of tiles ("size")
 static const char *k_skill_names[] = { "Novice", "Easy", "Normal", "Hard" };
 static const char *k_skill_cmds[]  = { "novice", "easy", "normal", "hard" };
+static const char *k_rules_names[] = { "Classic", "Civ2Civ3" };
+static const char *k_rules_dirs[]  = { "classic", "civ2civ3" };
+static const char *k_land_names[]  = { "Islands", "Continents", "Pangaea" };
+static const int   k_land_pct[]    = { 25, 35, 55 };
+static const char *k_barb_names[]  = { "Off", "Huts only", "Normal" };
+static const char *k_barb_vals[]   = { "DISABLED", "HUTS_ONLY", "NORMAL" };
+typedef NewGameOptsFwd NewGameOpts;   // same struct as the settings file uses
 
 // Writes the server script for the chosen options; false on an SD error.
-static bool write_new_game_script(const char *path, int size_idx, int rivals, int skill_idx)
+static bool write_new_game_script(const char *path, const NewGameOpts *o)
 {
     FILE *f = fopen(path, "w");
     if (!f) return false;
-    fprintf(f, "rulesetdir classic\n");
+    fprintf(f, "rulesetdir %s\n", k_rules_dirs[o->rules]);
     fprintf(f, "set topology \"\"\n");       // overhead square grid (see start.serv)
     fprintf(f, "set mapsize FULLSIZE\n");
-    fprintf(f, "set size %d\n", k_size_tiles[size_idx]);
+    fprintf(f, "set size %d\n", k_size_tiles[o->size]);
+    fprintf(f, "set landmass %d\n", k_land_pct[o->land]);
+    fprintf(f, "set barbarians %s\n", k_barb_vals[o->barb]);
     fprintf(f, "create Human\n");
-    fprintf(f, "set aifill %d\n", rivals + 1);
+    fprintf(f, "set aifill %d\n", o->rivals + 1);
     fprintf(f, "set minplayers 0\n");
     fprintf(f, "aitoggle Human\n");
-    fprintf(f, "%s\n", k_skill_cmds[skill_idx]);
+    fprintf(f, "%s\n", k_skill_cmds[o->skill]);
     fprintf(f, "start\n");
     fclose(f);
     return true;
@@ -436,7 +467,7 @@ int main(int argc, char* argv[])
     int load_scroll = 0;
     int save_toast_frames = 0; // >0 while the "Saved" banner should show
     // New Game options. Old 3DS (64 MB, 268 MHz) gets smaller defaults and caps.
-    int ng_size = 1, ng_rivals = 4, ng_skill = 1;
+    NewGameOpts ng = { 1, 4, 1, 0, 1, 1 };
     int ng_max_size = 3, ng_max_rivals = 7;
     bool save_in_flight = false; // true from the SAV tap until the queued save's busy step ends
 
@@ -482,6 +513,8 @@ int main(int argc, char* argv[])
     memset(&attack_odds, 0, sizeof(attack_odds));
     RoutePreview route;
     memset(&route, 0, sizeof(route));
+    bool game_over = false, game_over_shown = false, game_won = false;
+    int game_score = 0, game_end_turn = 0;
     static UnitBrief stack[16];
     int stack_n = 0;
     int sel_x = -1, sel_y = -1;          // currently selected map tile (-1 = none)
@@ -544,11 +577,13 @@ int main(int argc, char* argv[])
     int ui_other_player_count = 0;
     DiploInfo ui_diplo_info;
 
-    load_settings();
     if (!isNew3DS) {
-        ng_size = 0; ng_rivals = 2;
+        ng.size = 0; ng.rivals = 2;
         ng_max_size = 1; ng_max_rivals = 4;
     }
+    load_settings(&ng);
+    if (ng.size > ng_max_size) ng.size = ng_max_size;
+    if (ng.rivals > ng_max_rivals) ng.rivals = ng_max_rivals;
 
     // Initialize the Freeciv game engine
     init_freeciv(isNew3DS);
@@ -597,21 +632,20 @@ int main(int argc, char* argv[])
                     if (in_rows && px >= SETUP_MINUS_X && px < SETUP_MINUS_X + SETUP_BTN_W) d = -1;
                     if (in_rows && px >= SETUP_PLUS_X && px < SETUP_PLUS_X + SETUP_BTN_W) d = 1;
                     if (d) {
-                        if (row == 0) ng_size += d;
-                        if (row == 1) ng_rivals += d;
-                        if (row == 2) ng_skill += d;
-                        if (ng_size < 0) ng_size = 0;
-                        if (ng_size > ng_max_size) ng_size = ng_max_size;
-                        if (ng_rivals < 1) ng_rivals = 1;
-                        if (ng_rivals > ng_max_rivals) ng_rivals = ng_max_rivals;
-                        if (ng_skill < 0) ng_skill = 0;
-                        if (ng_skill > 3) ng_skill = 3;
+                        int *v[SETUP_ROWS] = { &ng.size, &ng.rivals, &ng.skill, &ng.rules, &ng.land, &ng.barb };
+                        int lo[SETUP_ROWS] = { 0, 1, 0, 0, 0, 0 };
+                        int hi[SETUP_ROWS] = { ng_max_size, ng_max_rivals, 3, 1, 2, 2 };
+                        *v[row] += d;
+                        if (*v[row] < lo[row]) *v[row] = lo[row];
+                        if (*v[row] > hi[row]) *v[row] = hi[row];
                     } else if (py >= SETUP_FOOT_Y && py < SETUP_FOOT_Y + SETUP_FOOT_H) {
                         if (px >= SETUP_BACK_X && px < SETUP_BACK_X + SETUP_FOOT_W) {
                             app_state = APP_START_MENU;
                         } else if (px >= SETUP_START_X && px < SETUP_START_X + SETUP_FOOT_W) {
                             const char *path = "sdmc:/3ds/freeciv/newgame.serv";
-                            if (write_new_game_script(path, ng_size, ng_rivals, ng_skill))
+                            s_saved_ng = ng;
+                            save_settings();
+                            if (write_new_game_script(path, &ng))
                                 fc3ds_server_begin_new_game_script(path);
                             else
                                 fc3ds_server_begin_new_game(false);
@@ -660,9 +694,9 @@ int main(int argc, char* argv[])
             C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 
             char ng_summary[160];
-            snprintf(ng_summary, sizeof(ng_summary), "%s map (about %d,000 tiles), %d rival%s, %s AI.",
-                     k_size_names[ng_size], k_size_tiles[ng_size], ng_rivals, ng_rivals == 1 ? "" : "s",
-                     k_skill_names[ng_skill]);
+            snprintf(ng_summary, sizeof(ng_summary), "%s rules, %s map (about %d,000 tiles), %s,\n%d rival%s, %s AI, barbarians: %s.",
+                     k_rules_names[ng.rules], k_size_names[ng.size], k_size_tiles[ng.size], k_land_names[ng.land],
+                     ng.rivals, ng.rivals == 1 ? "" : "s", k_skill_names[ng.skill], k_barb_names[ng.barb]);
             for (int eye = 0; eye < (osGet3DSliderState() > 0.02f ? 2 : 1); eye++) {
                 C3D_RenderTarget *tgt = eye ? top_right : top;
                 C2D_TargetClear(tgt, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
@@ -678,11 +712,13 @@ int main(int argc, char* argv[])
                 render_start_menu();
             } else if (app_state == APP_NEW_GAME) {
                 char rv[8];
-                snprintf(rv, sizeof(rv), "%d", ng_rivals);
-                const char *labels[SETUP_ROWS] = { "Map size", "Rivals", "AI skill" };
-                const char *values[SETUP_ROWS] = { k_size_names[ng_size], rv, k_skill_names[ng_skill] };
-                bool dec[SETUP_ROWS] = { ng_size > 0, ng_rivals > 1, ng_skill > 0 };
-                bool inc[SETUP_ROWS] = { ng_size < ng_max_size, ng_rivals < ng_max_rivals, ng_skill < 3 };
+                snprintf(rv, sizeof(rv), "%d", ng.rivals);
+                const char *labels[SETUP_ROWS] = { "Map size", "Rivals", "AI skill", "Rules", "Land", "Barbarians" };
+                const char *values[SETUP_ROWS] = { k_size_names[ng.size], rv, k_skill_names[ng.skill],
+                                                   k_rules_names[ng.rules], k_land_names[ng.land], k_barb_names[ng.barb] };
+                bool dec[SETUP_ROWS] = { ng.size > 0, ng.rivals > 1, ng.skill > 0, ng.rules > 0, ng.land > 0, ng.barb > 0 };
+                bool inc[SETUP_ROWS] = { ng.size < ng_max_size, ng.rivals < ng_max_rivals, ng.skill < 3,
+                                         ng.rules < 1, ng.land < 2, ng.barb < 2 };
                 render_new_game_setup(labels, values, dec, inc);
             } else {
                 render_load_picker(save_files, save_file_count, load_scroll);
@@ -696,6 +732,17 @@ int main(int argc, char* argv[])
         // inside a modal so a long turn step can't strand the panel behind
         // the busy overlay (handoff.md §7.3) - close the modal first.
         // ---------------- Map screen (UI_MAP) buttons ----------------
+        // End-of-game screen: Look at the map, or Quit.
+        if (game_over && !game_over_shown && (kDown & KEY_TOUCH)) {
+            touchPosition touch;
+            hidTouchRead(&touch);
+            if (touch.py >= GAMEOVER_BTN_Y && touch.py < GAMEOVER_BTN_Y + 44) {
+                if (touch.px < 160) game_over_shown = true;
+                else break;
+            }
+            kDown &= ~KEY_TOUCH;
+        }
+
         // Any input puts the turn report away (and still does its normal job).
         if (report_n > 0 && kDown) report_n = 0;
 
@@ -1469,6 +1516,15 @@ int main(int argc, char* argv[])
             }
             want_unit_popup = false;
 
+            static int over_check = 0;
+            if (!game_over && ++over_check >= 30) {
+                over_check = 0;
+                if (get_game_result(&game_won, &game_score, &game_end_turn)) {
+                    game_over = true;
+                    audio_play(game_won ? "w_generic" : "e_game_end");
+                }
+            }
+
             // Are any units still waiting for orders? (End Turn lights up.)
             static int moved_refresh = 0;
             if (ui_mode == UI_MAP && get_game_turn() > 0 && ++moved_refresh >= 20) {
@@ -1671,7 +1727,10 @@ int main(int argc, char* argv[])
             // projection; passing the landscape dims scales/clips the scene
             // on hardware.
             C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_TOP, true);
-            switch (ui_mode) {
+            switch (game_over && !game_over_shown ? -1 : (int)ui_mode) {
+            case -1:
+                render_game_over_top(game_won, game_score, game_end_turn);
+                break;
             case UI_CITY:
                 render_city_top(&ui_city_info, ui_garrison_sel);
                 break;
@@ -1745,7 +1804,10 @@ int main(int argc, char* argv[])
             C2D_TargetClear(bottom, C2D_Color32(0x10, 0x10, 0x10, 0xFF)); // Dark gray
             C2D_SceneBegin(bottom);
             C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_BOTTOM, true);
-            switch (ui_mode) {
+            switch (game_over && !game_over_shown ? -1 : (int)ui_mode) {
+            case -1:
+                render_game_over_bottom();
+                break;
             case UI_CITY:
                 if (ui_city_tab == CITY_TAB_TILES)
                     render_city_tiles_panel(&ui_city_info, city_tiles, city_tiles_n, city_radius, city_spec, city_spec_n);

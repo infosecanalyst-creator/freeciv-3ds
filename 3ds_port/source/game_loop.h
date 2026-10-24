@@ -415,6 +415,8 @@ bool find_pov_unit_tile(int *x, int *y);
 // Sound cues raised by the engine side (combat, a city founded); the main
 // thread pops them each frame and plays them. Tags are Freeciv soundspec tags.
 bool game_pop_sound(char *tag, int len);
+// True once the game has ended (or your civilization is gone).
+bool get_game_result(bool *won, int *score, int *turn);
 
 // ---- News: Freeciv's event messages for the pov player ----
 typedef enum { MSG_OTHER, MSG_COMBAT, MSG_CITY, MSG_SCIENCE, MSG_DIPLOMACY, MSG_GOOD } MsgCategory;

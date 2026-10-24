@@ -305,18 +305,18 @@ void render_start_menu(void);
 
 // New Game setup (bottom: rows of  label  [-] value [+], Start/Back;
 // top: summary). Values arrive pre-formatted.
-#define SETUP_ROWS      3
-#define SETUP_ROW_Y0    40
-#define SETUP_ROW_H     44
+#define SETUP_ROWS      6
+#define SETUP_ROW_Y0    32
+#define SETUP_ROW_H     26
 #define SETUP_MINUS_X   150
-#define SETUP_PLUS_X    270
-#define SETUP_BTN_W     44
-#define SETUP_BTN_H     34
+#define SETUP_PLUS_X    274
+#define SETUP_BTN_W     42
+#define SETUP_BTN_H     23
 #define SETUP_START_X   170
 #define SETUP_BACK_X    10
-#define SETUP_FOOT_Y    190
+#define SETUP_FOOT_Y    196
 #define SETUP_FOOT_W    140
-#define SETUP_FOOT_H    40
+#define SETUP_FOOT_H    38
 void render_new_game_setup(const char *labels[SETUP_ROWS], const char *values[SETUP_ROWS],
                            const bool can_dec[SETUP_ROWS], const bool can_inc[SETUP_ROWS]);
 void render_new_game_top(bool is_new_3ds, const char *summary);
@@ -332,5 +332,10 @@ void render_load_picker(const SaveFile *files, int n, int scroll);
 // highlighted message in full. Rows use the shared PANEL_* list layout.
 void render_messages_panel(const GameMessage *msgs, int n, int scroll, int highlight);
 void render_messages_top(const GameMessage *m);
+
+// End of the game.
+#define GAMEOVER_BTN_Y 170
+void render_game_over_top(bool won, int score, int turn);
+void render_game_over_bottom(void);   // [Look at the map] [Quit]
 
 #endif // RENDER_H

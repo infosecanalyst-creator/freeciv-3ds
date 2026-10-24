@@ -201,6 +201,7 @@ TerrainType get_tile_type(int x, int y)
     if (strcasecmp(terrain_name, "Tundra") == 0) return TERRAIN_TUNDRA;
     if (strcasecmp(terrain_name, "Arctic") == 0) return TERRAIN_ARCTIC;
     if (strcasecmp(terrain_name, "Glacier") == 0) return TERRAIN_ARCTIC;
+    if (strcasecmp(terrain_name, "Inaccessible") == 0) return TERRAIN_MOUNTAINS;
     if (strcasecmp(terrain_name, "Swamp") == 0) return TERRAIN_SWAMP;
     if (strcasecmp(terrain_name, "Jungle") == 0) return TERRAIN_JUNGLE;
     if (strcasecmp(terrain_name, "Desert") == 0) return TERRAIN_DESERT;
@@ -624,6 +625,19 @@ void freeciv3ds_event_hook(const struct packet_chat_msg *packet, int pidx)
 }
 
 int get_message_total(void) { return s_msg_total; }
+
+bool get_game_result(bool *won, int *score, int *turn)
+{
+    if (map_is_empty()) return false;
+    struct player *pov = get_pov_player();
+    if (!pov) return false;
+    bool over = server_state() == S_S_OVER || !pov->is_alive;
+    if (!over) return false;
+    *won = pov->is_alive && pov->is_winner;
+    *score = pov->score.game;
+    *turn = game.info.turn;
+    return true;
+}
 
 bool get_message(int index, GameMessage *out)
 {
