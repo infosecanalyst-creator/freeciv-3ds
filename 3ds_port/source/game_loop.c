@@ -771,7 +771,36 @@ void get_pedia_text(int kind, int id, char *out, int len)
                 }
             } requirement_vector_iterate_end;
         } improvement_iterate_end;
+        governments_iterate(pg) {
+            requirement_vector_iterate(&pg->reqs, preq) {
+                if (preq->source.kind == VUT_ADVANCE && preq->source.value.advance == pa && preq->present) {
+                    cat(out, len, "%s%s", first ? "Allows: " : ", ", government_name_translation(pg));
+                    first = false;
+                }
+            } requirement_vector_iterate_end;
+        } governments_iterate_end;
         if (!first) cat(out, len, "\n");
+        // Techs it opens the way to (most classic techs have no help text, so
+        // this is often the most useful line).
+        first = true;
+        advance_iterate(pt) {
+            if (advance_requires(pt, AR_ONE) == pa || advance_requires(pt, AR_TWO) == pa) {
+                cat(out, len, "%s%s", first ? "Leads to: " : ", ", advance_name_translation(pt));
+                first = false;
+            }
+        } advance_iterate_end;
+        if (!first) cat(out, len, "\n");
+        {
+            struct player *pov = get_pov_player();
+            const struct research *rs = pov ? research_get(pov) : NULL;
+            if (rs) {
+                if (research_invention_state(rs, advance_number(pa)) == TECH_KNOWN)
+                    cat(out, len, "You know this.\n");
+                else
+                    cat(out, len, "Research cost: %d bulbs\n",
+                        research_total_bulbs_required(rs, advance_number(pa), FALSE));
+            }
+        }
         cat_help(out, len, pa->helptext);
         break;
     }
