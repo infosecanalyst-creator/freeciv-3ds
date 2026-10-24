@@ -756,7 +756,10 @@ int main(int argc, char* argv[])
             kDown &= ~KEY_TOUCH;
         }
 
-        // Any input puts the turn report away (and still does its normal job).
+        // Any input puts the turn report away (and still does its normal job),
+        // except that a tap on the map only closes it rather than also moving
+        // the unit or marking a route.
+        bool report_tap = report_n > 0 && (kDown & KEY_TOUCH);
         if (report_n > 0 && kDown) report_n = 0;
 
         if (ui_mode == UI_MAP && (kDown & KEY_START) && !(kHeld & KEY_SELECT)) {
@@ -961,6 +964,7 @@ int main(int argc, char* argv[])
                     t_consumed = !(hit == -1 && popup_kind_was == POPUP_UNIT);
                 } else {
                     int h = hud_hit_test(t_x0, t_y0);
+                    if (h == HUD_NONE && report_tap) t_consumed = true;
                     if (h != HUD_NONE) {
                         t_consumed = true;
                         if (h == HUD_MENU) {

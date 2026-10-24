@@ -1472,24 +1472,16 @@ void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
                 C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, darkness_sprite), draw_x, draw_y, 0.59f, NULL, SC, SC);
             }
 
-            // Draw borders
+            // National borders: a thin line in the owner's colour on each edge
+            // that faces another owner (or no owner). Drawn as rectangles; the
+            // grid.borders sprites cut from the tileset carry stray pixels.
             if (info.tile_owner != -1) {
-                u32 bcolor = owner_color(info.tile_owner);
-                C2D_ImageTint tint;
-                C2D_PlainImageTint(&tint, bcolor, 1.0f);
-                
-                if (info.border_n) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_n_idx), draw_x, draw_y, 0.6f, &tint, SC, SC);
-                }
-                if (info.border_s) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_s_idx), draw_x, draw_y, 0.6f, &tint, SC, SC);
-                }
-                if (info.border_e) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_e_idx), draw_x, draw_y, 0.6f, &tint, SC, SC);
-                }
-                if (info.border_w) {
-                    C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_grid_borders_w_idx), draw_x, draw_y, 0.6f, &tint, SC, SC);
-                }
+                u32 bc = (owner_color(info.tile_owner) & 0x00FFFFFF) | 0xD0000000;
+                float tw = TILE_PX * SC, lw = SC >= 1.0f ? 2.0f : 1.0f;
+                if (info.border_n) C2D_DrawRectSolid(draw_x, draw_y, 0.6f, tw, lw, bc);
+                if (info.border_s) C2D_DrawRectSolid(draw_x, draw_y + tw - lw, 0.6f, tw, lw, bc);
+                if (info.border_w) C2D_DrawRectSolid(draw_x, draw_y, 0.6f, lw, tw, bc);
+                if (info.border_e) C2D_DrawRectSolid(draw_x + tw - lw, draw_y, 0.6f, lw, tw, bc);
             }
 
             // Draw entities based on visibility
