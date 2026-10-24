@@ -333,6 +333,14 @@ void render_load_picker(const SaveFile *files, int n, int scroll);
 void render_messages_panel(const GameMessage *msgs, int n, int scroll, int highlight);
 void render_messages_top(const GameMessage *m);
 
+// Civilopedia: category tabs + entry list (bottom), entry text (top).
+#define PEDIA_TAB_Y   34
+#define PEDIA_TAB_H   24
+#define PEDIA_TAB_W   61
+#define PEDIA_TAB_X(i) (3 + (i) * 63)
+void render_pedia_panel(int kind, const PediaEntry *list, int n, int scroll, int selected);
+void render_pedia_top(const char *title, const char *text, int scroll_lines);
+
 // End of the game.
 #define GAMEOVER_BTN_Y 170
 void render_game_over_top(bool won, int score, int turn);

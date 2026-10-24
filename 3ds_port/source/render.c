@@ -2447,6 +2447,77 @@ void render_messages_top(const GameMessage *m)
     draw_text(5, 240 - 16, 0.45f, soft, "D-Pad: scroll   B: close");
 }
 
+void render_pedia_panel(int kind, const PediaEntry *list, int n, int scroll, int selected)
+{
+    C2D_TextBufClear(g_textBuf);
+    panel_bg("Civilopedia", NULL);
+    static const char *tabs[PEDIA_KINDS] = { "Units", "Builds", "Wonders", "Techs", "Govts" };
+    for (int i = 0; i < PEDIA_KINDS; i++)
+        draw_button(PEDIA_TAB_X(i), PEDIA_TAB_Y, PEDIA_TAB_W, PEDIA_TAB_H, 0.03f, tabs[i], 0.42f, true, i == kind);
+    draw_text(8, PEDIA_TAB_Y + PEDIA_TAB_H + 6, 0.42f, C2D_Color32(0xA8, 0xB4, 0xC4, 0xFF),
+              "Tap an entry to read about it above.");
+    for (int i = 0; i < PANEL_ROWS_VISIBLE; i++) {
+        int idx = scroll + i;
+        if (idx >= n) break;
+        list_row(i, 4, 306, idx == selected, true);
+        draw_text_z(12, PANEL_LIST_Y + i * PANEL_ROW_H + 1, 0.01f, 0.47f, 0xFFFFFFFF, list[idx].name);
+    }
+    scroll_thumb(n, scroll, 313);
+    draw_button(4, PANEL_FOOTER_Y + 2, 312, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
+}
+
+void render_pedia_top(const char *title, const char *text, int scroll_lines)
+{
+    C2D_TextBufClear(g_textBuf);
+    u32 soft = C2D_Color32(0xC0, 0xCE, 0xDC, 0xFF);
+    C2D_DrawRectSolid(0, 0, 0.0f, 400, 32, C2D_Color32(0x14, 0x1E, 0x2E, 0xFF));
+    C2D_DrawRectSolid(0, 0, 0.01f, 6, 32, C2D_Color32(0x70, 0xB8, 0xFF, 0xFF));
+    C2D_DrawRectSolid(0, 32, 0.0f, 400, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
+    draw_text(14, 3, 0.85f, 0xFFFFFFFF, title && title[0] ? title : "Civilopedia");
+    layer(3.0f);
+    C2D_DrawRectSolid(8, 40, 0.0f, 384, 176, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
+    // Paragraph-by-paragraph wrap, skipping scroll_lines lines.
+    float y = 44;
+    int line_no = 0;
+    const char *p = text ? text : "";
+    char para[1200];
+    while (*p && y < 204) {
+        const char *e = strchr(p, '\n');
+        int l = e ? (int)(e - p) : (int)strlen(p);
+        if (l >= (int)sizeof(para)) l = sizeof(para) - 1;
+        memcpy(para, p, l); para[l] = 0;
+        p += l + (e ? 1 : 0);
+        if (!para[0]) { if (line_no++ >= scroll_lines) y += 8; continue; }
+        // wrap this paragraph into lines
+        const char *q = para;
+        while (*q) {
+            char line[200];
+            int best = 0, i = 0;
+            while (q[i]) {
+                int j = i;
+                while (q[j] && q[j] != ' ') j++;
+                if (j >= (int)sizeof(line)) break;
+                memcpy(line, q, j); line[j] = 0;
+                if (font_width(line, 0.47f) > 368 && best) break;
+                best = j;
+                if (!q[j]) break;
+                i = j + 1;
+            }
+            if (!best) best = strlen(q) < sizeof(line) - 1 ? (int)strlen(q) : (int)sizeof(line) - 1;
+            memcpy(line, q, best); line[best] = 0;
+            if (line_no++ >= scroll_lines && y < 204) {
+                draw_text_z(16, y, 0.01f, 0.47f, 0xFFFFFFFF, line);
+                y += 16;
+            }
+            q += best;
+            while (*q == ' ') q++;
+        }
+    }
+    layer(0.0f);
+    C2D_DrawRectSolid(0, 240 - 17, 0.0f, 400, 17, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
+    draw_text(5, 240 - 16, 0.45f, soft, "L/R: scroll the text   D-Pad: list   B: close");
+}
+
 void render_game_over_top(bool won, int score, int turn)
 {
     C2D_TextBufClear(g_textBuf);

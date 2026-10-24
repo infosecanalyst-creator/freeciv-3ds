@@ -418,6 +418,13 @@ bool game_pop_sound(char *tag, int len);
 // True once the game has ended (or your civilization is gone).
 bool get_game_result(bool *won, int *score, int *turn);
 
+// ---- Civilopedia (ruleset help) ----
+typedef enum { PEDIA_UNITS, PEDIA_BUILDINGS, PEDIA_WONDERS, PEDIA_TECHS, PEDIA_GOVS, PEDIA_KINDS } PediaKind;
+typedef struct { int id; char name[48]; } PediaEntry;
+int get_pedia_list(int kind, PediaEntry *out, int max);
+// Stats then the ruleset's help text, '\n' between paragraphs.
+void get_pedia_text(int kind, int id, char *out, int len);
+
 // ---- News: Freeciv's event messages for the pov player ----
 typedef enum { MSG_OTHER, MSG_COMBAT, MSG_CITY, MSG_SCIENCE, MSG_DIPLOMACY, MSG_GOOD } MsgCategory;
 typedef struct {

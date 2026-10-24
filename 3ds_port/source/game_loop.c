@@ -1,6 +1,7 @@
 #include "game_loop.h"
 #include "fc3ds_server.h"
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <malloc.h>
 #include <3ds.h>
@@ -37,6 +38,7 @@
 #include "combat.h"
 #include "events.h"
 #include "specialist.h"
+#include "string_vector.h"
 #include <string.h>
 #include <stdlib.h>
 #include <dirent.h>
@@ -625,6 +627,152 @@ void freeciv3ds_event_hook(const struct packet_chat_msg *packet, int pidx)
 }
 
 int get_message_total(void) { return s_msg_total; }
+
+// ---------------------------------------------------------------- civilopedia
+static void cat(char *out, int len, const char *fmt, ...)
+{
+    int used = strlen(out);
+    if (used >= len - 1) return;
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(out + used, len - used, fmt, ap);
+    va_end(ap);
+}
+
+static void cat_help(char *out, int len, const struct strvec *help)
+{
+    if (!help) return;
+    strvec_iterate(help, str) {
+        cat(out, len, "\n%s\n", str);
+    } strvec_iterate_end;
+}
+
+static void cat_reqs(char *out, int len, const struct requirement_vector *reqs, const char *label)
+{
+    bool first = true;
+    requirement_vector_iterate(reqs, preq) {
+        if (preq->source.kind == VUT_ADVANCE && preq->present) {
+            cat(out, len, "%s%s", first ? label : ", ", advance_name_translation(preq->source.value.advance));
+            first = false;
+        }
+    } requirement_vector_iterate_end;
+    if (!first) cat(out, len, "\n");
+}
+
+int get_pedia_list(int kind, PediaEntry *out, int max)
+{
+    int n = 0;
+    if (game.control.num_unit_types <= 0) return 0;   // no ruleset loaded yet
+    switch (kind) {
+    case PEDIA_UNITS:
+        unit_type_iterate(ut) {
+            if (n >= max) break;
+            out[n].id = utype_number(ut);
+            fc_strlcpy(out[n].name, utype_name_translation(ut), sizeof(out[n].name));
+            n++;
+        } unit_type_iterate_end;
+        break;
+    case PEDIA_BUILDINGS:
+    case PEDIA_WONDERS:
+        improvement_iterate(pi) {
+            if (n >= max) break;
+            if ((kind == PEDIA_WONDERS) != is_wonder(pi)) continue;
+            out[n].id = improvement_number(pi);
+            fc_strlcpy(out[n].name, improvement_name_translation(pi), sizeof(out[n].name));
+            n++;
+        } improvement_iterate_end;
+        break;
+    case PEDIA_TECHS:
+        advance_iterate(pa) {
+            if (n >= max) break;
+            out[n].id = advance_number(pa);
+            fc_strlcpy(out[n].name, advance_name_translation(pa), sizeof(out[n].name));
+            n++;
+        } advance_iterate_end;
+        break;
+    case PEDIA_GOVS:
+        governments_iterate(pg) {
+            if (n >= max) break;
+            out[n].id = government_number(pg);
+            fc_strlcpy(out[n].name, government_name_translation(pg), sizeof(out[n].name));
+            n++;
+        } governments_iterate_end;
+        break;
+    }
+    // alphabetical
+    for (int i = 1; i < n; i++) {
+        PediaEntry t = out[i];
+        int j = i - 1;
+        while (j >= 0 && strcasecmp(out[j].name, t.name) > 0) { out[j + 1] = out[j]; j--; }
+        out[j + 1] = t;
+    }
+    return n;
+}
+
+void get_pedia_text(int kind, int id, char *out, int len)
+{
+    out[0] = 0;
+    switch (kind) {
+    case PEDIA_UNITS: {
+        const struct unit_type *ut = utype_by_number(id);
+        if (!ut) return;
+        cat(out, len, "Cost %d   Attack %d   Defense %d   Moves %s\n", utype_build_shield_cost_base(ut),
+            ut->attack_strength, ut->defense_strength, move_points_text(ut->move_rate, TRUE));
+        cat(out, len, "Hit points %d   Firepower %d\n", ut->hp, ut->firepower);
+        cat_reqs(out, len, &ut->build_reqs, "Needs: ");
+        if (ut->obsoleted_by) cat(out, len, "Replaced by: %s\n", utype_name_translation(ut->obsoleted_by));
+        cat_help(out, len, ut->helptext);
+        break;
+    }
+    case PEDIA_BUILDINGS:
+    case PEDIA_WONDERS: {
+        const struct impr_type *pi = improvement_by_number(id);
+        if (!pi) return;
+        cat(out, len, "Cost %d   Upkeep %d gold\n", impr_base_build_shield_cost(pi), pi->upkeep);
+        cat_reqs(out, len, &pi->reqs, "Needs: ");
+        cat_help(out, len, pi->helptext);
+        break;
+    }
+    case PEDIA_TECHS: {
+        const struct advance *pa = advance_by_number(id);
+        if (!pa) return;
+        const struct advance *r1 = advance_requires(pa, AR_ONE), *r2 = advance_requires(pa, AR_TWO);
+        if (r1 && advance_number(r1) != A_NONE) {
+            cat(out, len, "Needs: %s", advance_name_translation(r1));
+            if (r2 && advance_number(r2) != A_NONE) cat(out, len, ", %s", advance_name_translation(r2));
+            cat(out, len, "\n");
+        }
+        // what it allows
+        bool first = true;
+        unit_type_iterate(ut) {
+            requirement_vector_iterate(&ut->build_reqs, preq) {
+                if (preq->source.kind == VUT_ADVANCE && preq->source.value.advance == pa && preq->present) {
+                    cat(out, len, "%s%s", first ? "Allows: " : ", ", utype_name_translation(ut));
+                    first = false;
+                }
+            } requirement_vector_iterate_end;
+        } unit_type_iterate_end;
+        improvement_iterate(pi) {
+            requirement_vector_iterate(&pi->reqs, preq) {
+                if (preq->source.kind == VUT_ADVANCE && preq->source.value.advance == pa && preq->present) {
+                    cat(out, len, "%s%s", first ? "Allows: " : ", ", improvement_name_translation(pi));
+                    first = false;
+                }
+            } requirement_vector_iterate_end;
+        } improvement_iterate_end;
+        if (!first) cat(out, len, "\n");
+        cat_help(out, len, pa->helptext);
+        break;
+    }
+    case PEDIA_GOVS: {
+        const struct government *pg = government_by_number(id);
+        if (!pg) return;
+        cat_reqs(out, len, &pg->reqs, "Needs: ");
+        cat_help(out, len, pg->helptext);
+        break;
+    }
+    }
+}
 
 bool get_game_result(bool *won, int *score, int *turn)
 {
