@@ -3,6 +3,7 @@ name: build
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -17,7 +18,7 @@ jobs:
         run: |
           apt-get update -qq
           apt-get install -y -qq build-essential autoconf automake libtool pkg-config gettext autopoint \
-            python3 zlib1g-dev libcurl4-openssl-dev libsqlite3-dev git >/dev/null
+            python3 zlib1g-dev libcurl4-openssl-dev libsqlite3-dev git unzip curl >/dev/null
           for i in 1 2 3 4; do dkp-pacman -Sy --noconfirm --needed 3ds-dev 3ds-curl 3ds-mbedtls 3ds-zlib && break; echo "retry $i"; sleep 30; done
       - name: Cache Freeciv engine build
         id: core
@@ -36,11 +37,29 @@ jobs:
           export PATH=$PATH:$DEVKITPRO/tools/bin:$DEVKITARM/bin
           cd 3ds_port && make -j"$(nproc)"
           cp 3ds_port.3dsx freeciv3ds.3dsx
+      - name: Package CIA (installs to the HOME menu)
+        continue-on-error: true
+        run: |
+          set -e
+          mkdir -p /tmp/tools && cd /tmp/tools
+          pick() { python3 -c "import sys,json; a=[x['browser_download_url'] for x in json.load(sys.stdin)['assets'] if $1]; print(a[0])"; }
+          curl -sL -o makerom.zip "$(curl -s https://api.github.com/repos/3DSGuy/Project_CTR/releases/latest | pick "'makerom' in x['name'].lower() and ('ubuntu' in x['name'].lower() or 'linux' in x['name'].lower())")"
+          unzip -o -q makerom.zip -d makerom
+          MAKEROM=$(find /tmp/tools/makerom -type f -name 'makerom*' ! -name '*.zip' | head -1); chmod +x "$MAKEROM"
+          curl -sL -o bannertool.zip "$(curl -s https://api.github.com/repos/Epicpkmn11/bannertool/releases/latest | pick "x['name'].endswith('.zip')")"
+          unzip -o -q bannertool.zip -d bannertool
+          BT=$(find /tmp/tools/bannertool -type f -name bannertool -path '*linux*' | grep -i 'x86\|amd64' | head -1); chmod +x "$BT"
+          cd "$GITHUB_WORKSPACE/3ds_port"
+          "$BT" makebanner -i cia/banner.png -a cia/banner.wav -o cia/banner.bnr
+          "$BT" makesmdh -s "Freeciv 3DS" -l "Civilization-style strategy (Freeciv)" -p "Freeciv 3DS contributors" -i cia/icon.png -o cia/icon.icn
+          "$MAKEROM" -f cia -o freeciv3ds.cia -elf 3ds_port.elf -rsf cia/cia.rsf -icon cia/icon.icn -banner cia/banner.bnr -exefslogo -target t
+          ls -la freeciv3ds.cia
       - uses: actions/upload-artifact@v4
         with:
           name: freeciv3ds
           path: |
             3ds_port/freeciv3ds.3dsx
+            3ds_port/freeciv3ds.cia
             3ds_port/3ds_port.elf
 
   # Every green build of main also goes to the "builds" branch, so the latest
@@ -69,9 +88,32 @@ jobs:
           git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           mkdir -p 3ds
           cp ../out/freeciv3ds.3dsx ../out/3ds_port.elf 3ds/
+          [ -f ../out/freeciv3ds.cia ] && cp ../out/freeciv3ds.cia 3ds/ || true
           printf '%s\n%s\n%s\n' "${GITHUB_SHA}" "${GITHUB_RUN_NUMBER}" "$(date -u +%FT%TZ)" > BUILD.txt
           git config user.name "freeciv-3ds-ci"
           git config user.email "ci@users.noreply.github.com"
           git add -A
           git commit -q -m "build ${GITHUB_RUN_NUMBER} from ${GITHUB_SHA::7}" || exit 0
           git push -q origin builds
+
+  # Pushing a tag like v1.0 publishes a GitHub Release with the .3dsx and .cia.
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [n3ds]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: freeciv3ds
+          path: out
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files="out/freeciv3ds.3dsx"
+          [ -f out/freeciv3ds.cia ] && files="$files out/freeciv3ds.cia"
+          gh release create "${GITHUB_REF_NAME}" $files --repo "${GITHUB_REPOSITORY}" \
+            --title "Freeciv 3DS ${GITHUB_REF_NAME}" --generate-notes

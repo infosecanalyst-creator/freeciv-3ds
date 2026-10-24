@@ -38,7 +38,7 @@ GFXBUILD	:=	$(ROMFS)/gfx
 APP_TITLE	:=	Freeciv 3DS
 APP_DESCRIPTION	:=	Civilization-style strategy (Freeciv)
 APP_AUTHOR	:=	Freeciv 3DS contributors
-ICON		:=	../freeciv/data/icons/48x48/freeciv-client.png
+ICON		:=	cia/icon.png
 #---------------------------------------------------------------------------------
 # options for code generation
 #---------------------------------------------------------------------------------
