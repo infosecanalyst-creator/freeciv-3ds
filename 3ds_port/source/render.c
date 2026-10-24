@@ -1657,6 +1657,123 @@ void draw_scroll_list(int x, const ScrollRow *rows, int count)
     }
 }
 
+void render_city_tabs(int tab)
+{
+    static const char *names[3] = { "Build", "Tiles", "Buildings" };
+    for (int i = 0; i < 3; i++)
+        draw_button(CITY_TAB_X(i), CITY_TAB_Y, CITY_TAB_W, CITY_TAB_H, 0.03f, names[i], 0.47f, true, i == tab);
+}
+
+static u32 terrain_color(int t)
+{
+    static const u32 c[11] = {
+        0xFF663300, 0xFF3B7A3B, 0xFF4F9B8B, 0xFF8CB4D2, 0xFF909A80, 0xFF304020,
+        0xFF1B4D1B, 0xFF3B6D5E, 0xFF225522, 0xFF606060, 0xFFFFF0E0 };
+    return (t >= 0 && t < 11) ? c[t] : 0xFF000000;   // ABGR
+}
+
+static float grid_cell(int radius) { return (float)(int)(CITY_GRID_SIZE / (2 * radius + 1)); }
+
+bool city_grid_hit(int radius, int px, int py, int *rx, int *ry)
+{
+    if (radius <= 0) return false;
+    float c = grid_cell(radius);
+    int gx = (int)((px - CITY_GRID_X) / c), gy = (int)((py - CITY_GRID_Y) / c);
+    if (px < CITY_GRID_X || py < CITY_GRID_Y || gx > 2 * radius || gy > 2 * radius) return false;
+    *rx = gx - radius; *ry = gy - radius;
+    return true;
+}
+
+void render_city_tiles_panel(const CityInfo *info, const CityTileInfo *tiles, int n, int radius,
+                             const SpecialistInfo *spec, int nspec)
+{
+    C2D_TextBufClear(g_textBuf);
+    u32 white = C2D_Color32(0xF0, 0xF0, 0xF0, 0xFF);
+    u32 soft  = C2D_Color32(0xA8, 0xB4, 0xC4, 0xFF);
+    char line[64];
+    C2D_DrawRectSolid(0, 0, 0.0f, 320, 240, C2D_Color32(0x10, 0x16, 0x22, 0xFF));
+    C2D_DrawRectSolid(0, 0, 0.01f, 320, PANEL_HEADER_H, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
+    draw_text_z(8, 3, 0.02f, 0.6f, white, info->name[0] ? info->name : "?");
+    snprintf(line, sizeof(line), "Food %+d  Shields %+d  Trade %+d", info->surplus[0], info->surplus[1], info->surplus[2]);
+    draw_text(8, PANEL_HEADER_H + 4, 0.45f, soft, line);
+    render_city_tabs(CITY_TAB_TILES);
+
+    float c = grid_cell(radius > 0 ? radius : 2);
+    for (int i = 0; i < n; i++) {
+        const CityTileInfo *t = &tiles[i];
+        float x = CITY_GRID_X + (t->rx + radius) * c, y = CITY_GRID_Y + (t->ry + radius) * c;
+        C2D_DrawRectSolid(x, y, 0.0f, c - 1, c - 1, terrain_color(t->terrain));
+        if (t->state == 3) C2D_DrawRectSolid(x, y, 0.01f, c - 1, c - 1, C2D_Color32(0, 0, 0, 0xB0));
+        if (t->state == 1 || t->state == 2) {
+            u32 hc = t->state == 2 ? C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF) : C2D_Color32(0xFF, 0xE0, 0x50, 0xFF);
+            C2D_DrawRectSolid(x, y, 0.02f, c - 1, 2, hc);
+            C2D_DrawRectSolid(x, y + c - 3, 0.02f, c - 1, 2, hc);
+            C2D_DrawRectSolid(x, y, 0.02f, 2, c - 1, hc);
+            C2D_DrawRectSolid(x + c - 3, y, 0.02f, 2, c - 1, hc);
+        }
+        if (t->state == 2) {
+            C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, sprites_city_idx), x + 1, y + 1, 0.03f, NULL,
+                            (c - 3) / TILE_PX, (c - 3) / TILE_PX);
+        }
+        // food / shields / trade digits
+        if (t->state != 3) {
+            char d[4];
+            u32 col[3] = { C2D_Color32(0x90, 0xF0, 0x80, 0xFF), C2D_Color32(0xF0, 0xB0, 0x60, 0xFF),
+                           C2D_Color32(0xF8, 0xE8, 0x70, 0xFF) };
+            int v[3] = { t->food, t->shield, t->trade };
+            for (int k = 0; k < 3; k++) {
+                snprintf(d, sizeof(d), "%d", v[k] > 9 ? 9 : v[k]);
+                C2D_DrawRectSolid(x + 2 + k * 7, y + c - 13, 0.035f, 6, 10, C2D_Color32(0, 0, 0, 0x90));
+                font_draw(d, x + 2 + k * 7, y + c - 17, 0.04f, 0.36f, col[k]);
+            }
+        }
+    }
+    draw_text(CITY_SPEC_X, CITY_GRID_Y, 0.42f, soft, "Tap land to work it or free it.");
+    for (int i = 0; i < nspec; i++) {
+        float y = CITY_SPEC_Y + i * CITY_SPEC_H;
+        C2D_DrawRectSolid(CITY_SPEC_X, y, 0.0f, CITY_SPEC_W, CITY_SPEC_H - 3, C2D_Color32(0x1A, 0x24, 0x34, 0xFF));
+        draw_text_z(CITY_SPEC_X + 6, y + 1, 0.01f, 0.47f, white, spec[i].name);
+        snprintf(line, sizeof(line), "%d", spec[i].count);
+        draw_text_z(CITY_SPEC_X + CITY_SPEC_W - 8 - text_width(line, 0.5f), y, 0.01f, 0.5f,
+                    spec[i].count ? C2D_Color32(0xFF, 0xE0, 0x60, 0xFF) : soft, line);
+    }
+    if (nspec > 1) draw_text(CITY_SPEC_X, CITY_SPEC_Y + nspec * CITY_SPEC_H, 0.4f, soft, "Tap a specialist to switch one.");
+    draw_button(4, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Buy", 0.5f, false, false);
+    draw_button(164, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
+}
+
+void render_city_buildings_panel(const CityInfo *info, const BuildingInfo *b, int n, int scroll, int armed)
+{
+    C2D_TextBufClear(g_textBuf);
+    u32 white = C2D_Color32(0xF0, 0xF0, 0xF0, 0xFF);
+    u32 soft  = C2D_Color32(0xA8, 0xB4, 0xC4, 0xFF);
+    char line[48];
+    C2D_DrawRectSolid(0, 0, 0.0f, 320, 240, C2D_Color32(0x10, 0x16, 0x22, 0xFF));
+    C2D_DrawRectSolid(0, 0, 0.01f, 320, PANEL_HEADER_H, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
+    draw_text_z(8, 3, 0.02f, 0.6f, white, info->name[0] ? info->name : "?");
+    snprintf(line, sizeof(line), "%d building%s", n, n == 1 ? "" : "s");
+    draw_text(8, PANEL_HEADER_H + 4, 0.45f, soft, n ? line : "Nothing built yet.");
+    render_city_tabs(CITY_TAB_BUILDINGS);
+    for (int i = 0; i < PANEL_ROWS_VISIBLE; i++) {
+        int idx = scroll + i;
+        if (idx >= n) break;
+        float y = PANEL_LIST_Y + i * PANEL_ROW_H;
+        bool arm = idx == armed;
+        C2D_DrawRectSolid(4, y + 1, 0.0f, 306, PANEL_ROW_H - 2,
+                          arm ? C2D_Color32(0x6A, 0x24, 0x20, 0xFF) : (i & 1) ? C2D_Color32(0x1A, 0x24, 0x34, 0xFF)
+                                                                       : C2D_Color32(0x20, 0x2C, 0x3E, 0xFF));
+        draw_text_z(12, y + 1, 0.01f, 0.47f, white, b[idx].name);
+        if (arm) snprintf(line, sizeof(line), "tap again: sell %dg", b[idx].sell_gold);
+        else if (b[idx].can_sell) snprintf(line, sizeof(line), "sell %dg", b[idx].sell_gold);
+        else line[0] = 0;
+        if (line[0]) draw_text_z(304 - text_width(line, 0.4f), y + 2, 0.01f, 0.4f,
+                                 arm ? C2D_Color32(0xFF, 0xC0, 0xB0, 0xFF) : soft, line);
+    }
+    draw_button(4, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Buy", 0.5f, false, false);
+    draw_button(164, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
+    (void)scroll;
+}
+
 void render_city_panel(const CityInfo *info, const BuildOption *opts, int n, int scroll,
                        const WorklistEntry *worklist, int worklist_n, bool queue_mode)
 {
@@ -1678,9 +1795,8 @@ void render_city_panel(const CityInfo *info, const BuildOption *opts, int n, int
     snprintf(line, sizeof(line), "%s  %d/%d  (%d turns)", info->producing[0] ? info->producing : "?",
              info->shield_stock, info->prod_cost, info->prod_turns);
     draw_text(8, PANEL_HEADER_H + 4, 0.47f, cur, line);
-    draw_text(8, PANEL_HEADER_H + 26, 0.42f, soft, queue_mode ? "Tap an item to add it to the queue." :
-                                                               "Tap an item to build it now.");
-    draw_text(CITY_WORKLIST_COL_X + 4, PANEL_HEADER_H + 40, 0.42f, soft, worklist_n ? "Queue (tap: remove)" : "Queue empty");
+    render_city_tabs(CITY_TAB_BUILD);
+    if (!worklist_n) draw_text(CITY_WORKLIST_COL_X + 4, PANEL_LIST_Y + 2, 0.42f, soft, "Queue empty");
 
     // Buildables (left), as tappable rows.
     for (int i = 0; i < PANEL_ROWS_VISIBLE; i++) {

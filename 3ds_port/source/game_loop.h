@@ -454,6 +454,24 @@ typedef struct { int action; char label[32]; } CityAction;
 // (embassy, sabotage, trade route...). Returns how many were written.
 int get_city_actions(int unit_id, int tx, int ty, CityAction *out, int max);
 void freeciv_request_city_action(int unit_id, int action, int tx, int ty);
+
+// ---- City tiles, specialists and buildings ----
+typedef struct {
+    int rx, ry;          // offset from the city centre (-r..r)
+    int x, y;            // native tile
+    int food, shield, trade;
+    int state;           // 0 free, 1 worked by this city, 2 the centre, 3 not available
+    int terrain;         // TerrainType
+} CityTileInfo;
+#define CITY_TILES_MAX 64
+int get_city_tiles(int city_id, CityTileInfo *out, int max, int *radius);
+typedef struct { int id; char name[32]; int count; } SpecialistInfo;
+int get_city_specialists(int city_id, SpecialistInfo *out, int max);
+typedef struct { int id; char name[48]; bool can_sell; int sell_gold; } BuildingInfo;
+int get_city_buildings(int city_id, BuildingInfo *out, int max);
+void freeciv_request_city_toggle_tile(int city_id, int tx, int ty);   // work it / free it
+void freeciv_request_city_change_specialist(int city_id, int from, int to);
+void freeciv_request_city_sell(int city_id, int building_id);
 // Fills *out for unit_id (out->valid=false if it no longer exists).
 void get_unit_info(int unit_id, UnitInfo *out);
 // The units on tile (x, y), pov's first; returns how many were written.

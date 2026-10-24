@@ -36,6 +36,7 @@
 #include "movement.h"
 #include "combat.h"
 #include "events.h"
+#include "specialist.h"
 #include <string.h>
 #include <stdlib.h>
 #include <dirent.h>
@@ -311,7 +312,10 @@ typedef enum {
     CMD_DIPLOMACY_REMOVE_CLAUSE, // a=counterpart, b=clause_type, c=value
     CMD_DIPLOMACY_ACCEPT,        // a=counterpart player id
     CMD_SAVE_GAME,               // no payload; auto-named "3ds-T<turn>"
-    CMD_UNIT_CITY_ACTION         // a=unit_id, b=action id, c=city tile index
+    CMD_UNIT_CITY_ACTION,        // a=unit_id, b=action id, c=city tile index
+    CMD_CITY_TOGGLE_TILE,        // a=city_id, b=tile index
+    CMD_CITY_CHANGE_SPECIALIST,  // a=city_id, b=from, c=to
+    CMD_CITY_SELL                // a=city_id, b=improvement id
 } PendingCmdKind;
 
 typedef struct {
@@ -452,6 +456,23 @@ void freeciv_request_city_action(int unit_id, int action, int tx, int ty)
     if (map_is_empty()) return;
     struct tile *t = port_native_tile(tx, ty);
     if (t) enqueue_cmd(CMD_UNIT_CITY_ACTION, unit_id, action, tile_index(t), 0);
+}
+
+void freeciv_request_city_toggle_tile(int city_id, int tx, int ty)
+{
+    if (map_is_empty()) return;
+    struct tile *t = port_native_tile(tx, ty);
+    if (t) enqueue_cmd(CMD_CITY_TOGGLE_TILE, city_id, tile_index(t), 0, 0);
+}
+
+void freeciv_request_city_change_specialist(int city_id, int from, int to)
+{
+    enqueue_cmd(CMD_CITY_CHANGE_SPECIALIST, city_id, from, to, 0);
+}
+
+void freeciv_request_city_sell(int city_id, int building_id)
+{
+    enqueue_cmd(CMD_CITY_SELL, city_id, building_id, 0, 0);
 }
 
 void freeciv_request_save_game(void)
@@ -719,6 +740,71 @@ int get_city_actions(int unit_id, int tx, int ty, CityAction *out, int max)
         fc_strlcpy(out[n].label, k_city_actions[i].label, sizeof(out[n].label));
         n++;
     }
+    return n;
+}
+
+int get_city_tiles(int city_id, CityTileInfo *out, int max, int *radius)
+{
+    *radius = 0;
+    if (map_is_empty()) return 0;
+    struct city *pcity = game_city_by_number(city_id);
+    struct player *pov = get_pov_player();
+    if (!pcity || city_owner(pcity) != pov) return 0;
+    const struct civ_map *nmap = &(wld.map);
+    int rsq = city_map_radius_sq_get(pcity);
+    int n = 0;
+    city_map_iterate(rsq, cindex, cx, cy) {
+        struct tile *t = city_map_to_tile(nmap, pcity->tile, rsq, cx, cy);
+        if (!t || n >= max) continue;
+        CityTileInfo *c = &out[n++];
+        c->rx = CITY_ABS2REL(cx);
+        c->ry = CITY_ABS2REL(cy);
+        if (abs(c->rx) > *radius) *radius = abs(c->rx);
+        if (abs(c->ry) > *radius) *radius = abs(c->ry);
+        index_to_native_pos(&c->x, &c->y, tile_index(t));
+        c->food = city_tile_output_now(pcity, t, O_FOOD);
+        c->shield = city_tile_output_now(pcity, t, O_SHIELD);
+        c->trade = city_tile_output_now(pcity, t, O_TRADE);
+        c->terrain = get_tile_type(c->x, c->y);
+        if (t == pcity->tile) c->state = 2;
+        else if (tile_worked(t) == pcity) c->state = 1;
+        else if (city_can_work_tile(pcity, t)) c->state = 0;
+        else c->state = 3;
+        (void)cindex;
+    } city_map_iterate_end;
+    return n;
+}
+
+int get_city_specialists(int city_id, SpecialistInfo *out, int max)
+{
+    if (map_is_empty()) return 0;
+    struct city *pcity = game_city_by_number(city_id);
+    if (!pcity) return 0;
+    int n = 0;
+    specialist_type_iterate(sp) {
+        if (n >= max) break;
+        out[n].id = sp;
+        fc_strlcpy(out[n].name, specialist_plural_translation(specialist_by_number(sp)), sizeof(out[n].name));
+        out[n].count = pcity->specialists[sp];
+        n++;
+    } specialist_type_iterate_end;
+    return n;
+}
+
+int get_city_buildings(int city_id, BuildingInfo *out, int max)
+{
+    if (map_is_empty()) return 0;
+    struct city *pcity = game_city_by_number(city_id);
+    if (!pcity) return 0;
+    int n = 0;
+    city_built_iterate(pcity, pimprove) {
+        if (n >= max) break;
+        out[n].id = improvement_number(pimprove);
+        fc_strlcpy(out[n].name, improvement_name_translation(pimprove), sizeof(out[n].name));
+        out[n].can_sell = can_city_sell_building(pcity, pimprove) && !pcity->did_sell;
+        out[n].sell_gold = impr_sell_gold(pimprove);
+        n++;
+    } city_built_iterate_end;
     return n;
 }
 
@@ -1105,6 +1191,21 @@ void freeciv3ds_process_pending_actions(void)
             }
             break;
         }
+        case CMD_CITY_TOGGLE_TILE: {
+            struct city *pcity = game_city_by_number(cmd.a);
+            struct tile *t = index_to_tile(&(wld.map), cmd.b);
+            if (pcity && t && city_owner(pcity) == pov) {
+                if (tile_worked(t) == pcity) handle_city_make_specialist(pov, cmd.a, cmd.b);
+                else handle_city_make_worker(pov, cmd.a, cmd.b);
+            }
+            break;
+        }
+        case CMD_CITY_CHANGE_SPECIALIST:
+            handle_city_change_specialist(pov, cmd.a, cmd.b, cmd.c);
+            break;
+        case CMD_CITY_SELL:
+            handle_city_sell(pov, cmd.a, cmd.b);
+            break;
         case CMD_CITY_PRODUCTION:
             // Self-validating: no-ops on an illegal kind/value or a
             // non-pov/nonexistent city_id.

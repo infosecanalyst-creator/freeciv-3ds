@@ -201,6 +201,29 @@ void render_city_top(const CityInfo *info, int garrison_sel);
 void render_city_panel(const CityInfo *info, const BuildOption *opts, int n, int scroll,
                        const WorklistEntry *worklist, int worklist_n, bool queue_mode);
 
+// City screen tabs (Build / Tiles / Buildings), under the header.
+#define CITY_TAB_Y      56
+#define CITY_TAB_H      26
+#define CITY_TAB_W      100
+#define CITY_TAB_X(i)   (4 + (i) * 104)
+enum { CITY_TAB_BUILD, CITY_TAB_TILES, CITY_TAB_BUILDINGS };
+void render_city_tabs(int tab);
+// Tiles tab: the city's land as a grid (left) and its specialists (right).
+#define CITY_GRID_X     6
+#define CITY_GRID_Y     88
+#define CITY_GRID_SIZE  120
+#define CITY_SPEC_X     134
+#define CITY_SPEC_Y     110
+#define CITY_SPEC_W     182
+#define CITY_SPEC_H     26
+void render_city_tiles_panel(const CityInfo *info, const CityTileInfo *tiles, int n, int radius,
+                             const SpecialistInfo *spec, int nspec);
+// Maps a tap to a grid offset; false if outside the grid.
+bool city_grid_hit(int radius, int px, int py, int *rx, int *ry);
+// Buildings tab: rows on the shared PANEL_* list layout; armed = row waiting
+// for its confirming second tap (-1 none).
+void render_city_buildings_panel(const CityInfo *info, const BuildingInfo *b, int n, int scroll, int armed);
+
 // Top-screen readout for the civ-level (research/rates) panels. title is
 // the panel name shown in the header bar ("Research" / "Tax & Science").
 void render_civ_top(const CivInfo *civ, const char *title);

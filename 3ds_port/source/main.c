@@ -506,6 +506,14 @@ int main(int argc, char* argv[])
     int ui_garrison_sel = 0; // L/R-cycled garrison index, reset per city open (handoff.md §3)
     bool ui_worklist_queue_mode = false; // NOW (false) / QUEUE (true) toggle, reset per city open (handoff.md §6)
     int ui_dipl_stage = 1; // 1=player picker, 2=clause editor (handoff.md §7.4)
+    int ui_city_tab = CITY_TAB_BUILD;
+    int city_sell_armed = -1;
+    static CityTileInfo city_tiles[CITY_TILES_MAX];
+    int city_tiles_n = 0, city_radius = 2;
+    static SpecialistInfo city_spec[8];
+    int city_spec_n = 0;
+    static BuildingInfo city_bldg[96];
+    int city_bldg_n = 0;
     int ui_dipl_counterpart = -1;
     char ui_dipl_counterpart_name[48] = "";
     // Tracks whether get_diplo_info() has EVER reported an active meeting
@@ -935,7 +943,43 @@ int main(int argc, char* argv[])
             hidTouchRead(&touch);
             int px = (int)touch.px, py = (int)touch.py;
 
-            if (ui_mode == UI_CITY) {
+            if (ui_mode == UI_CITY && py >= CITY_TAB_Y && py < CITY_TAB_Y + CITY_TAB_H) {
+                for (int t = 0; t < 3; t++)
+                    if (px >= CITY_TAB_X(t) && px < CITY_TAB_X(t) + CITY_TAB_W) {
+                        ui_city_tab = t; ui_scroll = 0; city_sell_armed = -1;
+                    }
+            } else if (ui_mode == UI_CITY && ui_city_tab == CITY_TAB_TILES) {
+                int rx, ry;
+                if (py >= PANEL_FOOTER_Y) {
+                    if (px >= 160) ui_mode = UI_MAP;
+                } else if (city_grid_hit(city_radius, px, py, &rx, &ry)) {
+                    for (int i = 0; i < city_tiles_n; i++)
+                        if (city_tiles[i].rx == rx && city_tiles[i].ry == ry
+                            && (city_tiles[i].state == 0 || city_tiles[i].state == 1))
+                            freeciv_request_city_toggle_tile(ui_city_id, city_tiles[i].x, city_tiles[i].y);
+                } else if (px >= CITY_SPEC_X && px < CITY_SPEC_X + CITY_SPEC_W && py >= CITY_SPEC_Y) {
+                    int row = (py - CITY_SPEC_Y) / CITY_SPEC_H;
+                    if (row < city_spec_n && city_spec[row].count > 0 && city_spec_n > 1)
+                        freeciv_request_city_change_specialist(ui_city_id, city_spec[row].id,
+                                                               city_spec[(row + 1) % city_spec_n].id);
+                }
+            } else if (ui_mode == UI_CITY && ui_city_tab == CITY_TAB_BUILDINGS) {
+                if (py >= PANEL_FOOTER_Y) {
+                    if (px >= 160) ui_mode = UI_MAP;
+                } else {
+                    int row = hit_test_scroll_list(py, ui_scroll, city_bldg_n);
+                    if (row >= 0 && city_bldg[row].can_sell) {
+                        if (city_sell_armed == row) {
+                            freeciv_request_city_sell(ui_city_id, city_bldg[row].id);
+                            city_sell_armed = -1;
+                        } else {
+                            city_sell_armed = row;
+                        }
+                    } else {
+                        city_sell_armed = -1;
+                    }
+                }
+            } else if (ui_mode == UI_CITY) {
                 // NOW/QUEUE toggle lives in the header band, above the list/
                 // footer rows below - checked first so it can never collide
                 // with them (handoff.md §6.4).
@@ -1240,7 +1284,7 @@ int main(int argc, char* argv[])
                             ui_city_id = t.city_id;
                             ui_scroll = 0;
                             ui_garrison_sel = 0;
-                            ui_worklist_queue_mode = false;
+                            ui_worklist_queue_mode = false; ui_city_tab = CITY_TAB_BUILD; city_sell_armed = -1;
                         }
                     } else {
                         selected_unit_id = id;
@@ -1355,7 +1399,7 @@ int main(int argc, char* argv[])
                             ui_city_id = t.city_id;
                             ui_scroll = 0;
                             ui_garrison_sel = 0;
-                            ui_worklist_queue_mode = false;
+                            ui_worklist_queue_mode = false; ui_city_tab = CITY_TAB_BUILD; city_sell_armed = -1;
                             selected_unit_id = -1;
                         } else if (mine_n == 1) {
                             // Your unit: command it and show its orders.
@@ -1493,6 +1537,14 @@ int main(int argc, char* argv[])
                     if (ui_scroll < 0) ui_scroll = 0;
                     if (ui_scroll > max_scroll) ui_scroll = max_scroll;
                     ui_worklist_count = get_city_worklist(ui_city_id, ui_worklist, MAX_WORKLIST_ENTRIES);
+                    if (ui_city_tab == CITY_TAB_TILES) {
+                        city_tiles_n = get_city_tiles(ui_city_id, city_tiles, CITY_TILES_MAX, &city_radius);
+                        city_spec_n = get_city_specialists(ui_city_id, city_spec, 8);
+                    } else if (ui_city_tab == CITY_TAB_BUILDINGS) {
+                        city_bldg_n = get_city_buildings(ui_city_id, city_bldg, 96);
+                        int ms = city_bldg_n > PANEL_ROWS_VISIBLE ? city_bldg_n - PANEL_ROWS_VISIBLE : 0;
+                        if (ui_scroll > ms) ui_scroll = ms;
+                    }
 
                     // Garrison may have shrunk (unit taken out, disbanded,
                     // city captured mid-refresh) - keep the L/R cursor in
@@ -1695,8 +1747,13 @@ int main(int argc, char* argv[])
             C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_BOTTOM, true);
             switch (ui_mode) {
             case UI_CITY:
-                render_city_panel(&ui_city_info, ui_build_opts, ui_build_count, ui_scroll,
-                                  ui_worklist, ui_worklist_count, ui_worklist_queue_mode);
+                if (ui_city_tab == CITY_TAB_TILES)
+                    render_city_tiles_panel(&ui_city_info, city_tiles, city_tiles_n, city_radius, city_spec, city_spec_n);
+                else if (ui_city_tab == CITY_TAB_BUILDINGS)
+                    render_city_buildings_panel(&ui_city_info, city_bldg, city_bldg_n, ui_scroll, city_sell_armed);
+                else
+                    render_city_panel(&ui_city_info, ui_build_opts, ui_build_count, ui_scroll,
+                                      ui_worklist, ui_worklist_count, ui_worklist_queue_mode);
                 break;
             case UI_RESEARCH:
                 if (ui_tech_tree_view) {
