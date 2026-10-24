@@ -1721,8 +1721,8 @@ void render_city_tiles_panel(const CityInfo *info, const CityTileInfo *tiles, in
         // food / shields / trade digits
         if (t->state != 3) {
             char d[4];
-            u32 col[3] = { C2D_Color32(0x90, 0xF0, 0x80, 0xFF), C2D_Color32(0xF0, 0xB0, 0x60, 0xFF),
-                           C2D_Color32(0xF8, 0xE8, 0x70, 0xFF) };
+            u32 col[3] = { C2D_Color32(0x60, 0xFF, 0x60, 0xFF), C2D_Color32(0xFF, 0x98, 0x38, 0xFF),
+                           C2D_Color32(0xFF, 0xE8, 0x30, 0xFF) };
             int v[3] = { t->food, t->shield, t->trade };
             // One dark strip, three spaced digits; zeros are dimmed so the
             // non-zero yields stand out.
@@ -1732,7 +1732,7 @@ void render_city_tiles_panel(const CityInfo *info, const CityTileInfo *tiles, in
             for (int k = 0; k < 3; k++) {
                 snprintf(d, sizeof(d), "%d", v[k] > 9 ? 9 : v[k]);
                 float dx = x + 2 + k * 7;
-                font_draw(d, dx, y + c - 16, 0.04f, 0.34f, v[k] ? col[k] : C2D_Color32(0x70, 0x70, 0x70, 0xFF));
+                font_draw(d, dx, y + c - 16, 0.04f, 0.34f, v[k] ? col[k] : C2D_Color32(0x50, 0x50, 0x50, 0xFF));
             }
             font_set_bias(bias);
         }
