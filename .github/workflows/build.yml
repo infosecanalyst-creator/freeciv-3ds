@@ -37,8 +37,34 @@ jobs:
           export PATH=$PATH:$DEVKITPRO/tools/bin:$DEVKITARM/bin
           cd 3ds_port && make -j"$(nproc)"
           cp 3ds_port.3dsx freeciv3ds.3dsx
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freeciv3ds
+          path: |
+            3ds_port/freeciv3ds.3dsx
+            3ds_port/3ds_port.elf
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cia-inputs
+          path: |
+            3ds_port/3ds_port.elf
+            3ds_port/romfs
+            3ds_port/cia
+          retention-days: 3
+
+  # makerom needs a newer glibc than the devkitPro image, so the CIA is
+  # packaged on the stock runner from the ELF + RomFS built above.
+  cia:
+    name: CIA package
+    needs: [n3ds]
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: cia-inputs
+          path: in
       - name: Package CIA (installs to the HOME menu)
-        continue-on-error: true
         run: |
           set -e
           mkdir -p /tmp/tools && cd /tmp/tools
@@ -49,25 +75,22 @@ jobs:
           curl -sL -o bannertool.zip "$(curl -s https://api.github.com/repos/Epicpkmn11/bannertool/releases/latest | pick "x['name'].endswith('.zip')")"
           unzip -o -q bannertool.zip -d bannertool
           BT=$(find /tmp/tools/bannertool -type f -name bannertool -path '*linux*' | grep -i 'x86\|amd64' | head -1); chmod +x "$BT"
-          cd "$GITHUB_WORKSPACE/3ds_port"
+          cd "$GITHUB_WORKSPACE/in/3ds_port"
           "$BT" makebanner -i cia/banner.png -a cia/banner.wav -o cia/banner.bnr
           "$BT" makesmdh -s "Freeciv 3DS" -l "Civilization-style strategy (Freeciv)" -p "Freeciv 3DS contributors" -i cia/icon.png -o cia/icon.icn
           "$MAKEROM" -f cia -o freeciv3ds.cia -elf 3ds_port.elf -rsf cia/cia.rsf -icon cia/icon.icn -banner cia/banner.bnr -exefslogo -target t
           ls -la freeciv3ds.cia
       - uses: actions/upload-artifact@v4
         with:
-          name: freeciv3ds
-          path: |
-            3ds_port/freeciv3ds.3dsx
-            3ds_port/freeciv3ds.cia
-            3ds_port/3ds_port.elf
+          name: freeciv3ds-cia
+          path: in/3ds_port/freeciv3ds.cia
 
   # Every green build of main also goes to the "builds" branch, so the latest
   # .3dsx can be fetched through the GitHub API.
   publish-latest:
     name: Publish latest build
-    if: github.ref == 'refs/heads/main'
-    needs: [n3ds]
+    if: always() && github.ref == 'refs/heads/main' && needs.n3ds.result == 'success'
+    needs: [n3ds, cia]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -75,6 +98,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: freeciv3ds
+          path: out
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: freeciv3ds-cia
           path: out
       - name: Commit to the builds branch
         env:
@@ -99,8 +127,8 @@ jobs:
   # Pushing a tag like v1.0 publishes a GitHub Release with the .3dsx and .cia.
   release:
     name: GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [n3ds]
+    if: always() && startsWith(github.ref, 'refs/tags/v') && needs.n3ds.result == 'success'
+    needs: [n3ds, cia]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -108,6 +136,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: freeciv3ds
+          path: out
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: freeciv3ds-cia
           path: out
       - name: Create the release
         env:
