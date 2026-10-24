@@ -414,6 +414,37 @@ bool find_pov_unit_tile(int *x, int *y);
 // Sound cues raised by the engine side (combat, a city founded); the main
 // thread pops them each frame and plays them. Tags are Freeciv soundspec tags.
 bool game_pop_sound(char *tag, int len);
+
+// ---- News: Freeciv's event messages for the pov player ----
+typedef enum { MSG_OTHER, MSG_COMBAT, MSG_CITY, MSG_SCIENCE, MSG_DIPLOMACY, MSG_GOOD } MsgCategory;
+typedef struct {
+    int  turn;
+    int  x, y;          // native tile, -1 if none
+    int  category;      // MsgCategory
+    char text[160];     // markup stripped
+} GameMessage;
+// Total messages received so far (a running counter, never reset).
+int get_message_total(void);
+// Copies message number `index` (0 = first ever) if it's still in the log.
+bool get_message(int index, GameMessage *out);
+#define MESSAGE_LOG_SIZE 128
+
+// ---- Combat odds (read-only, while parked) ----
+typedef struct {
+    char attacker[48], defender[48];
+    char defender_rule[48];
+    int  defender_owner;
+    int  def_hp, def_hp_max, att_hp, att_hp_max;
+    int  win_pct;       // 0..100
+    bool can_attack;    // the ruleset allows attacking there now (at war, etc.)
+} AttackOdds;
+// false if (tx, ty) holds no units unit_id could fight.
+bool get_attack_odds(int unit_id, int tx, int ty, AttackOdds *out);
+
+// ---- Route preview ----
+#define ROUTE_MAX 64
+typedef struct { int n; int x[ROUTE_MAX], y[ROUTE_MAX]; int turns; bool reachable; } RoutePreview;
+void get_route_preview(int unit_id, int tx, int ty, RoutePreview *out);
 // Fills *out for unit_id (out->valid=false if it no longer exists).
 void get_unit_info(int unit_id, UnitInfo *out);
 // The units on tile (x, y), pov's first; returns how many were written.

@@ -65,7 +65,7 @@ void __wrap_abort(void) {
 // UI mode: drives both input routing and which render path runs each frame.
 // UI_MAP is the existing map/unit-control screen (untouched behavior);
 // UI_CITY/UI_RESEARCH/UI_RATES are the new modal panels from handoff.md.
-typedef enum { UI_MAP, UI_CITY, UI_RESEARCH, UI_RATES, UI_GOVERNMENT, UI_DIPLOMACY } UiMode;
+typedef enum { UI_MAP, UI_CITY, UI_RESEARCH, UI_RATES, UI_GOVERNMENT, UI_DIPLOMACY, UI_MESSAGES } UiMode;
 
 // App-level state, one level above UiMode (handoff-nohw.md §A.3). The
 // server coroutine is created in init_freeciv() but blocks before touching
@@ -236,7 +236,7 @@ static bool adjacent_dir(int ax, int ay, int bx, int by, MoveDir *dir)
 }
 
 // ---- Popup menus ----
-enum { POPUP_NONE, POPUP_UNIT, POPUP_CONFIRM_DISBAND, POPUP_STACK, POPUP_MENU };
+enum { POPUP_NONE, POPUP_UNIT, POPUP_CONFIRM_DISBAND, POPUP_STACK, POPUP_MENU, POPUP_ATTACK };
 // Popup item ids beyond UnitActionKind.
 #define PID_SKIP        100
 #define PID_DESELECT    101
@@ -244,7 +244,7 @@ enum { POPUP_NONE, POPUP_UNIT, POPUP_CONFIRM_DISBAND, POPUP_STACK, POPUP_MENU };
 #define PID_OPEN_CITY   (-100)
 #define PID_YES         1
 #define PID_NO          0
-enum { MENU_RESEARCH = 1, MENU_RATES, MENU_GOVERNMENT, MENU_DIPLOMACY, MENU_SAVE, MENU_MUSIC, MENU_EFFECTS, MENU_CLOSE };
+enum { MENU_RESEARCH = 1, MENU_RATES, MENU_GOVERNMENT, MENU_DIPLOMACY, MENU_SAVE, MENU_MUSIC, MENU_EFFECTS, MENU_CLOSE, MENU_MESSAGES };
 
 static void popup_add(PopupMenu *m, int id, const char *label, bool enabled)
 {
@@ -286,6 +286,7 @@ static void open_game_menu(PopupMenu *m)
     popup_add(m, MENU_RATES,      "Tax Rates", true);
     popup_add(m, MENU_GOVERNMENT, "Government", true);
     popup_add(m, MENU_DIPLOMACY,  "Diplomacy", true);
+    popup_add(m, MENU_MESSAGES,   "Messages", true);
     popup_add(m, MENU_SAVE,       "Save Game", true);
     char lbl[24];
     snprintf(lbl, sizeof(lbl), "Music: %d", audio_music_volume());
@@ -461,6 +462,19 @@ int main(int argc, char* argv[])
     int pending_goto_x = -1, pending_goto_y = -1; // first tap of a two-tap route
     UnitInfo unit_info;
     memset(&unit_info, 0, sizeof(unit_info));
+    // Turn report: news that arrived while the AI took its turn.
+    static GameMessage report[12];
+    int report_n = 0, report_more = 0;
+    int report_seen = 0;             // message counter when you last ended your turn
+    // Message log view (newest first).
+    static GameMessage msg_view[MESSAGE_LOG_SIZE];
+    int msg_view_n = 0;
+    // Attack confirmation and route preview.
+    MoveDir pending_attack_dir = MOVE_DIR_NORTH;
+    AttackOdds attack_odds;
+    memset(&attack_odds, 0, sizeof(attack_odds));
+    RoutePreview route;
+    memset(&route, 0, sizeof(route));
     static UnitBrief stack[16];
     int stack_n = 0;
     int sel_x = -1, sel_y = -1;          // currently selected map tile (-1 = none)
@@ -667,7 +681,11 @@ int main(int argc, char* argv[])
         // inside a modal so a long turn step can't strand the panel behind
         // the busy overlay (handoff.md §7.3) - close the modal first.
         // ---------------- Map screen (UI_MAP) buttons ----------------
+        // Any input puts the turn report away (and still does its normal job).
+        if (report_n > 0 && kDown) report_n = 0;
+
         if (ui_mode == UI_MAP && (kDown & KEY_START) && !(kHeld & KEY_SELECT)) {
+            report_seen = get_message_total();
             fc3ds_server_request_end_turn();
             popup_kind = POPUP_NONE;
             pending_goto_x = pending_goto_y = -1;
@@ -694,7 +712,7 @@ int main(int argc, char* argv[])
         hidCircleRead(&pos);
 
         if (ui_mode == UI_CITY || ui_mode == UI_RESEARCH || ui_mode == UI_GOVERNMENT
-            || ui_mode == UI_DIPLOMACY) {
+            || ui_mode == UI_DIPLOMACY || ui_mode == UI_MESSAGES) {
             // D-Pad up/down scrolls the open list; B closes the panel.
             if (kDown & KEY_DUP)   ui_scroll--;
             if (kDown & KEY_DDOWN) ui_scroll++;
@@ -876,6 +894,7 @@ int main(int argc, char* argv[])
                         } else if (h == HUD_ZIN) {
                             set_zoom(zoom_idx + 1, &zoom_idx, &zoom, &cam_x, &cam_y);
                         } else if (h == HUD_END) {
+                            report_seen = get_message_total();
                             fc3ds_server_request_end_turn();
                             pending_goto_x = pending_goto_y = -1;
                         }
@@ -1035,6 +1054,19 @@ int main(int argc, char* argv[])
                                                                 ui_diplo_info.clauses[row].value);
                     }
                 }
+            } else if (ui_mode == UI_MESSAGES) {
+                int row = hit_test_scroll_list(py, ui_scroll, msg_view_n);
+                if (row >= 0) {
+                    if (msg_view[row].x >= 0) {
+                        sel_x = msg_view[row].x; sel_y = msg_view[row].y;
+                        prev_sel_x = sel_x; prev_sel_y = sel_y;
+                        center_on_tile(sel_x, sel_y, zoom, &cam_x, &cam_y);
+                        selected_unit_id = -1;
+                        ui_mode = UI_MAP;
+                    }
+                } else if (py >= PANEL_FOOTER_Y) {
+                    ui_mode = UI_MAP;
+                }
             } else if (ui_mode == UI_RATES) {
                 if (py >= RATES_TAX_Y && py < RATES_TAX_Y + RATES_ROW_TOUCH_H) {
                     if (px >= RATES_BTN_MINUS_X && px < RATES_BTN_MINUS_X + RATES_BTN_W) {
@@ -1116,6 +1148,22 @@ int main(int argc, char* argv[])
             // A new turn: clear "Wait" marks and pick the first unit to move.
             int turn_now = get_game_turn();
             if (turn_now > 0 && turn_now != last_turn) {
+                if (last_turn > 0) {
+                    // Most important first: combat, diplomacy, good news, science, cities, other.
+                    static const int order[] = { MSG_COMBAT, MSG_DIPLOMACY, MSG_GOOD, MSG_SCIENCE, MSG_CITY, MSG_OTHER };
+                    int total = get_message_total();
+                    report_n = 0; report_more = 0;
+                    for (int o = 0; o < 6; o++) {
+                        for (int i = report_seen; i < total; i++) {
+                            GameMessage m;
+                            if (!get_message(i, &m) || m.category != order[o]) continue;
+                            if (report_n < (int)(sizeof(report) / sizeof(report[0]))) report[report_n++] = m;
+                            else report_more++;
+                        }
+                    }
+                    if (report_n > 8) { report_more += report_n - 8; report_n = 8; }
+                    report_seen = total;
+                }
                 last_turn = turn_now;
                 nskip = 0;
                 turn_select_frames = 600;
@@ -1160,6 +1208,8 @@ int main(int argc, char* argv[])
                             want_next_unit = true;
                         }
                     }
+                } else if (kind == POPUP_ATTACK && selected_unit_id >= 0) {
+                    if (id == PID_YES) freeciv_request_unit_move(selected_unit_id, pending_attack_dir);
                 } else if (kind == POPUP_CONFIRM_DISBAND && selected_unit_id >= 0) {
                     if (id == PID_YES) {
                         freeciv_request_unit_action(selected_unit_id, UNIT_ACTION_DISBAND);
@@ -1189,6 +1239,7 @@ int main(int argc, char* argv[])
                     case MENU_RATES:      ui_mode = UI_RATES; ui_scroll = 0; break;
                     case MENU_GOVERNMENT: ui_mode = UI_GOVERNMENT; ui_scroll = 0; break;
                     case MENU_DIPLOMACY:  ui_mode = UI_DIPLOMACY; ui_scroll = 0; ui_dipl_stage = 1; break;
+                    case MENU_MESSAGES:   ui_mode = UI_MESSAGES; ui_scroll = 0; break;
                     case MENU_SAVE:
                         freeciv_request_save_game();
                         save_toast_frames = SAVE_TOAST_FRAMES;
@@ -1229,8 +1280,22 @@ int main(int argc, char* argv[])
                             if (mine_n > 1 || own_city) select_here = true; // pick from the stack
                             else want_unit_popup = true;
                         } else if (adjacent_dir(unit_info.x, unit_info.y, tx, ty, &dir)) {
-                            freeciv_request_unit_move(selected_unit_id, dir);
                             pending_goto_x = pending_goto_y = -1;
+                            if (get_attack_odds(selected_unit_id, tx, ty, &attack_odds)) {
+                                // Show the odds before fighting.
+                                memset(&popup, 0, sizeof(popup));
+                                snprintf(popup.title, sizeof(popup.title), "vs %s: %d%% to win",
+                                         attack_odds.defender, attack_odds.win_pct);
+                                popup_add(&popup, PID_YES, attack_odds.can_attack ? "Attack" : "Not at war", attack_odds.can_attack);
+                                popup_add(&popup, PID_NO, "Cancel", true);
+                                int sx, sy;
+                                tile_to_screen(tx, ty, cam_x, cam_y, zoom, &sx, &sy);
+                                popup_layout(&popup, sx + (int)(15 * zoom), sy + (int)(15 * zoom));
+                                popup_kind = POPUP_ATTACK;
+                                pending_attack_dir = dir;
+                            } else {
+                                freeciv_request_unit_move(selected_unit_id, dir);
+                            }
                         } else if (mine_n > 0 && !own_city) {
                             select_here = true;          // switch to that unit
                         } else if (tx == pending_goto_x && ty == pending_goto_y) {
@@ -1239,6 +1304,7 @@ int main(int argc, char* argv[])
                         } else {
                             pending_goto_x = tx;         // first tap marks the route
                             pending_goto_y = ty;
+                            get_route_preview(selected_unit_id, tx, ty, &route);
                         }
                     }
                     if (select_here) {
@@ -1439,6 +1505,16 @@ int main(int argc, char* argv[])
                 }
             } else if (ui_mode == UI_RATES) {
                 get_civ_info(&ui_civ_info);
+            } else if (ui_mode == UI_MESSAGES) {
+                int total = get_message_total();
+                msg_view_n = 0;
+                for (int i = total - 1; i >= 0 && msg_view_n < MESSAGE_LOG_SIZE; i--) {
+                    if (!get_message(i, &msg_view[msg_view_n])) break;
+                    msg_view_n++;
+                }
+                int max_scroll = msg_view_n > PANEL_ROWS_VISIBLE ? msg_view_n - PANEL_ROWS_VISIBLE : 0;
+                if (ui_scroll < 0) ui_scroll = 0;
+                if (ui_scroll > max_scroll) ui_scroll = max_scroll;
             } else if (ui_mode == UI_GOVERNMENT) {
                 get_civ_info(&ui_civ_info);
                 ui_gov_count = get_governments(ui_gov_opts, MAX_GOV_OPTIONS);
@@ -1536,6 +1612,9 @@ int main(int argc, char* argv[])
             case UI_DIPLOMACY:
                 render_diplomacy_top(ui_dipl_stage, ui_dipl_counterpart_name, &ui_diplo_info);
                 break;
+            case UI_MESSAGES:
+                render_messages_top(msg_view_n > 0 ? &msg_view[ui_scroll < msg_view_n ? ui_scroll : 0] : NULL);
+                break;
             case UI_MAP:
             default:
 {
@@ -1547,14 +1626,25 @@ int main(int argc, char* argv[])
                 ti.unit = (selected_unit_id >= 0 && unit_info.valid) ? &unit_info : NULL;
                 ti.stack = stack; ti.stack_n = stack_n;
                 ti.cam_x = cam_x; ti.cam_y = cam_y; ti.zoom = zoom;
+                ti.report = report; ti.report_n = report_n; ti.report_more = report_more;
                 if (popup_kind == POPUP_UNIT) {
                     ti.hint = "Tap an order, or tap outside the menu to close it.";
                 } else if (popup_kind == POPUP_STACK) {
                     ti.hint = "Tap a unit to command it.";
                 } else if (popup_kind != POPUP_NONE) {
                     ti.hint = "Tap a choice, or tap outside the menu to close it.";
+                } else if (popup_kind == POPUP_ATTACK) {
+                    static char odds_hint[96];
+                    snprintf(odds_hint, sizeof(odds_hint), "%s (%d/%d HP) vs %s (%d/%d HP): %d%% chance to win.",
+                             attack_odds.attacker, attack_odds.att_hp, attack_odds.att_hp_max,
+                             attack_odds.defender, attack_odds.def_hp, attack_odds.def_hp_max, attack_odds.win_pct);
+                    ti.hint = odds_hint;
+                    ti.hint_color = attack_odds.win_pct >= 65 ? C2D_Color32(0x90, 0xE8, 0x90, 0xFF)
+                                  : attack_odds.win_pct >= 40 ? C2D_Color32(0xFF, 0xD0, 0x60, 0xFF)
+                                                              : C2D_Color32(0xFF, 0x80, 0x70, 0xFF);
                 } else if (pending_goto_x >= 0) {
-                    ti.hint = "Tap the marked tile again to send the unit there.  B: cancel";
+                    ti.hint = route.reachable ? "Tap the marked tile again to send the unit there.  B: cancel"
+                                              : "No way to get there from here.  B: cancel";
                     ti.hint_color = C2D_Color32(0xFF, 0xC0, 0x40, 0xFF);
                 } else if (selected_unit_id >= 0 && unit_info.valid) {
                     ti.hint = unit_info.moves_left > 0
@@ -1596,6 +1686,9 @@ int main(int argc, char* argv[])
             case UI_GOVERNMENT:
                 render_government_panel(ui_gov_opts, ui_gov_count, ui_scroll, ui_civ_info.government_id);
                 break;
+            case UI_MESSAGES:
+                render_messages_panel(msg_view, msg_view_n, ui_scroll, ui_scroll);
+                break;
             case UI_DIPLOMACY:
                 render_diplomacy_panel(ui_dipl_stage, ui_dipl_counterpart_name,
                                        ui_other_players, ui_other_player_count, ui_scroll,
@@ -1611,7 +1704,8 @@ int main(int argc, char* argv[])
                                   armed ? unit_info.x : -1, armed ? unit_info.y : -1,
                                   armed && unit_info.moves_left > 0, gx, gy,
                                   popup_kind != POPUP_NONE ? &popup : NULL,
-                                  zoom_idx > 0, zoom_idx < ZOOM_COUNT - 1, all_moved);
+                                  zoom_idx > 0, zoom_idx < ZOOM_COUNT - 1, all_moved,
+                                  pending_goto_x >= 0 ? &route : NULL);
             }
                 if (save_toast_frames > 0) render_toast("Saved");
                 break;

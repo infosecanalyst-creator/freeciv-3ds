@@ -58,7 +58,8 @@ int hud_hit_test(int px, int py);
 // popup may be NULL. all_moved highlights End Turn.
 void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,
                        int unit_x, int unit_y, bool unit_can_move, int goto_x, int goto_y,
-                       const PopupMenu *popup, bool can_zoom_out, bool can_zoom_in, bool all_moved);
+                       const PopupMenu *popup, bool can_zoom_out, bool can_zoom_in, bool all_moved,
+                       const RoutePreview *route);
 
 // Top screen contents.
 typedef struct {
@@ -72,6 +73,9 @@ typedef struct {
     u32              hint_color;  // 0 = default
     int              cam_x, cam_y;
     float            zoom;
+    // Turn report (shown instead of the minimap/card while report_n > 0).
+    const GameMessage *report;
+    int              report_n, report_more, report_turn;
 } TopInfo;
 void render_top_info(const TopInfo *ti);
 
@@ -300,5 +304,10 @@ void render_new_game_top(bool is_new_3ds, const char *summary);
 // every other scrollable list panel.
 #define MAX_SAVE_FILES 32
 void render_load_picker(const SaveFile *files, int n, int scroll);
+
+// Message log (Menu > Messages): bottom list newest first, top shows the
+// highlighted message in full. Rows use the shared PANEL_* list layout.
+void render_messages_panel(const GameMessage *msgs, int n, int scroll, int highlight);
+void render_messages_top(const GameMessage *m);
 
 #endif // RENDER_H

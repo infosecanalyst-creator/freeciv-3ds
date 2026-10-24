@@ -634,11 +634,64 @@ int hud_hit_test(int px, int py)
     return HUD_BAR;
 }
 
+// Screen position of a tile's centre on the bottom map (nearest wrap copy).
+static void tile_center(int tx, int ty, int cam_x, int cam_y, float scale, float *sx, float *sy)
+{
+    int mw = 40, mh = 40;
+    get_map_dimensions(&mw, &mh);
+    int wx = tx * TILE_PX;
+    if (map_wraps_x()) {
+        int world_w = mw * TILE_PX, c = cam_x + (int)(160 / scale);
+        int d = ((wx - c) % world_w + world_w + world_w / 2) % world_w - world_w / 2;
+        wx = c + d;
+    }
+    *sx = (wx + TILE_PX / 2 - cam_x) * scale;
+    *sy = (ty * TILE_PX + TILE_PX / 2 - cam_y) * scale;
+}
+
+static void draw_route(const RoutePreview *r, int cam_x, int cam_y, float scale)
+{
+    if (!r || r->n <= 0) return;
+    u32 c = r->reachable ? C2D_Color32(0xFF, 0xB0, 0x30, 0xF0) : C2D_Color32(0xE0, 0x40, 0x40, 0xF0);
+    float px = 0, py = 0;
+    for (int i = 0; i < r->n; i++) {
+        float x, y;
+        tile_center(r->x[i], r->y[i], cam_x, cam_y, scale, &x, &y);
+        if (i > 0) {
+            // dotted segment from the previous point
+            float dx = x - px, dy = y - py;
+            float len = sqrtf(dx * dx + dy * dy);
+            int dots = (int)(len / 6);
+            for (int k = 1; k < dots; k++) {
+                float t = (float)k / dots;
+                C2D_DrawRectSolid(px + dx * t - 1, py + dy * t - 1, 0.74f, 2, 2, c);
+            }
+        }
+        C2D_DrawRectSolid(x - 2.5f, y - 2.5f, 0.741f, 5, 5, c);
+        px = x; py = y;
+    }
+    char lbl[24];
+    if (!r->reachable) snprintf(lbl, sizeof(lbl), "can't reach");
+    else if (r->turns <= 0) snprintf(lbl, sizeof(lbl), "this turn");
+    else if (r->turns == 1) snprintf(lbl, sizeof(lbl), "1 turn");
+    else snprintf(lbl, sizeof(lbl), "%d turns", r->turns);
+    float w = font_width(lbl, 0.42f) + 8;
+    float bx = px - w / 2, by = py + 10 * scale + 4;
+    if (bx < 2) bx = 2;
+    if (bx + w > 318) bx = 318 - w;
+    if (by > HUD_Y - 18) by = py - 30;
+    C2D_DrawRectSolid(bx, by, 0.85f, w, 15, C2D_Color32(0x10, 0x14, 0x1C, 0xE8));
+    C2D_DrawRectSolid(bx, by, 0.851f, 2, 15, c);
+    font_draw(lbl, bx + 5, by - 1, 0.852f, 0.42f, 0xFFFFFFFF);
+}
+
 void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,
                        int unit_x, int unit_y, bool unit_can_move, int goto_x, int goto_y,
-                       const PopupMenu *popup, bool can_zoom_out, bool can_zoom_in, bool all_moved)
+                       const PopupMenu *popup, bool can_zoom_out, bool can_zoom_in, bool all_moved,
+                       const RoutePreview *route)
 {
     render_map_view(cam_x, cam_y, scale, 320, 240, sel_x, sel_y, unit_x >= 0, goto_x, goto_y);
+    draw_route(route, cam_x, cam_y, scale);
 
     // Where the commanded unit can step: a soft frame on each neighbour.
     if (unit_x >= 0 && unit_can_move && !popup) {
@@ -679,6 +732,84 @@ void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,
     if (popup) draw_popup(popup);
 }
 
+// Draws text wrapped to width w; returns the number of lines used.
+static int draw_wrapped(const char *text, float x, float y, float w, float scale, u32 color,
+                        int max_lines, float line_h, float z)
+{
+    char line[200];
+    int lines = 0;
+    const char *p = text;
+    while (*p && lines < max_lines) {
+        int best = 0, i = 0;
+        // take words while they fit
+        while (p[i]) {
+            int j = i;
+            while (p[j] && p[j] != ' ') j++;
+            if (j >= (int)sizeof(line)) break;
+            memcpy(line, p, j); line[j] = 0;
+            if (font_width(line, scale) > w && best > 0) break;
+            best = j;
+            if (!p[j]) break;
+            i = j + 1;
+        }
+        if (best == 0) {      // a single over-long word: hard cut
+            best = 0;
+            while (p[best] && best < (int)sizeof(line) - 1) {
+                line[best] = p[best]; line[best + 1] = 0;
+                if (font_width(line, scale) > w) break;
+                best++;
+            }
+            if (best == 0) best = 1;
+        }
+        memcpy(line, p, best); line[best] = 0;
+        if (lines == max_lines - 1 && p[best]) {
+            // last allowed line: ellipsis
+            while (best > 0 && font_width(line, scale) + font_width("...", scale) > w) line[--best] = 0;
+            strcat(line, "...");
+        }
+        draw_text_z(x, y + lines * line_h, z, scale, color, line);
+        lines++;
+        p += best;
+        while (*p == ' ') p++;
+    }
+    return lines;
+}
+
+static u32 msg_color(int cat)
+{
+    switch (cat) {
+    case MSG_COMBAT:    return C2D_Color32(0xF0, 0x60, 0x50, 0xFF);
+    case MSG_CITY:      return C2D_Color32(0xE0, 0xA8, 0x50, 0xFF);
+    case MSG_SCIENCE:   return C2D_Color32(0x70, 0xB8, 0xFF, 0xFF);
+    case MSG_DIPLOMACY: return C2D_Color32(0xC0, 0x90, 0xF0, 0xFF);
+    case MSG_GOOD:      return C2D_Color32(0x80, 0xE0, 0x80, 0xFF);
+    default:            return C2D_Color32(0x8C, 0xA0, 0xB4, 0xFF);
+    }
+}
+
+static void draw_turn_report(const TopInfo *ti)
+{
+    u32 white = 0xFFFFFFFF;
+    u32 label = C2D_Color32(0x8C, 0xA0, 0xB4, 0xFF);
+    char line[64];
+    layer(3.0f);
+    C2D_DrawRectSolid(6, 22, 0.0f, 388, 198, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
+    C2D_DrawRectSolid(6, 22, 0.01f, 388, 2, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF));
+    snprintf(line, sizeof(line), "Since last turn");
+    draw_text(14, 25, 0.6f, white, line);
+    float y = 50;
+    for (int i = 0; i < ti->report_n && y < 205; i++) {
+        const GameMessage *m = &ti->report[i];
+        C2D_DrawRectSolid(14, y + 5, 0.01f, 6, 6, msg_color(m->category));
+        int used = draw_wrapped(m->text, 26, y, 360, 0.44f, C2D_Color32(0xD8, 0xE0, 0xEA, 0xFF), 2, 15, 0.01f);
+        y += used * 15 + 3;
+    }
+    if (ti->report_more > 0) {
+        snprintf(line, sizeof(line), "+%d more in Menu > Messages", ti->report_more);
+        draw_text(14, 203, 0.42f, label, line);
+    }
+}
+
 // ---- Top screen: information only (never touched) ----
 
 void render_top_info(const TopInfo *ti)
@@ -708,6 +839,14 @@ void render_top_info(const TopInfo *ti)
         }
     } else {
         draw_text(5, 1, 0.52f, white, "Generating world...");
+    }
+
+    if (ti->report_n > 0) {
+        draw_turn_report(ti);
+        layer(0.0f);
+        C2D_DrawRectSolid(0, 240 - 17, 0.0f, 400, 17, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
+        draw_text(5, 240 - 16, 0.45f, soft, "Tap or press anything to carry on.");
+        return;
     }
 
     // Left: minimap and research (slightly in front).
@@ -2140,6 +2279,56 @@ void render_new_game_top(bool is_new_3ds, const char *summary)
         ? "New 3DS detected: 804 MHz, room for big maps."
         : "Old 3DS detected: smaller maps keep turns quick.");
     draw_text(16, 170, 0.45f, label, "Larger maps and more rivals mean longer AI turns.");
+}
+
+void render_messages_panel(const GameMessage *msgs, int n, int scroll, int highlight)
+{
+    C2D_TextBufClear(g_textBuf);
+    char right[24];
+    snprintf(right, sizeof(right), "%d", n);
+    panel_bg("Messages", right);
+    draw_text(8, PANEL_HEADER_H + 8, 0.45f, C2D_Color32(0xA8, 0xB4, 0xC4, 0xFF),
+              n ? "Newest first. Tap one to go there." : "No news yet.");
+    for (int i = 0; i < PANEL_ROWS_VISIBLE; i++) {
+        int idx = scroll + i;
+        if (idx >= n) break;
+        const GameMessage *m = &msgs[idx];
+        list_row(i, 4, 306, idx == highlight, true);
+        float y = PANEL_LIST_Y + i * PANEL_ROW_H;
+        C2D_DrawRectSolid(9, y + 7, 0.01f, 5, 5, msg_color(m->category));
+        char t[160];
+        snprintf(t, sizeof(t), "%s", m->text);
+        while (t[0] && font_width(t, 0.42f) > 284) t[strlen(t) - 1] = 0;
+        draw_text_z(18, y + 2, 0.01f, 0.42f, 0xFFFFFFFF, t);
+    }
+    scroll_thumb(n, scroll, 313);
+    draw_button(4, PANEL_FOOTER_Y + 2, 312, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
+}
+
+void render_messages_top(const GameMessage *m)
+{
+    C2D_TextBufClear(g_textBuf);
+    u32 soft = C2D_Color32(0xC0, 0xCE, 0xDC, 0xFF);
+    C2D_DrawRectSolid(0, 0, 0.0f, 400, 32, C2D_Color32(0x14, 0x1E, 0x2E, 0xFF));
+    C2D_DrawRectSolid(0, 0, 0.01f, 6, 32, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF));
+    C2D_DrawRectSolid(0, 32, 0.0f, 400, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
+    draw_text(14, 3, 0.85f, 0xFFFFFFFF, "Messages");
+    layer(3.0f);
+    C2D_DrawRectSolid(8, 44, 0.0f, 384, 166, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
+    if (m) {
+        static const char *cats[] = { "News", "Combat", "Cities", "Science", "Diplomacy", "Good news" };
+        char line[48];
+        snprintf(line, sizeof(line), "%s - turn %d", cats[m->category % 6], m->turn);
+        C2D_DrawRectSolid(16, 54, 0.01f, 8, 8, msg_color(m->category));
+        draw_text(30, 48, 0.47f, msg_color(m->category), line);
+        draw_wrapped(m->text, 18, 72, 364, 0.55f, 0xFFFFFFFF, 7, 19, 0.01f);
+        if (m->x >= 0) draw_text(18, 190, 0.42f, soft, "Tap it below to see where it happened.");
+    } else {
+        draw_text(18, 52, 0.55f, soft, "Nothing has happened yet.");
+    }
+    layer(0.0f);
+    C2D_DrawRectSolid(0, 240 - 17, 0.0f, 400, 17, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
+    draw_text(5, 240 - 16, 0.45f, soft, "D-Pad: scroll   B: close");
 }
 
 void render_load_picker(const SaveFile *files, int n, int scroll)

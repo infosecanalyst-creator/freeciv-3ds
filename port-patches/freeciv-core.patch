@@ -1,5 +1,5 @@
 diff --git a/common/game.h b/common/game.h
-index 43c120639a..a69c78adcf 100644
+index 43c1206..a69c78a 100644
 --- a/common/game.h
 +++ b/common/game.h
 @@ -403,11 +403,19 @@ static inline bool is_ruleset_compat_mode(void)
@@ -23,7 +23,7 @@ index 43c120639a..a69c78adcf 100644
  #define GAME_DEFAULT_AIFILL          5
  #define GAME_MIN_AIFILL              0
 diff --git a/common/map.h b/common/map.h
-index b124ea0ae5..4c670d485d 100644
+index b124ea0..4c670d4 100644
 --- a/common/map.h
 +++ b/common/map.h
 @@ -652,7 +652,7 @@ int map_signed_latitude(const struct tile *ptile);
@@ -36,7 +36,7 @@ index b124ea0ae5..4c670d485d 100644
  #define MAP_MIN_SIZE             0
  #define MAP_MAX_SIZE             38
 diff --git a/common/oblig_reqs.c b/common/oblig_reqs.c
-index 16f5802eeb..9f59d45074 100644
+index 16f5802..9f59d45 100644
 --- a/common/oblig_reqs.c
 +++ b/common/oblig_reqs.c
 @@ -45,7 +45,7 @@ static struct obligatory_req_vector oblig_hard_reqs_sr[ACT_SUB_RES_COUNT];
@@ -86,7 +86,7 @@ index 16f5802eeb..9f59d45074 100644
                                      const char *error_message,
                                      ...)
 diff --git a/configure.ac b/configure.ac
-index 9814bb591d..dddff02b92 100644
+index 9814bb5..dddff02 100644
 --- a/configure.ac
 +++ b/configure.ac
 @@ -669,10 +669,19 @@ if test "x$XMLREGISTRY" = "xyes" ; then
@@ -113,8 +113,51 @@ index 9814bb591d..dddff02b92 100644
  
  dnl This needs to be before C++ compiler check FC_WORKING_CXX, and
  dnl that in turn needs to be before FC_DEBUG that will depend on compiler
+diff --git a/server/notify.c b/server/notify.c
+index f1bcf7d..53bafee 100644
+--- a/server/notify.c
++++ b/server/notify.c
+@@ -616,8 +616,15 @@ void event_cache_remove_old(void)
+ /**********************************************************************//**
+   Add an event to the cache for all connections.
+ **************************************************************************/
++/* 3DS port: the in-process client receives every event addressed to a
++ * player here (there is no network client to send them to). player_index
++ * is -1 for "everyone". Defined by the 3DS client (game_loop.c). */
++void freeciv3ds_event_hook(const struct packet_chat_msg *packet, int player_index);
++
+ void event_cache_add_for_all(const struct packet_chat_msg *packet)
+ {
++  freeciv3ds_event_hook(packet, -1);
++
+   if (0 < game.server.event_cache.turns) {
+     (void) event_cache_data_new(packet, time(NULL),
+                                 server_state(), ECT_ALL, NULL);
+@@ -649,6 +656,7 @@ void event_cache_add_for_player(const struct packet_chat_msg *packet,
+     event_cache_add_for_all(packet);
+     return;
+   }
++  freeciv3ds_event_hook(packet, player_index(pplayer));
+ 
+   if (0 < game.server.event_cache.turns
+       && (server_state() > S_S_INITIAL || !game.info.is_new_game)) {
+@@ -671,6 +679,14 @@ void event_cache_add_for_player(const struct packet_chat_msg *packet,
+ void event_cache_add_for_players(const struct packet_chat_msg *packet,
+                                  struct event_cache_players *players)
+ {
++  if (NULL != players) {
++    players_iterate(pplayer) {
++      if (BV_ISSET(players->vector, player_index(pplayer))) {
++        freeciv3ds_event_hook(packet, player_index(pplayer));
++      }
++    } players_iterate_end;
++  }
++
+   if (0 < game.server.event_cache.turns
+       && NULL != players
+       && BV_ISSET_ANY(players->vector)
 diff --git a/server/sernet.c b/server/sernet.c
-index a8530f8dfb..6089e589ec 100644
+index a8530f8..6089e58 100644
 --- a/server/sernet.c
 +++ b/server/sernet.c
 @@ -519,6 +519,21 @@ static void incoming_client_packets(struct connection *pconn)
@@ -206,7 +249,7 @@ index a8530f8dfb..6089e589ec 100644
  
    fc_sockaddr_list_destroy(list);
 diff --git a/utility/shared.h b/utility/shared.h
-index 42a7777a0b..d623d4e18d 100644
+index 42a7777..d623d4e 100644
 --- a/utility/shared.h
 +++ b/utility/shared.h
 @@ -108,7 +108,9 @@ enum fc_tristate fc_tristate_or(enum fc_tristate one, enum fc_tristate two);
@@ -221,7 +264,7 @@ index 42a7777a0b..d623d4e18d 100644
  # define PATH_SEPARATOR ";"
  #else
 diff --git a/utility/support.c b/utility/support.c
-index 154d9301cf..2ae7de5f37 100644
+index 154d930..2ae7de5 100644
 --- a/utility/support.c
 +++ b/utility/support.c
 @@ -96,7 +96,9 @@

@@ -34,6 +34,8 @@
 #include "savemain.h"
 #include "pf_tools.h"
 #include "movement.h"
+#include "combat.h"
+#include "events.h"
 #include <string.h>
 #include <stdlib.h>
 #include <dirent.h>
@@ -502,6 +504,168 @@ static void push_unit_sound(char kind, const struct unit *punit)
     while (j > 2 && tag[j - 1] == '_') j--;
     tag[j] = 0;
     push_sound(tag);
+}
+
+// ---------------------------------------------------------------- news
+static GameMessage s_msgs[MESSAGE_LOG_SIZE];
+static volatile int s_msg_total;
+
+static int message_category(enum event_type e)
+{
+    switch (e) {
+    case E_UNIT_LOST_ATT: case E_UNIT_WIN_ATT: case E_UNIT_LOST_DEF: case E_UNIT_WIN_DEF:
+    case E_UNIT_LOST_MISC: case E_CITY_LOST: case E_CITY_CONQUERED: case E_DESTROYED:
+    case E_NUKE: case E_CIVIL_WAR: case E_UPRISING: case E_HUT_BARB: case E_HUT_BARB_CITY_NEAR:
+    case E_CITY_NUKED: case E_UNIT_ESCAPED:
+        return MSG_COMBAT;
+    case E_TECH_GAIN: case E_TECH_LEARNED: case E_TECH_LOST: case E_TECH_EMBASSY: case E_TECH_GOAL:
+        return MSG_SCIENCE;
+    case E_TREATY_ALLIANCE: case E_TREATY_BROKEN: case E_TREATY_CEASEFIRE: case E_TREATY_PEACE:
+    case E_TREATY_SHARED_VISION: case E_TREATY_EMBASSY: case E_TREATY_SHARED_TILES:
+    case E_DIPLOMACY: case E_FIRST_CONTACT: case E_DIPLOMATIC_INCIDENT:
+    case E_MY_DIPLOMAT_BRIBE: case E_MY_DIPLOMAT_ESCAPE: case E_MY_DIPLOMAT_EMBASSY: case E_MY_DIPLOMAT_FAILED:
+    case E_MY_DIPLOMAT_INCITE: case E_MY_DIPLOMAT_POISON: case E_MY_DIPLOMAT_SABOTAGE: case E_MY_DIPLOMAT_THEFT:
+    case E_ENEMY_DIPLOMAT_BRIBE: case E_ENEMY_DIPLOMAT_EMBASSY: case E_ENEMY_DIPLOMAT_FAILED:
+    case E_ENEMY_DIPLOMAT_INCITE: case E_ENEMY_DIPLOMAT_POISON: case E_ENEMY_DIPLOMAT_SABOTAGE:
+    case E_ENEMY_DIPLOMAT_THEFT:
+        return MSG_DIPLOMACY;
+    case E_HUT_GOLD: case E_HUT_TECH: case E_HUT_MERC: case E_HUT_SETTLER: case E_HUT_CITY: case E_HUT_MAP:
+    case E_HUT_BARB_KILLED: case E_ACHIEVEMENT: case E_UNIT_BECAME_VET: case E_REVOLT_DONE:
+    case E_NEW_GOVERNMENT: case E_WONDER_BUILD: case E_CITY_LOVE:
+        return MSG_GOOD;
+    case E_CITY_CANTBUILD: case E_CITY_DISORDER: case E_CITY_FAMINE: case E_CITY_FAMINE_FEARED:
+    case E_CITY_GROWTH: case E_CITY_MAY_SOON_GROW: case E_CITY_AQUEDUCT: case E_CITY_AQ_BUILDING:
+    case E_CITY_NORMAL: case E_CITY_TRANSFER: case E_CITY_BUILD: case E_CITY_PRODUCTION_CHANGED:
+    case E_WORKLIST: case E_IMP_BUY: case E_IMP_BUILD: case E_IMP_AUCTIONED: case E_IMP_AUTO: case E_IMP_SOLD:
+    case E_UNIT_BUY: case E_UNIT_BUILT: case E_UNIT_BUILT_POP_COST: case E_POLLUTION: case E_CITY_PLAGUE:
+    case E_DISASTER: case E_WONDER_OBSOLETE: case E_WONDER_STARTED: case E_WONDER_STOPPED:
+    case E_WONDER_WILL_BE_BUILT: case E_CITY_RADIUS_SQ: case E_LOW_ON_FUNDS:
+        return MSG_CITY;
+    default:
+        return MSG_OTHER;
+    }
+}
+
+static bool message_wanted(enum event_type e)
+{
+    switch (e) {
+    case E_CHAT_MSG: case E_CHAT_ERROR: case E_MESSAGE_WALL: case E_CONNECTION: case E_AI_DEBUG:
+    case E_LOG_ERROR: case E_LOG_FATAL: case E_SETTING: case E_VOTE_NEW: case E_VOTE_RESOLVED:
+    case E_VOTE_ABORTED: case E_DEPRECATION_WARNING: case E_TURN_BELL: case E_NEXT_YEAR:
+    case E_NATION_SELECTED: case E_BEGINNER_HELP: case E_SCRIPT: case E_GAME_START:
+        return false;
+    default:
+        return true;
+    }
+}
+
+// Called from server/notify.c (see port-patches) for every event addressed
+// to a player; runs on the server thread.
+void freeciv3ds_event_hook(const struct packet_chat_msg *packet, int pidx)
+{
+    struct player *pov = get_pov_player();
+    if (!pov || !packet) return;
+    if (pidx >= 0 && pidx != player_index(pov)) return;
+    enum event_type e = packet->event;
+    if (!message_wanted(e)) return;
+
+    GameMessage *m = &s_msgs[s_msg_total % MESSAGE_LOG_SIZE];
+    // Strip Freeciv's [c fg=...]...[/c] / [l ...] markup.
+    int j = 0;
+    bool in_tag = false;
+    for (const char *p = packet->message; *p && j < (int)sizeof(m->text) - 1; p++) {
+        if (*p == '[') { in_tag = true; continue; }
+        if (*p == ']' && in_tag) { in_tag = false; continue; }
+        if (!in_tag) m->text[j++] = *p;
+    }
+    m->text[j] = 0;
+    if (!j) return;
+    m->turn = game.info.turn;
+    m->category = message_category(e);
+    m->x = m->y = -1;
+    if (packet->tile >= 0) {
+        struct tile *t = index_to_tile(&(wld.map), packet->tile);
+        if (t) index_to_native_pos(&m->x, &m->y, tile_index(t));
+    }
+    s_msg_total++;
+
+    // Hear it when you're attacked, and when a wonder is finished.
+    if (e == E_UNIT_LOST_DEF || e == E_UNIT_WIN_DEF || e == E_CITY_LOST) push_sound("f_generic");
+    else if (e == E_WONDER_BUILD) push_sound("w_generic");
+}
+
+int get_message_total(void) { return s_msg_total; }
+
+bool get_message(int index, GameMessage *out)
+{
+    int total = s_msg_total;
+    if (index < 0 || index >= total || index < total - MESSAGE_LOG_SIZE) return false;
+    *out = s_msgs[index % MESSAGE_LOG_SIZE];
+    return true;
+}
+
+// ---------------------------------------------------------------- odds / routes
+bool get_attack_odds(int unit_id, int tx, int ty, AttackOdds *out)
+{
+    memset(out, 0, sizeof(*out));
+    if (map_is_empty()) return false;
+    struct unit *punit = game_unit_by_number(unit_id);
+    struct tile *ptile = port_native_tile(tx, ty);
+    struct player *pov = get_pov_player();
+    if (!punit || !ptile || !pov || !ptile->units || unit_list_size(ptile->units) == 0) return false;
+    bool enemy = false;
+    unit_list_iterate(ptile->units, u) {
+        if (unit_owner(u) != pov) enemy = true;
+    } unit_list_iterate_end;
+    if (!enemy) return false;
+    const struct civ_map *nmap = &(wld.map);
+    struct action *att = action_by_number(ACTION_ATTACK);
+    struct unit *def = get_defender(nmap, punit, ptile, att);
+    if (!def) return false;
+    fc_strlcpy(out->attacker, unit_name_translation(punit), sizeof(out->attacker));
+    fc_strlcpy(out->defender, unit_name_translation(def), sizeof(out->defender));
+    fc_strlcpy(out->defender_rule, unit_rule_name(def), sizeof(out->defender_rule));
+    out->defender_owner = player_index(unit_owner(def));
+    out->def_hp = def->hp; out->def_hp_max = unit_type_get(def)->hp;
+    out->att_hp = punit->hp; out->att_hp_max = unit_type_get(punit)->hp;
+    double w = unit_win_chance(nmap, punit, def, att);
+    out->win_pct = (int)(w * 100.0 + 0.5);
+    out->can_attack = is_action_enabled_unit_on_stack(nmap, ACTION_ATTACK, punit, ptile)
+                   || is_action_enabled_unit_on_stack(nmap, ACTION_ATTACK2, punit, ptile);
+    return true;
+}
+
+void get_route_preview(int unit_id, int tx, int ty, RoutePreview *out)
+{
+    memset(out, 0, sizeof(*out));
+    if (map_is_empty()) return;
+    struct unit *punit = game_unit_by_number(unit_id);
+    struct tile *dst = port_native_tile(tx, ty);
+    if (!punit || !dst) return;
+    struct pf_parameter parameter;
+    pft_fill_unit_parameter(&parameter, &(wld.map), punit);
+    struct pf_map *pfm = pf_map_new(&parameter);
+    struct pf_path *path = pf_map_path(pfm, dst);
+    if (path && path->length > 0) {
+        out->reachable = true;
+        out->turns = path->positions[path->length - 1].turn;
+        // Keep at most ROUTE_MAX points, always including the last.
+        int step = (path->length + ROUTE_MAX - 1) / ROUTE_MAX;
+        if (step < 1) step = 1;
+        for (unsigned i = 0; i < path->length && out->n < ROUTE_MAX; i += step) {
+            index_to_native_pos(&out->x[out->n], &out->y[out->n], tile_index(path->positions[i].tile));
+            out->n++;
+        }
+        int lx, ly;
+        index_to_native_pos(&lx, &ly, tile_index(path->positions[path->length - 1].tile));
+        if (out->n > 0 && (out->x[out->n - 1] != lx || out->y[out->n - 1] != ly)) {
+            if (out->n < ROUTE_MAX) out->n++;
+            out->x[out->n - 1] = lx;
+            out->y[out->n - 1] = ly;
+        }
+    }
+    if (path) pf_path_destroy(path);
+    pf_map_destroy(pfm);
 }
 
 bool game_pop_sound(char *tag, int len)
