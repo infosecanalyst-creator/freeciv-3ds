@@ -2167,7 +2167,7 @@ void render_turn_banner(ProcessingReason reason, int frame)
     // "touches no Freeciv game state" rule as render_processing_overlay().
     C2D_TextBufClear(g_textBuf);
     const float H = 28, Y = 240 - H;
-    C2D_DrawRectSolid(0, Y, 0.0f, 320, H, C2D_Color32(0x0C, 0x14, 0x22, 0xF0));
+    C2D_DrawRectSolid(0, Y, 0.0f, 320, H, C2D_Color32(0x0C, 0x14, 0x22, 0xFF));
     C2D_DrawRectSolid(0, Y, 0.0f, 320, 2, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF));
     const char *msg = reason == PROC_SAVING ? "Saving" : "Other civilizations are moving";
     char line[48];
