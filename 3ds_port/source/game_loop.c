@@ -971,6 +971,28 @@ bool get_attack_odds(int unit_id, int tx, int ty, AttackOdds *out)
     return true;
 }
 
+// Every tile the unit can still reach this turn (Advance Wars-style range),
+// excluding its own. Positions come out cheapest first, so stop at turn 1.
+int get_move_range(int unit_id, short *xs, short *ys, int max)
+{
+    if (map_is_empty()) return 0;
+    struct unit *punit = game_unit_by_number(unit_id);
+    if (!punit || punit->moves_left <= 0) return 0;
+    struct pf_parameter parameter;
+    pft_fill_unit_parameter(&parameter, &(wld.map), punit);
+    struct pf_map *pfm = pf_map_new(&parameter);
+    int n = 0;
+    pf_map_positions_iterate(pfm, pos, FALSE) {
+        if (pos.turn > 0 || n >= max) break;
+        int x, y;
+        index_to_native_pos(&x, &y, tile_index(pos.tile));
+        xs[n] = (short)x; ys[n] = (short)y;
+        n++;
+    } pf_map_positions_iterate_end;
+    pf_map_destroy(pfm);
+    return n;
+}
+
 void get_route_preview(int unit_id, int tx, int ty, RoutePreview *out)
 {
     memset(out, 0, sizeof(*out));

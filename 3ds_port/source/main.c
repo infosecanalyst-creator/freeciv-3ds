@@ -1652,6 +1652,21 @@ int main(int argc, char* argv[])
                 }
             }
 
+            // Movement range of the commanded unit, recomputed only when it
+            // changes (pathfinding is not free on a 3DS).
+            {
+                static int r_id = -2, r_x = -1, r_y = -1, r_moves = -1, r_turn = -1;
+                int id = (selected_unit_id >= 0 && unit_info.valid) ? selected_unit_id : -1;
+                int t = get_game_turn();
+                if (id != r_id || (id >= 0 && (unit_info.x != r_x || unit_info.y != r_y
+                                               || unit_info.moves_left != r_moves || t != r_turn))) {
+                    static short rx[256], ry[256];
+                    int rn = id >= 0 ? get_move_range(id, rx, ry, 256) : 0;
+                    render_set_move_range(rx, ry, rn);
+                    r_id = id; r_x = unit_info.x; r_y = unit_info.y; r_moves = unit_info.moves_left; r_turn = t;
+                }
+            }
+
             // Are any units still waiting for orders? (End Turn lights up.)
             static int moved_refresh = 0;
             if (ui_mode == UI_MAP && get_game_turn() > 0 && ++moved_refresh >= 20) {

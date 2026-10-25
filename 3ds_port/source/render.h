@@ -56,6 +56,8 @@ int hud_hit_test(int px, int py);
 
 // Bottom screen. unit_x/unit_y is the commanded unit's tile (-1 if none);
 // popup may be NULL. all_moved highlights End Turn.
+// Squares the selected unit can reach this turn (tinted on the map).
+void render_set_move_range(const short *xs, const short *ys, int n);
 void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,
                        int unit_x, int unit_y, bool unit_can_move, int goto_x, int goto_y,
                        const PopupMenu *popup, bool can_zoom_out, bool can_zoom_in, bool all_moved,

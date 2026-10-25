@@ -457,6 +457,8 @@ int get_pending_production(char *name, int len, int *x, int *y);
 void dismiss_pending_production(int city_id);
 // True when nothing is being researched (the player should pick).
 bool research_needs_choice(void);
+// Tiles the unit can still reach this turn (not its own); returns the count.
+int get_move_range(int unit_id, short *xs, short *ys, int max);
 // Copies message number `index` (0 = first ever) if it's still in the log.
 bool get_message(int index, GameMessage *out);
 #define MESSAGE_LOG_SIZE 128

@@ -699,6 +699,16 @@ static void draw_route(const RoutePreview *r, int cam_x, int cam_y, float scale)
     font_draw(lbl, bx + 5, by - 1, 0.852f, 0.42f, 0xFFFFFFFF);
 }
 
+static short s_range_x[256], s_range_y[256];
+static int s_range_n;
+void render_set_move_range(const short *xs, const short *ys, int n)
+{
+    if (n > 256) n = 256;
+    memcpy(s_range_x, xs, n * sizeof(short));
+    memcpy(s_range_y, ys, n * sizeof(short));
+    s_range_n = n;
+}
+
 void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,
                        int unit_x, int unit_y, bool unit_can_move, int goto_x, int goto_y,
                        const PopupMenu *popup, bool can_zoom_out, bool can_zoom_in, bool all_moved,
@@ -707,17 +717,15 @@ void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,
     render_map_view(cam_x, cam_y, scale, 320, 240, sel_x, sel_y, unit_x >= 0, goto_x, goto_y);
     draw_route(route, cam_x, cam_y, scale);
 
-    // Where the commanded unit can step: a soft frame on each neighbour.
-    if (unit_x >= 0 && unit_can_move && !popup) {
+    // Where the commanded unit can get to this turn: a soft tint on every
+    // reachable square (from pathfinding, so water/mountains/ZOC are right).
+    if (unit_x >= 0 && unit_can_move && !popup && s_range_n > 0) {
         int mw = 40, mh = 40;
         get_map_dimensions(&mw, &mh);
         float T = TILE_PX * scale;
-        u32 c = C2D_Color32(0xFF, 0xFF, 0xFF, 0x70);
-        for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
-            if (!dx && !dy) continue;
-            int tx = unit_x + dx, ty = unit_y + dy;
-            if (ty < 0 || ty >= mh) continue;
-            if (!map_wraps_x() && (tx < 0 || tx >= mw)) continue;
+        u32 fill = C2D_Color32(0xFF, 0xFF, 0xFF, 0x30), edge = C2D_Color32(0xFF, 0xFF, 0xFF, 0x80);
+        for (int i = 0; i < s_range_n; i++) {
+            int tx = s_range_x[i], ty = s_range_y[i];
             int wx = tx * TILE_PX;
             if (map_wraps_x()) {
                 int world_w = mw * TILE_PX;
@@ -725,11 +733,12 @@ void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,
                 wx = cam_x + d;
             }
             float x = (wx - cam_x) * scale, y = (ty * TILE_PX - cam_y) * scale;
-            float b = 1.5f, in = 3.0f;
-            C2D_DrawRectSolid(x + in, y + in, 0.68f, T - 2 * in, b, c);
-            C2D_DrawRectSolid(x + in, y + T - in - b, 0.68f, T - 2 * in, b, c);
-            C2D_DrawRectSolid(x + in, y + in, 0.68f, b, T - 2 * in, c);
-            C2D_DrawRectSolid(x + T - in - b, y + in, 0.68f, b, T - 2 * in, c);
+            if (x < -T || y < -T || x > 320 || y > 240) continue;
+            C2D_DrawRectSolid(x + 1, y + 1, 0.68f, T - 2, T - 2, fill);
+            C2D_DrawRectSolid(x + 1, y + 1, 0.681f, T - 2, 1, edge);
+            C2D_DrawRectSolid(x + 1, y + T - 2, 0.681f, T - 2, 1, edge);
+            C2D_DrawRectSolid(x + 1, y + 1, 0.681f, 1, T - 2, edge);
+            C2D_DrawRectSolid(x + T - 2, y + 1, 0.681f, 1, T - 2, edge);
         }
     }
 
