@@ -104,6 +104,8 @@ typedef struct {
     int  city_size;
     char unit_name[48];
     char city_name[48];
+    char city_prod[24];  // your cities only: what it is building ("" otherwise)
+    int  city_prod_turns;
 
     // Extras/Overlays
     bool has_river;

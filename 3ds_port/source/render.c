@@ -485,23 +485,28 @@ static void draw_hollow_rect(float x, float y, float w, float h, float thickness
 
 // ---- Minimap (top screen, UI_MAP) ----
 // Fits the whole map uniformly into the MINIMAP_* rect (render.h).
-static bool minimap_layout(float *dest_x, float *dest_y, float *S)
+static bool minimap_layout_in(float bx, float by, float bw, float bh, float *dest_x, float *dest_y, float *S)
 {
     if (!s_minimap_initialized || s_map_w <= 0 || s_map_h <= 0) return false;
-    float sx = (float)MINIMAP_W / s_map_w, sy = (float)MINIMAP_H / s_map_h;
+    float sx = bw / s_map_w, sy = bh / s_map_h;
     *S = sx < sy ? sx : sy;
-    *dest_x = MINIMAP_X + (MINIMAP_W - s_map_w * *S) / 2.0f;
-    *dest_y = MINIMAP_Y + (MINIMAP_H - s_map_h * *S) / 2.0f;
+    *dest_x = bx + (bw - s_map_w * *S) / 2.0f;
+    *dest_y = by + (bh - s_map_h * *S) / 2.0f;
     return true;
 }
 
-static void draw_minimap(int cam_x, int cam_y, float view_w_tiles, float view_h_tiles,
-                         int sel_x, int sel_y)
+static bool minimap_layout(float *dest_x, float *dest_y, float *S)
+{
+    return minimap_layout_in(MINIMAP_X, MINIMAP_Y, MINIMAP_W, MINIMAP_H, dest_x, dest_y, S);
+}
+
+static void draw_minimap_in(float bx, float by, float bw, float bh, int cam_x, int cam_y,
+                            float view_w_tiles, float view_h_tiles, int sel_x, int sel_y)
 {
     float dest_x, dest_y, S;
-    C2D_DrawRectSolid(MINIMAP_X - 2, MINIMAP_Y - 2, 0.0f, MINIMAP_W + 4, MINIMAP_H + 4, C2D_Color32(0x3A, 0x55, 0x78, 255));
-    C2D_DrawRectSolid(MINIMAP_X, MINIMAP_Y, 0.05f, MINIMAP_W, MINIMAP_H, C2D_Color32(0, 0, 0, 255));
-    if (!minimap_layout(&dest_x, &dest_y, &S)) return;
+    C2D_DrawRectSolid(bx - 2, by - 2, 0.0f, bw + 4, bh + 4, C2D_Color32(0x3A, 0x55, 0x78, 255));
+    C2D_DrawRectSolid(bx, by, 0.05f, bw, bh, C2D_Color32(0, 0, 0, 255));
+    if (!minimap_layout_in(bx, by, bw, bh, &dest_x, &dest_y, &S)) return;
 
     // Per-tile rects, run-length-encoded per row (a mostly uniform row - ocean,
     // or unexplored - collapses to a few rects). See the s_minimap_colors note.
@@ -544,6 +549,30 @@ static void draw_minimap(int cam_x, int cam_y, float view_w_tiles, float view_h_
         C2D_DrawRectSolid(dest_x + (sel_x + 0.5f) * S - m / 2, dest_y + (sel_y + 0.5f) * S - m / 2,
                           0.55f, m, m, C2D_Color32(0xFF, 0xF0, 0x30, 0xFF));
     }
+}
+
+static void draw_minimap(int cam_x, int cam_y, float view_w_tiles, float view_h_tiles,
+                         int sel_x, int sel_y)
+{
+    draw_minimap_in(MINIMAP_X, MINIMAP_Y, MINIMAP_W, MINIMAP_H, cam_x, cam_y, view_w_tiles, view_h_tiles, sel_x, sel_y);
+}
+
+// World map on the touch screen (tap to jump there).
+#define WORLD_BOX_X 4
+#define WORLD_BOX_Y 4
+#define WORLD_BOX_W 312
+#define WORLD_BOX_H (HUD_Y - 8)
+static bool s_world_view;
+void render_set_world_view(bool on) { s_world_view = on; }
+
+bool world_map_hit(int px, int py, int *tx, int *ty)
+{
+    float dx, dy, S;
+    if (!minimap_layout_in(WORLD_BOX_X, WORLD_BOX_Y, WORLD_BOX_W, WORLD_BOX_H, &dx, &dy, &S)) return false;
+    int x = (int)((px - dx) / S), y = (int)((py - dy) / S);
+    if (x < 0 || y < 0 || x >= s_map_w || y >= s_map_h) return false;
+    *tx = x; *ty = y;
+    return true;
 }
 
 // A translucent strip, for HUD text/buttons over the map.
@@ -642,6 +671,7 @@ int hud_hit_test(int px, int py)
     if (py < HUD_Y) return HUD_NONE;
     if (px >= HUD_MENU_X && px < HUD_MENU_X + HUD_MENU_W) return HUD_MENU;
     if (px >= HUD_NEXT_X && px < HUD_NEXT_X + HUD_NEXT_W) return HUD_NEXT;
+    if (px >= HUD_MAP_X  && px < HUD_MAP_X  + HUD_MAP_W)  return HUD_MAP;
     if (px >= HUD_ZOUT_X && px < HUD_ZOUT_X + HUD_ZOOM_W) return HUD_ZOUT;
     if (px >= HUD_ZIN_X  && px < HUD_ZIN_X  + HUD_ZOOM_W) return HUD_ZIN;
     if (px >= HUD_END_X  && px < HUD_END_X  + HUD_END_W)  return HUD_END;
@@ -723,6 +753,13 @@ void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,
                        const PopupMenu *popup, bool can_zoom_out, bool can_zoom_in, bool all_moved,
                        const RoutePreview *route, const char *end_label)
 {
+    if (s_world_view) {
+        C2D_DrawRectSolid(0, 0, 0.0f, 320, 240, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
+        draw_minimap_in(WORLD_BOX_X, WORLD_BOX_Y, WORLD_BOX_W, WORLD_BOX_H, cam_x, cam_y,
+                        320.0f / (TILE_PX * scale), (float)HUD_Y / (TILE_PX * scale), sel_x, sel_y);
+        popup = NULL;
+        goto hud;
+    }
     render_map_view(cam_x, cam_y, scale, 320, 240, sel_x, sel_y, unit_x >= 0, goto_x, goto_y);
     draw_route(route, cam_x, cam_y, scale);
 
@@ -760,12 +797,14 @@ void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,
         }
     }
 
+hud:
     // HUD button row along the bottom edge.
     hud_strip(HUD_Y, 320, 240 - HUD_Y);
     const float Z = 0.9f;
     float by = HUD_Y + 2, bh = 240 - HUD_Y - 3;
     draw_button(HUD_MENU_X, by, HUD_MENU_W, bh, Z, "Menu", 0.5f, true, false);
     draw_button(HUD_NEXT_X, by, HUD_NEXT_W, bh, Z, "Next", 0.5f, !all_moved, false);
+    draw_button(HUD_MAP_X,  by, HUD_MAP_W,  bh, Z, "Map", 0.5f, true, s_world_view);
     draw_button(HUD_ZOUT_X, by, HUD_ZOOM_W, bh, Z, "-", 0.7f, can_zoom_out, false);
     draw_button(HUD_ZIN_X,  by, HUD_ZOOM_W, bh, Z, "+", 0.7f, can_zoom_in, false);
     // The smart button: "Choose Research" / "Wien: Production" / "End Turn".
@@ -1218,7 +1257,7 @@ static void draw_ocean_cell(float draw_x, float draw_y, int dx, int dy, int b0, 
 }
 
 // City banners are drawn after the tile pass so they can overlap neighbours.
-typedef struct { float x, y; int owner, size; char name[48]; } CityBanner;
+typedef struct { float x, y; int owner, size; char name[48]; char prod[32]; } CityBanner;
 static CityBanner s_banners[48];
 static int s_nbanners;
 
@@ -1244,6 +1283,10 @@ static void draw_tile_entities(const TileInfo *info, float draw_x, float draw_y)
             b->x = draw_x + T / 2; b->y = draw_y + T - 3;
             b->owner = info->city_owner; b->size = info->city_size;
             snprintf(b->name, sizeof(b->name), "%s", info->city_name);
+            if (info->city_prod[0] && info->city_prod_turns > 0 && info->city_prod_turns < 999)
+                snprintf(b->prod, sizeof(b->prod), "%.20s %d", info->city_prod, info->city_prod_turns);
+            else
+                snprintf(b->prod, sizeof(b->prod), "%.20s", info->city_prod);
         }
     } else if (info->unit_owner >= 0) {
         int sprite_idx = get_unit_sprite(info->unit_name);
@@ -1292,6 +1335,14 @@ static void draw_city_banners(void)
         C2D_DrawRectSolid(x, y, 0.802f, sw + 6, h, oc);
         font_draw(sz, x + 3, y - 1.5f, 0.803f, 0.42f, contrast_text(oc));
         font_draw(b->name, x + sw + 10, y - 1.5f, 0.803f, 0.42f, 0xFFFFFFFF);
+        // Your cities: what's being built and in how many turns, at the
+        // closer zoom levels (Civ Rev / Civ VI style).
+        if (b->prod[0] && TILE_PX * s_ms >= 22) {
+            float pw = font_width(b->prod, 0.34f) + 6, ph = 11;
+            float px = floorf(b->x - pw / 2), py = y + h + 1;
+            C2D_DrawRectSolid(px, py, 0.80f, pw, ph, C2D_Color32(0x0C, 0x12, 0x1E, 0xD0));
+            font_draw(b->prod, px + 3, py - 2.5f, 0.803f, 0.34f, C2D_Color32(0xF0, 0xC0, 0x70, 0xFF));
+        }
     }
 }
 

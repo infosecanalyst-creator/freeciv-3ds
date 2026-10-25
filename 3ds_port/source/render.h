@@ -43,15 +43,20 @@ int popup_hit_test(const PopupMenu *m, int px, int py);
 // Bottom-screen HUD button row.
 #define HUD_Y       212
 #define HUD_MENU_X  2
-#define HUD_MENU_W  58
-#define HUD_NEXT_X  63
-#define HUD_NEXT_W  58
-#define HUD_ZOUT_X  124
-#define HUD_ZIN_X   164
-#define HUD_ZOOM_W  37
-#define HUD_END_X   204
-#define HUD_END_W   114
-enum { HUD_NONE, HUD_BAR, HUD_MENU, HUD_NEXT, HUD_ZOUT, HUD_ZIN, HUD_END };
+#define HUD_MENU_W  50
+#define HUD_NEXT_X  55
+#define HUD_NEXT_W  50
+#define HUD_MAP_X   108
+#define HUD_MAP_W   44
+#define HUD_ZOUT_X  155
+#define HUD_ZIN_X   192
+#define HUD_ZOOM_W  34
+#define HUD_END_X   229
+#define HUD_END_W   89
+enum { HUD_NONE, HUD_BAR, HUD_MENU, HUD_NEXT, HUD_ZOUT, HUD_ZIN, HUD_END, HUD_MAP };
+// World map in place of the bottom map (HUD Map button); tap maps to a tile.
+void render_set_world_view(bool on);
+bool world_map_hit(int px, int py, int *tx, int *ty);
 int hud_hit_test(int px, int py);
 
 // Bottom screen. unit_x/unit_y is the commanded unit's tile (-1 if none);

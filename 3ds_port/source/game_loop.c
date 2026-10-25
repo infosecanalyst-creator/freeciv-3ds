@@ -1709,6 +1709,12 @@ void get_tile_info(int x, int y, TileInfo *out)
         if (cname) {
             fc_strlcpy(out->city_name, cname, sizeof(out->city_name));
         }
+        struct player *pov_c = get_pov_player();
+        if (pov_c && city_owner(pcity) == pov_c) {
+            const char *pn = city_production_name_translation(pcity);
+            if (pn) fc_strlcpy(out->city_prod, pn, sizeof(out->city_prod));
+            out->city_prod_turns = city_production_turns_to_build(pcity, TRUE);
+        }
     }
 
     if (ptile->units) {

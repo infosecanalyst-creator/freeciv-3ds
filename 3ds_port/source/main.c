@@ -525,6 +525,7 @@ int main(int argc, char* argv[])
     int want_smart = -1;  // tapped while it offered a decision; handled while !busy
     // Quick-order bar: popup ids for the visible buttons, and a tapped one.
     int bar_ids[UNITBAR_MAX]; int bar_n = 0; int bar_tap = -1;
+    bool world_view = false; // HUD Map: whole world on the touch screen, tap to jump
     int pending_goto_x = -1, pending_goto_y = -1; // first tap of a two-tap route
     UnitInfo unit_info;
     memset(&unit_info, 0, sizeof(unit_info));
@@ -1051,6 +1052,14 @@ int main(int argc, char* argv[])
                     t_consumed = !(hit == -1 && popup_kind_was == POPUP_UNIT);
                 } else {
                     int h = hud_hit_test(t_x0, t_y0);
+                    if (world_view && h == HUD_NONE) {
+                        int wx, wy;
+                        if (world_map_hit(t_x0, t_y0, &wx, &wy)) center_on_tile(wx, wy, zoom, &cam_x, &cam_y);
+                        world_view = false;
+                        render_set_world_view(false);
+                        t_consumed = true;
+                        h = HUD_BAR; // swallow: nothing else reacts to this tap
+                    }
                     if (h == HUD_NONE && bar_n > 0 && !report_tap
                         && t_y0 >= UNITBAR_Y && t_y0 < UNITBAR_Y + UNITBAR_H) {
                         bar_tap = t_x0 * bar_n / 320; // handled below while !busy
@@ -1063,6 +1072,9 @@ int main(int argc, char* argv[])
                         if (h == HUD_MENU) {
                             open_game_menu(&popup);
                             popup_kind = POPUP_MENU;
+                        } else if (h == HUD_MAP) {
+                            world_view = !world_view;
+                            render_set_world_view(world_view);
                         } else if (h == HUD_NEXT) {
                             want_next_unit = true;
                         } else if (h == HUD_ZOUT) {
