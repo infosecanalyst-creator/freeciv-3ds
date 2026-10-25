@@ -34,8 +34,8 @@ supports the Old 3DS.
 - **Caravans, diplomats and more**: next to a foreign city a unit is offered everything it can do there
   (embassy, investigate, steal tech, sabotage, incite revolt, trade route, sell goods) besides Attack. In
   a city: Help Wonder, Disband for shields, Upgrade and Make Home City. Also Pillage.
-- **Civilopedia** (Menu): every unit, building, wonder, technology and government, with stats and the
-  ruleset's help text.
+- **Civilopedia** (Menu): every unit, building, wonder, technology and government, with its picture,
+  stats, what it leads to, and the ruleset's help text.
 - **Map labels**: city name plates with size, owner shields, health bars for wounded units,
   activity badges (Fortified, Sentry, Working, Exploring, Goto), and dimmed units that are done.
 - **Cities**: yields, growth and production bars, and the units inside (lead one out with Y). Three
@@ -104,7 +104,8 @@ scripts/build_freeciv_core.sh   # fetch upstream Freeciv at the pinned commit, p
 cd 3ds_port && make             # build the client -> 3ds_port.3dsx
 ```
 
-`tools/make_font.py` (needs Pillow) regenerates the font atlas, and `tools/make_audio.sh` (needs
+`tools/make_font.py` (needs Pillow) regenerates the font atlas, `tools/make_pedia_icons.py` the
+Civilopedia icons, and `tools/make_audio.sh` (needs
 ffmpeg) regenerates the audio. Both outputs are committed, so a normal build needs neither tool.
 
 ## How it works
@@ -126,7 +127,7 @@ ffmpeg) regenerates the audio. Both outputs are committed, so a normal build nee
 
 ## Credits and licences
 
-- **Freeciv** engine, rulesets, `trident` tileset and sound set: the Freeciv project, GPL-2.0-or-later.
+- **Freeciv** engine, rulesets, `trident` tileset, Civilopedia icons and sound set: the Freeciv project, GPL-2.0-or-later.
 - **Original 3DS port**: [xPsycho999](https://github.com/xPsycho999/freeciv3ds), GPL-2.0-or-later.
 - **Menu music** "Dawning Fanfare": Cullam Bruce-Lockhart (Freeciv `stdmusic`).
 - **Game music** "Exploration", "Harvest Season", "Market Day" and "The Bard's Tale": RandomMind,

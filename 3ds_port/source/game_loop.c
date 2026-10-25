@@ -720,6 +720,38 @@ int get_pedia_list(int kind, PediaEntry *out, int max)
     return n;
 }
 
+// The entry's picture: Freeciv graphic tag (+ fallback) for buildings,
+// wonders, techs and governments; for units, the unit's rule name (the client
+// already has unit sprites). Returns true for a unit.
+bool get_pedia_graphic(int kind, int id, char *tag, int tlen, char *alt, int alen)
+{
+    tag[0] = alt[0] = 0;
+    switch (kind) {
+    case PEDIA_UNITS: {
+        const struct unit_type *ut = utype_by_number(id);
+        if (ut) fc_strlcpy(tag, utype_rule_name(ut), tlen);
+        return true;
+    }
+    case PEDIA_BUILDINGS:
+    case PEDIA_WONDERS: {
+        const struct impr_type *pi = improvement_by_number(id);
+        if (pi) { fc_strlcpy(tag, pi->graphic_str, tlen); fc_strlcpy(alt, pi->graphic_alt, alen); }
+        break;
+    }
+    case PEDIA_TECHS: {
+        const struct advance *pa = advance_by_number(id);
+        if (pa) { fc_strlcpy(tag, pa->graphic_str, tlen); fc_strlcpy(alt, pa->graphic_alt, alen); }
+        break;
+    }
+    case PEDIA_GOVS: {
+        const struct government *pg = government_by_number(id);
+        if (pg) { fc_strlcpy(tag, pg->graphic_str, tlen); fc_strlcpy(alt, pg->graphic_alt, alen); }
+        break;
+    }
+    }
+    return false;
+}
+
 void get_pedia_text(int kind, int id, char *out, int len)
 {
     out[0] = 0;

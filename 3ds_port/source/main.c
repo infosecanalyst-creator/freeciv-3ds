@@ -465,6 +465,17 @@ int main(int argc, char* argv[])
     C3D_RenderTarget* top_right = C2D_CreateScreenTarget(GFX_TOP, GFX_RIGHT);
     gfxSet3D(true); // the right eye is only drawn while the 3D slider is up
     C3D_RenderTarget* bottom = C2D_CreateScreenTarget(GFX_BOTTOM, GFX_LEFT);
+    // The map screen is drawn into this texture and then onto the bottom
+    // screen, so while a turn runs (and the map can't be read) the last
+    // picture stays up under a small banner instead of a full-screen page.
+    static C3D_Tex cap_tex;
+    C3D_TexInitVRAM(&cap_tex, 512, 256, GPU_RGBA8);
+    C3D_TexSetFilter(&cap_tex, GPU_NEAREST, GPU_NEAREST);
+    C3D_RenderTarget *cap = C3D_RenderTargetCreateFromTex(&cap_tex, GPU_TEXFACE_2D, 0, GPU_RB_DEPTH16);
+    static const Tex3DS_SubTexture cap_sub = { 320, 240, 0.0f, 1.0f, 320.0f / 512.0f, 1.0f - 240.0f / 256.0f };
+    C2D_Image cap_img = { &cap_tex, &cap_sub };
+    bool have_cap = false;
+    int busy_frames = 0;
 
     AppState app_state = APP_START_MENU;
     static SaveFile save_files[MAX_SAVE_FILES];
@@ -524,6 +535,8 @@ int main(int argc, char* argv[])
     static PediaEntry pedia_list[160];
     int pedia_n = 0;
     static char pedia_text[4096];
+    static char pedia_icon_tag[48], pedia_icon_alt[48]; // picture for the open entry
+    bool pedia_icon_unit = false;
     SpaceshipInfo ship;
     memset(&ship, 0, sizeof(ship));
     bool game_over = false, game_over_shown = false, game_won = false;
@@ -1688,8 +1701,14 @@ int main(int argc, char* argv[])
                 if (pedia_dirty) {
                     pedia_n = get_pedia_list(pedia_kind, pedia_list, 160);
                     if (pedia_sel >= pedia_n) pedia_sel = -1;
-                    if (pedia_sel >= 0) get_pedia_text(pedia_kind, pedia_list[pedia_sel].id, pedia_text, sizeof(pedia_text));
-                    else snprintf(pedia_text, sizeof(pedia_text), "Pick a category and an entry below.");
+                    if (pedia_sel >= 0) {
+                        get_pedia_text(pedia_kind, pedia_list[pedia_sel].id, pedia_text, sizeof(pedia_text));
+                        pedia_icon_unit = get_pedia_graphic(pedia_kind, pedia_list[pedia_sel].id, pedia_icon_tag,
+                                                            sizeof(pedia_icon_tag), pedia_icon_alt, sizeof(pedia_icon_alt));
+                    } else {
+                        pedia_icon_tag[0] = pedia_icon_alt[0] = 0;
+                        snprintf(pedia_text, sizeof(pedia_text), "Pick a category and an entry below.");
+                    }
                     pedia_dirty = false;
                 }
                 int max_scroll = pedia_n > PANEL_ROWS_VISIBLE ? pedia_n - PANEL_ROWS_VISIBLE : 0;
@@ -1745,8 +1764,12 @@ int main(int argc, char* argv[])
         // (no fresh reads happen here - see the `if (!busy)` block above)
         // with a small non-blocking corner indicator, so a Buy tap's brief
         // busy blip doesn't flash the panel away.
-        bool full_overlay = busy && ui_mode == UI_MAP;
+        busy_frames = busy ? busy_frames + 1 : 0;
+        // Full-screen page only while the world is first generated (no map
+        // yet); otherwise the captured map stays up with a bottom banner.
+        bool full_overlay = busy && ui_mode == UI_MAP && (!fc3ds_server_is_ready() || !have_cap || !cap);
         bool show_busy_indicator = busy && ui_mode != UI_MAP;
+        bool map_screen = !(game_over && !game_over_shown) && ui_mode == UI_MAP;
 
         if (full_overlay) {
             // See fc3ds_server_is_ready() vs is_busy(): not-yet-ready means
@@ -1779,7 +1802,7 @@ int main(int argc, char* argv[])
             C3D_RenderTarget *tgt = eye ? top_right : top;
             C2D_TargetClear(tgt, C2D_Color32(0x18, 0x24, 0x38, 0xFF));
             C2D_SceneBegin(tgt);
-            render_set_stereo(eyes == 2 ? (eye ? 1 : -1) : 0, slider * 1.2f);
+            render_set_stereo(eyes == 2 ? (eye ? 1 : -1) : 0, slider);
             // Force the tilted landscape projection. C2D_SceneSize swaps w/h
             // when tilt=true and expects the PORTRAIT framebuffer dims
             // (240x400 top, 240x320 bottom) to hit its cached, correct
@@ -1809,7 +1832,8 @@ int main(int argc, char* argv[])
                 render_spaceship_top(&ship);
                 break;
             case UI_PEDIA:
-                render_pedia_top(pedia_sel >= 0 ? pedia_list[pedia_sel].name : "Civilopedia", pedia_text, pedia_text_scroll);
+                render_pedia_top(pedia_sel >= 0 ? pedia_list[pedia_sel].name : "Civilopedia", pedia_text, pedia_text_scroll,
+                                 pedia_sel >= 0 ? pedia_icon_tag : NULL, pedia_icon_alt, pedia_icon_unit);
                 break;
             case UI_MESSAGES:
                 render_messages_top(msg_view_n > 0 ? &msg_view[ui_scroll < msg_view_n ? ui_scroll : 0] : NULL);
@@ -1866,6 +1890,25 @@ int main(int argc, char* argv[])
             render_set_stereo(0, 0);
             } // eyes
 
+            // Map screen: draw into the capture texture (only while the map
+            // can be read), then show the texture below.
+            bool drew_cap = false;
+            if (map_screen && cap && !busy) {
+                C2D_TargetClear(cap, C2D_Color32(0x10, 0x10, 0x10, 0xFF));
+                C2D_SceneBegin(cap);
+                int gx = pending_goto_x >= 0 ? pending_goto_x : ui_goto_x;
+                int gy = pending_goto_x >= 0 ? pending_goto_y : ui_goto_y;
+                bool armed = selected_unit_id >= 0 && unit_info.valid;
+                render_bottom_map(cam_x, cam_y, zoom, sel_x, sel_y,
+                                  armed ? unit_info.x : -1, armed ? unit_info.y : -1,
+                                  armed && unit_info.moves_left > 0, gx, gy,
+                                  popup_kind != POPUP_NONE ? &popup : NULL,
+                                  zoom_idx > 0, zoom_idx < ZOOM_COUNT - 1, all_moved,
+                                  pending_goto_x >= 0 ? &route : NULL);
+                if (save_toast_frames > 0) render_toast("Saved");
+                have_cap = drew_cap = true;
+            }
+
             C2D_TargetClear(bottom, C2D_Color32(0x10, 0x10, 0x10, 0xFF)); // Dark gray
             C2D_SceneBegin(bottom);
             C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_BOTTOM, true);
@@ -1911,18 +1954,14 @@ int main(int argc, char* argv[])
                 break;
             case UI_MAP:
             default:
-{
-                int gx = pending_goto_x >= 0 ? pending_goto_x : ui_goto_x;
-                int gy = pending_goto_x >= 0 ? pending_goto_y : ui_goto_y;
-                bool armed = selected_unit_id >= 0 && unit_info.valid;
-                render_bottom_map(cam_x, cam_y, zoom, sel_x, sel_y,
-                                  armed ? unit_info.x : -1, armed ? unit_info.y : -1,
-                                  armed && unit_info.moves_left > 0, gx, gy,
-                                  popup_kind != POPUP_NONE ? &popup : NULL,
-                                  zoom_idx > 0, zoom_idx < ZOOM_COUNT - 1, all_moved,
-                                  pending_goto_x >= 0 ? &route : NULL);
-            }
-                if (save_toast_frames > 0) render_toast("Saved");
+                if (have_cap) {
+                    C2D_DrawImageAt(cap_img, 0, 0, 0.0f, NULL, 1.0f, 1.0f);
+                    // Brief steps (a unit move) finish in a frame or two;
+                    // only a real wait gets the banner.
+                    if (busy && busy_frames > 6)
+                        render_turn_banner(save_in_flight ? PROC_SAVING : PROC_TURN, busy_frames);
+                }
+                (void)drew_cap;
                 break;
             }
             if (show_busy_indicator) render_busy_indicator(SCREEN_WIDTH_BOT);

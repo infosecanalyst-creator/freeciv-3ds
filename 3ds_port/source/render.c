@@ -2,6 +2,7 @@
 #include "game_loop.h"
 #include "fc3ds_server.h"
 #include "sprites.h"
+#include "pedia_icons.h"
 #include "font.h"
 #include <citro2d.h>
 #include <stdio.h>
@@ -249,10 +250,19 @@ void render_set_stereo(int eye, float amount)
     C2D_ViewReset();
 }
 
+// Depth is in "levels" (0 = screen plane, 4 = the selection card). Each eye
+// moves by a WHOLE number of pixels: fractional offsets resample the
+// point-sampled sprites and font differently per eye, which reads as blur and
+// ghosting. At full slider the nearest layer gets 3 px per eye (6 px total
+// disparity) - the 3DS stays comfortable well under ~10 px.
 static void layer(float depth)
 {
     C2D_ViewReset();
-    if (s_eye) C2D_ViewTranslate(-s_eye * s_stereo * depth, 0);
+    if (!s_eye) return;
+    float px = s_stereo * depth * 0.75f;
+    if (px > 3.0f) px = 3.0f;
+    int ipx = (int)(px + 0.5f);
+    if (ipx) C2D_ViewTranslate((float)(-s_eye * ipx), 0);
 }
 
 // Black or white, whichever reads better on `bg` (ABGR).
@@ -884,7 +894,7 @@ void render_top_info(const TopInfo *ti)
         C2D_DrawRectSolid(CX - 4, 24, 0.01f, 4, 196, owner_color(u->owner));
         // Unit portrait, double size.
         C2D_DrawRectSolid(CX + 2, 30, 0.01f, 64, 64, C2D_Color32(0x1C, 0x28, 0x3A, 0xFF));
-        layer(7.0f);
+        layer(5.0f); // the portrait sits just a little in front of its card
         C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, get_unit_sprite(u->rule_name)),
                         CX + 4, 32, 0.02f, NULL, 2.0f, 2.0f);
         layer(4.0f);
@@ -2150,6 +2160,22 @@ void render_processing_overlay(int screen_w, int screen_h, ProcessingReason reas
     draw_text(8, screen_h / 2.0f + 8, 0.55f, dim, "Please wait");
 }
 
+void render_turn_banner(ProcessingReason reason, int frame)
+{
+    // A strip across the bottom of the touch screen, over the (inactive) HUD
+    // row, while the map above stays visible as a captured picture. Same
+    // "touches no Freeciv game state" rule as render_processing_overlay().
+    C2D_TextBufClear(g_textBuf);
+    const float H = 28, Y = 240 - H;
+    C2D_DrawRectSolid(0, Y, 0.0f, 320, H, C2D_Color32(0x0C, 0x14, 0x22, 0xF0));
+    C2D_DrawRectSolid(0, Y, 0.0f, 320, 2, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF));
+    const char *msg = reason == PROC_SAVING ? "Saving" : "Other civilizations are moving";
+    char line[48];
+    int dots = (frame / 20) % 4;
+    snprintf(line, sizeof(line), "%s%.*s", msg, dots, "...");
+    draw_text(10, Y + 6, 0.5f, C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF), line);
+}
+
 void render_busy_indicator(int screen_w)
 {
     // Same "touches no Freeciv game state" rule as render_processing_overlay
@@ -2478,7 +2504,20 @@ void render_pedia_panel(int kind, const PediaEntry *list, int n, int scroll, int
     draw_button(4, PANEL_FOOTER_Y + 2, 312, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
 }
 
-void render_pedia_top(const char *title, const char *text, int scroll_lines)
+static int pedia_icon_index(const char *tag)
+{
+    if (!tag || !tag[0]) return -1;
+    int lo = 0, hi = PEDIA_ICON_COUNT - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2, c = strcmp(k_pedia_icons[mid].tag, tag);
+        if (!c) return k_pedia_icons[mid].idx;
+        if (c < 0) lo = mid + 1; else hi = mid - 1;
+    }
+    return -1;
+}
+
+void render_pedia_top(const char *title, const char *text, int scroll_lines,
+                      const char *icon_tag, const char *icon_alt, bool icon_is_unit)
 {
     C2D_TextBufClear(g_textBuf);
     u32 soft = C2D_Color32(0xC0, 0xCE, 0xDC, 0xFF);
@@ -2488,6 +2527,38 @@ void render_pedia_top(const char *title, const char *text, int scroll_lines)
     draw_text(14, 3, 0.85f, 0xFFFFFFFF, title && title[0] ? title : "Civilopedia");
     layer(3.0f);
     C2D_DrawRectSolid(8, 40, 0.0f, 384, 176, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
+
+    // The entry's picture, framed at the top right; text beside it wraps
+    // narrower until it clears the frame. The icon sheet loads on first use.
+    static C2D_SpriteSheet s_pedia_sheet;
+    C2D_Image pic = { 0 };
+    float pic_scale = 1.0f;
+    if (icon_tag && icon_tag[0]) {
+        if (icon_is_unit) {
+            pic = C2D_SpriteSheetGetImage(g_spriteSheet, get_unit_sprite(icon_tag));
+            pic_scale = 2.0f;
+        } else {
+            if (!s_pedia_sheet) s_pedia_sheet = C2D_SpriteSheetLoad("romfs:/gfx/pedia.t3x");
+            int idx = pedia_icon_index(icon_tag);
+            if (idx < 0) idx = pedia_icon_index(icon_alt);
+            if (s_pedia_sheet && idx >= 0) {
+                pic = C2D_SpriteSheetGetImage(s_pedia_sheet, idx);
+                // whole-number scale that fits an 80x64 frame
+                int w = pic.subtex->width, h = pic.subtex->height;
+                pic_scale = 1.0f;
+                while (w * (pic_scale + 1) <= 80 && h * (pic_scale + 1) <= 64) pic_scale += 1.0f;
+            }
+        }
+    }
+    float text_w_near = 368, pic_bottom = 0;
+    if (pic.tex) {
+        float pw = pic.subtex->width * pic_scale, ph = pic.subtex->height * pic_scale;
+        float fx = 384 - 4 - 84, fy = 44;
+        C2D_DrawRectSolid(fx, fy, 0.01f, 84, 68, C2D_Color32(0x1C, 0x28, 0x3A, 0xFF));
+        C2D_DrawImageAt(pic, fx + (84 - pw) / 2, fy + (68 - ph) / 2, 0.02f, NULL, pic_scale, pic_scale);
+        text_w_near = fx - 16 - 8;
+        pic_bottom = fy + 68;
+    }
     // Paragraph-by-paragraph wrap, skipping scroll_lines lines.
     float y = 44;
     int line_no = 0;
@@ -2510,7 +2581,7 @@ void render_pedia_top(const char *title, const char *text, int scroll_lines)
                 while (q[j] && q[j] != ' ') j++;
                 if (j >= (int)sizeof(line)) break;
                 memcpy(line, q, j); line[j] = 0;
-                if (font_width(line, 0.47f) > 368 && best) break;
+                if (font_width(line, 0.47f) > (y < pic_bottom ? text_w_near : 368) && best) break;
                 best = j;
                 if (!q[j]) break;
                 i = j + 1;

@@ -107,6 +107,9 @@ void render_processing_overlay(int screen_w, int screen_h, ProcessingReason reas
 // this does not cover the panel, since the panel itself is only ever drawn
 // from the last cached !busy snapshot and needs no fresh reads.
 void render_busy_indicator(int screen_w);
+// Bottom-strip "Other civilizations are moving..." banner shown over the
+// last captured map frame while a long step runs.
+void render_turn_banner(ProcessingReason reason, int frame);
 
 // On-screen action bar (bottom-screen right edge, UI_MAP only) - reaches
 // panels that have no dedicated shoulder-button shortcut left (handoff.md
@@ -339,7 +342,8 @@ void render_messages_top(const GameMessage *m);
 #define PEDIA_TAB_W   61
 #define PEDIA_TAB_X(i) (3 + (i) * 63)
 void render_pedia_panel(int kind, const PediaEntry *list, int n, int scroll, int selected);
-void render_pedia_top(const char *title, const char *text, int scroll_lines);
+void render_pedia_top(const char *title, const char *text, int scroll_lines,
+                      const char *icon_tag, const char *icon_alt, bool icon_is_unit);
 
 // Spaceship (Menu > Spaceship).
 void render_spaceship_top(const SpaceshipInfo *s);
