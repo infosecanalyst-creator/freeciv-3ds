@@ -1900,8 +1900,8 @@ void render_city_panel(const CityInfo *info, const BuildOption *opts, int n, int
     draw_button(CITY_TOGGLE_X, CITY_TOGGLE_Y, CITY_TOGGLE_W, CITY_TOGGLE_H, 0.03f,
                 queue_mode ? "Add to queue" : "Build now", 0.42f, true, !queue_mode);
 
-    snprintf(line, sizeof(line), "%s  %d/%d  (%d turns)", info->producing[0] ? info->producing : "?",
-             info->shield_stock, info->prod_cost, info->prod_turns);
+    snprintf(line, sizeof(line), "%s  %d/%d  (%d turn%s)", info->producing[0] ? info->producing : "?",
+             info->shield_stock, info->prod_cost, info->prod_turns, info->prod_turns == 1 ? "" : "s");
     draw_text(8, PANEL_HEADER_H + 4, 0.47f, cur, line);
     render_city_tabs(CITY_TAB_BUILD);
     if (!worklist_n) draw_text(CITY_WORKLIST_COL_X + 4, PANEL_LIST_Y + 2, 0.42f, soft, "Queue empty");
