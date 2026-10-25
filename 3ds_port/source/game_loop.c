@@ -982,8 +982,11 @@ int get_move_range(int unit_id, short *xs, short *ys, int max)
     pft_fill_unit_parameter(&parameter, &(wld.map), punit);
     struct pf_map *pfm = pf_map_new(&parameter);
     int n = 0;
+    // Freeciv's pos.turn is total cost / move rate, so a step that uses the
+    // last move point already reads as turn 1. Compare the cost to the
+    // unit's moves left instead (cheapest first, so stop at the first miss).
     pf_map_positions_iterate(pfm, pos, FALSE) {
-        if (pos.turn > 0 || n >= max) break;
+        if ((int)pos.total_MC > punit->moves_left || n >= max) break;
         int x, y;
         index_to_native_pos(&x, &y, tile_index(pos.tile));
         xs[n] = (short)x; ys[n] = (short)y;
@@ -1006,7 +1009,14 @@ void get_route_preview(int unit_id, int tx, int ty, RoutePreview *out)
     struct pf_path *path = pf_map_path(pfm, dst);
     if (path && path->length > 0) {
         out->reachable = true;
-        out->turns = path->positions[path->length - 1].turn;
+        // Turns beyond this one (0 = arrives this turn); pos.turn over-counts
+        // by one when the move uses exactly the remaining move points.
+        {
+            int mc = (int)path->positions[path->length - 1].total_MC;
+            int rate = unit_move_rate(punit);
+            out->turns = mc <= punit->moves_left ? 0
+                         : (rate > 0 ? 1 + (mc - punit->moves_left - 1) / rate : 99);
+        }
         // Keep at most ROUTE_MAX points, always including the last.
         int step = (path->length + ROUTE_MAX - 1) / ROUTE_MAX;
         if (step < 1) step = 1;

@@ -575,6 +575,7 @@ int main(int argc, char* argv[])
     int peek_sx = -1, peek_sy = -1; // screen point to resolve while !busy
     int peek_timer = 0, peek_x = -1, peek_y = -1;
     TileInfo peek_info;
+    UnitBrief peek_stack[16]; int peek_stack_n = 0;
     bool have_sel = false;
 
     // City-screen / civ-control modal state (handoff.md goals A/B).
@@ -1705,6 +1706,7 @@ int main(int argc, char* argv[])
             if (peek_sx >= 0) {
                 if (screen_to_tile(peek_sx, peek_sy, cam_x, cam_y, zoom, &peek_x, &peek_y)) {
                     get_tile_info(peek_x, peek_y, &peek_info);
+                    peek_stack_n = get_tile_units(peek_x, peek_y, peek_stack, 16);
                     peek_timer = 240; // ~4 s, or until the next touch
                 }
                 peek_sx = peek_sy = -1;
@@ -2047,6 +2049,7 @@ int main(int argc, char* argv[])
                 ti.unit = (selected_unit_id >= 0 && unit_info.valid) ? &unit_info : NULL;
                 if (peek_timer > 0) { // long-press details win over the unit card
                     ti.tile = &peek_info; ti.tile_x = peek_x; ti.tile_y = peek_y; ti.unit = NULL;
+                    ti.stack = peek_stack; ti.stack_n = peek_stack_n;
                 }
                 ti.stack = stack; ti.stack_n = stack_n;
                 ti.cam_x = cam_x; ti.cam_y = cam_y; ti.zoom = zoom;
@@ -2082,6 +2085,10 @@ int main(int argc, char* argv[])
                     ti.hint_color = C2D_Color32(0x90, 0xE8, 0x90, 0xFF);
                 } else {
                     ti.hint = "Tap a unit to command it. Drag to scroll. Next / A: next unit.";
+                }
+                if (peek_timer > 0) {
+                    ti.hint = "Square details (held stylus). Tap anywhere to carry on.";
+                    ti.hint_color = C2D_Color32(0xB0, 0xD8, 0xFF, 0xFF);
                 }
                 render_top_info(&ti);
             }
