@@ -12,6 +12,9 @@ rulesetdir classic
 # empty string for none - a bare "0" is rejected as an unknown name and silently
 # leaves the default ISO|HEX in place.
 set topology ""
+# Autosave every turn, but with fast compression: level 6 costs noticeable
+# CPU on the 3DS for little size gain.
+set compress 1
 # Create the human player before aifill runs, so aifill tops up the
 # remaining slots with AI instead of counting/displacing this one
 # (aifill fills to a target *total* player count).

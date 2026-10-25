@@ -7,4 +7,6 @@
 # pregame sniff loop so the server thread reaches its normal per-turn park
 # point; `start` is safe on an already-loaded game (start_game() in
 # server/srv_main.c does nothing but flip force_end_of_sniff).
+# Fast autosave compression (see start.serv); older saves carry level 6.
+set compress 1
 start

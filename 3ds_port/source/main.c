@@ -1,5 +1,6 @@
 #include <3ds.h>
 #include <citro2d.h>
+#include <malloc.h>
 
 #include <string.h>
 #include <stdio.h>
@@ -394,6 +395,7 @@ static bool write_new_game_script(const char *path, const NewGameOpts *o)
     if (!f) return false;
     fprintf(f, "rulesetdir %s\n", k_rules_dirs[o->rules]);
     fprintf(f, "set topology \"\"\n");       // overhead square grid (see start.serv)
+    fprintf(f, "set compress 1\n");          // fast autosaves (see start.serv)
     fprintf(f, "set mapsize FULLSIZE\n");
     fprintf(f, "set size %d\n", k_size_tiles[o->size]);
     fprintf(f, "set landmass %d\n", k_land_pct[o->land]);
@@ -954,6 +956,37 @@ int main(int argc, char* argv[])
         // mutating game state as early as this call.
         fc3ds_server_pump();
         bool busy = fc3ds_server_is_busy();
+        // ---- Performance log (read back from sdmc:/freeciv_out.log) ----
+        // Engine steps longer than 250 ms (AI turns, saves, world gen), and
+        // once per turn the UI frame times and heap use since the last turn.
+        {
+            static bool was_busy = false;
+            static u64 busy_t0 = 0, frame_t0 = 0;
+            static u32 nframes = 0;
+            static float fsum = 0, fmax = 0;
+            static int perf_turn = -1;
+            u64 now = svcGetSystemTick();
+            if (frame_t0 && !busy) {
+                float ms = (float)(now - frame_t0) / (float)CPU_TICKS_PER_MSEC;
+                if (ms < 1000) { fsum += ms; nframes++; if (ms > fmax) fmax = ms; }
+            }
+            frame_t0 = now;
+            if (busy && !was_busy) busy_t0 = now;
+            if (!busy && was_busy) {
+                u32 ms = (u32)((now - busy_t0) / CPU_TICKS_PER_MSEC);
+                if (ms > 250) printf("PERF step %lu ms (turn %d)\n", (unsigned long)ms, get_game_turn());
+            }
+            was_busy = busy;
+            int t = busy ? perf_turn : get_game_turn(); // no engine reads while it runs
+            if (!busy && t != perf_turn && t > 0) {
+                struct mallinfo mi = mallinfo();
+                if (nframes)
+                    printf("PERF turn %d: ui avg %.1f ms max %.1f ms over %lu frames; heap used %d KB, linear free %lu KB\n",
+                           t, fsum / nframes, fmax, (unsigned long)nframes, mi.uordblks / 1024,
+                           (unsigned long)(linearSpaceFree() / 1024));
+                perf_turn = t; nframes = 0; fsum = fmax = 0;
+            }
+        }
         if (!busy) save_in_flight = false; // the queued save's busy step has ended
 
         if (save_toast_frames > 0) save_toast_frames--;
