@@ -53,6 +53,7 @@ typedef enum {
     UNIT_ACTION_JOIN_CITY,
     UNIT_ACTION_WAKE,        // cancel orders / current activity
     UNIT_ACTION_PILLAGE,
+    UNIT_ACTION_AUTO_WORK,   // hand the unit to Freeciv's auto-worker
     UNIT_ACTION_COUNT
 } UnitActionKind;
 
@@ -171,6 +172,7 @@ typedef struct {
     int  value;        // improvement_number() / utype_number()
     char name[48];
     int  cost;
+    int  turns;        // turns to build at the city's current shield rate
     bool is_current;   // matches pcity->production
 } BuildOption;
 

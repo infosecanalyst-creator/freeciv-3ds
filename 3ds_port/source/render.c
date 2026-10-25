@@ -1829,8 +1829,10 @@ void render_city_panel(const CityInfo *info, const BuildOption *opts, int n, int
         char nm[32];
         snprintf(nm, sizeof(nm), "%.20s", opt->name);
         draw_text_z(10, y + 1, 0.01f, 0.45f, opt->is_current ? cur : white, nm);
-        if (opt->cost >= 0) snprintf(line, sizeof(line), "%d", opt->cost);
-        else snprintf(line, sizeof(line), "gold");
+        // Turns first (what players plan by), as in the Civ games.
+        if (opt->cost < 0) snprintf(line, sizeof(line), "gold");
+        else if (opt->turns > 0 && opt->turns < 999) snprintf(line, sizeof(line), "%d turn%s", opt->turns, opt->turns == 1 ? "" : "s");
+        else snprintf(line, sizeof(line), "%d", opt->cost);
         draw_text_z(CITY_WORKLIST_COL_X - 12 - text_width(line, 0.42f), y + 2, 0.01f, 0.42f, soft, line);
     }
     if (n > PANEL_ROWS_VISIBLE) {
@@ -2376,26 +2378,23 @@ void render_diplomacy_panel(int stage, const char *counterpart_name,
                 "Close", 0.5f, true, false);
 }
 
-void render_start_menu(void)
+void render_start_menu(const char *continue_label)
 {
     C2D_TextBufClear(g_textBuf);
-
-    u32 white  = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
-    u32 dim    = C2D_Color32(0xA0, 0xA8, 0xB4, 0xFF);
-    u32 bg     = C2D_Color32(0x2C, 0x50, 0x80, 0xFF);
-    u32 border = C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF);
-
+    u32 white = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
+    u32 dim   = C2D_Color32(0xA0, 0xA8, 0xB4, 0xFF);
+    bool cont = continue_label != NULL;
     C2D_DrawRectSolid(0, 0, 0.0f, 320, 240, C2D_Color32(0x10, 0x10, 0x10, 0xFF));
-    draw_text(8, 20, 0.8f, white, "Freeciv 3DS");
-
-    C2D_DrawRectSolid(STARTMENU_BTN_X, STARTMENU_NEW_Y, 0.0f, STARTMENU_BTN_W, STARTMENU_BTN_H, bg);
-    C2D_DrawRectSolid(STARTMENU_BTN_X, STARTMENU_NEW_Y, 0.0f, STARTMENU_BTN_W, 2, border);
-    draw_text(STARTMENU_BTN_X + 16, STARTMENU_NEW_Y + 12, 0.6f, white, "New Game");
-
-    C2D_DrawRectSolid(STARTMENU_BTN_X, STARTMENU_LOAD_Y, 0.0f, STARTMENU_BTN_W, STARTMENU_BTN_H, bg);
-    C2D_DrawRectSolid(STARTMENU_BTN_X, STARTMENU_LOAD_Y, 0.0f, STARTMENU_BTN_W, 2, border);
-    draw_text(STARTMENU_BTN_X + 16, STARTMENU_LOAD_Y + 12, 0.6f, white, "Load Game");
-
+    draw_text(8, cont ? 8 : 20, 0.8f, white, "Freeciv 3DS");
+    if (cont) {
+        int y = startmenu_slot_y(0, true);
+        draw_button(STARTMENU_BTN_X, y, STARTMENU_BTN_W, STARTMENU_BTN_H, 0.0f, "", 0.6f, true, true);
+        draw_text(STARTMENU_BTN_X + 16, y + 3, 0.6f, white, "Continue");
+        draw_text(STARTMENU_BTN_X + 16, y + 22, 0.42f, C2D_Color32(0xD0, 0xF0, 0xD0, 0xFF), continue_label);
+    }
+    int yn = startmenu_slot_y(1, cont), yl = startmenu_slot_y(2, cont);
+    draw_button(STARTMENU_BTN_X, yn, STARTMENU_BTN_W, STARTMENU_BTN_H, 0.0f, "New Game", 0.6f, true, false);
+    draw_button(STARTMENU_BTN_X, yl, STARTMENU_BTN_W, STARTMENU_BTN_H, 0.0f, "Load Game", 0.6f, true, false);
     draw_text(8, 220, 0.45f, dim, "Tap to choose");
 }
 

@@ -1190,8 +1190,11 @@ static unsigned unit_action_mask(struct player *pov, struct unit *punit)
     if (pcity && is_action_enabled_unit_on_city(nmap, ACTION_JOIN_CITY, punit, pcity)) {
         m |= 1u << UNIT_ACTION_JOIN_CITY;
     }
-    if (punit->activity != ACTIVITY_IDLE || unit_has_orders(punit)) {
+    if (punit->activity != ACTIVITY_IDLE || unit_has_orders(punit) || punit->ssa_controller != SSA_NONE) {
         m |= 1u << UNIT_ACTION_WAKE;
+    }
+    if (punit->ssa_controller != SSA_AUTOWORKER && can_unit_do_autoworker(punit)) {
+        m |= 1u << UNIT_ACTION_AUTO_WORK;
     }
     if (punit->activity != ACTIVITY_PILLAGE
         && can_unit_do_activity(nmap, punit, ACTIVITY_PILLAGE, ACTION_PILLAGE)) {
@@ -1223,7 +1226,8 @@ void get_unit_info(int unit_id, UnitInfo *out)
     out->moves_left = punit->moves_left;
     fc_strlcpy(out->moves, move_points_text(punit->moves_left, TRUE), sizeof(out->moves));
     out->has_orders = unit_has_orders(punit);
-    fc_strlcpy(out->activity, out->has_orders ? "Under orders" : get_activity_text(punit->activity),
+    fc_strlcpy(out->activity, punit->ssa_controller == SSA_AUTOWORKER ? "Auto Work"
+                              : out->has_orders ? "Under orders" : get_activity_text(punit->activity),
                sizeof(out->activity));
     out->idle = punit->activity == ACTIVITY_IDLE && !out->has_orders;
     struct city *home = game_city_by_number(punit->homecity);
@@ -1268,7 +1272,7 @@ bool find_next_idle_unit(int after_id, const int *skip, int nskip, int *id, int 
     for (int k = 0; k < n; k++) {
         struct unit *punit = unit_list_get(pov->units, (start + k) % n);
         if (!punit || punit->moves_left <= 0 || punit->activity != ACTIVITY_IDLE
-            || unit_has_orders(punit) || !unit_tile(punit)) continue;
+            || unit_has_orders(punit) || punit->ssa_controller != SSA_NONE || !unit_tile(punit)) continue;
         bool skipped = false;
         for (int j = 0; j < nskip; j++) if (skip[j] == punit->id) { skipped = true; break; }
         if (skipped) continue;
@@ -1423,7 +1427,15 @@ void freeciv3ds_process_pending_actions(void)
                 }
                 case UNIT_ACTION_WAKE:
                     free_unit_orders(punit);
+                    if (punit->ssa_controller != SSA_NONE)
+                        handle_unit_server_side_agent_set(pov, punit->id, SSA_NONE);
                     unit_activity_handling(punit, ACTIVITY_IDLE, ACTION_NONE);
+                    break;
+                case UNIT_ACTION_AUTO_WORK:
+                    // Freeciv's auto-worker picks and does terrain work every
+                    // turn from now on (it runs at turn change).
+                    free_unit_orders(punit);
+                    handle_unit_server_side_agent_set(pov, punit->id, SSA_AUTOWORKER);
                     break;
                 case UNIT_ACTION_PILLAGE: {
                     struct extra_type *t = NULL;   // NULL: the server picks what to pillage
@@ -1642,6 +1654,7 @@ void get_tile_info(int x, int y, TileInfo *out)
                 case ACTIVITY_IDLE:    out->unit_badge = unit_has_orders(punit) ? 'G' : 0; break;
                 default:               out->unit_badge = 'W'; break;
                 }
+                if (punit->ssa_controller == SSA_AUTOWORKER) out->unit_badge = 'A';
                 struct player *pov_p = get_pov_player();
                 out->unit_done = pov_p && unit_owner(punit) == pov_p
                                  && (punit->moves_left <= 0 || out->unit_badge != 0);
@@ -1837,6 +1850,10 @@ int get_city_buildables(int city_id, BuildOption *out, int max)
             const char *uname = utype_name_translation(putype);
             fc_strlcpy(out[n].name, uname ? uname : "?", sizeof(out[n].name));
             out[n].cost = utype_build_shield_cost(pcity, pov, putype);
+            {
+                struct universal tgt = { .kind = VUT_UTYPE, .value.utype = putype };
+                out[n].turns = city_turns_to_build(pcity, &tgt, TRUE);
+            }
             out[n].is_current = (pcity->production.kind == VUT_UTYPE
                                   && pcity->production.value.utype == putype);
             n++;
@@ -1853,6 +1870,10 @@ int get_city_buildables(int city_id, BuildOption *out, int max)
             // Coinage turns shields into gold; its nominal cost (999) means nothing.
             out[n].cost = improvement_has_flag(pimprove, IF_GOLD) ? -1
                                                                    : impr_build_shield_cost(pcity, pimprove);
+            {
+                struct universal tgt = { .kind = VUT_IMPROVEMENT, .value.building = pimprove };
+                out[n].turns = out[n].cost < 0 ? 0 : city_turns_to_build(pcity, &tgt, TRUE);
+            }
             out[n].is_current = (pcity->production.kind == VUT_IMPROVEMENT
                                   && pcity->production.value.building == pimprove);
             n++;

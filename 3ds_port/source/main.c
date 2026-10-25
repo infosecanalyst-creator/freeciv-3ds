@@ -263,6 +263,7 @@ static void build_unit_popup(PopupMenu *m, const UnitInfo *u)
     snprintf(m->title, sizeof(m->title), "%s", u->name);
     static const struct { int kind; const char *label; } items[] = {
         { UNIT_ACTION_FOUND_CITY, "Build City" },
+        { UNIT_ACTION_AUTO_WORK,  "Auto Work" },
         { UNIT_ACTION_JOIN_CITY,  "Join City" },
         { UNIT_ACTION_ROAD,       "Build Road" },
         { UNIT_ACTION_IRRIGATE,   "Irrigate" },
@@ -618,6 +619,23 @@ int main(int argc, char* argv[])
     // Initialize the Freeciv game engine
     init_freeciv(isNew3DS);
 
+    // Newest save (autosave or manual) for the title screen's Continue button.
+    static char continue_file[64], continue_label[48];
+    continue_file[0] = continue_label[0] = 0;
+    {
+        SaveFile newest[1];
+        if (get_save_files(newest, 1) > 0) {
+            snprintf(continue_file, sizeof(continue_file), "%s", newest[0].filename);
+            int turn = 0, year = 0;
+            // freeciv-T0012-Y-3450-auto.sav.gz  (Y-3450 = 3450 BC)
+            if (sscanf(continue_file, "freeciv-T%d-Y%d", &turn, &year) == 2)
+                snprintf(continue_label, sizeof(continue_label), "Turn %d, %d %s", turn,
+                         year < 0 ? -year : year, year < 0 ? "BC" : "AD");
+            else
+                snprintf(continue_label, sizeof(continue_label), "%.40s", continue_file);
+        }
+    }
+
     // Main loop
     while (aptMainLoop())
     {
@@ -683,8 +701,13 @@ int main(int argc, char* argv[])
                         }
                     }
                 } else if (app_state == APP_START_MENU) {
+                    bool cont = continue_file[0] != 0;
+                    int yc = startmenu_slot_y(0, cont), yn = startmenu_slot_y(1, cont), yl = startmenu_slot_y(2, cont);
                     if (px >= STARTMENU_BTN_X && px < STARTMENU_BTN_X + STARTMENU_BTN_W) {
-                        if (py >= STARTMENU_NEW_Y && py < STARTMENU_NEW_Y + STARTMENU_BTN_H) {
+                        if (cont && py >= yc && py < yc + STARTMENU_BTN_H) {
+                            fc3ds_server_begin_load_game(continue_file);
+                            app_state = APP_GAME;
+                        } else if (py >= yn && py < yn + STARTMENU_BTN_H) {
                             bool dev = (kHeld & KEY_L) && (kHeld & KEY_R); // hold both shoulders = dev quick game
                             if (dev) {
                                 fc3ds_server_begin_new_game(true);
@@ -692,7 +715,7 @@ int main(int argc, char* argv[])
                             } else {
                                 app_state = APP_NEW_GAME;
                             }
-                        } else if (py >= STARTMENU_LOAD_Y && py < STARTMENU_LOAD_Y + STARTMENU_BTN_H) {
+                        } else if (py >= yl && py < yl + STARTMENU_BTN_H) {
                             save_file_count = get_save_files(save_files, MAX_SAVE_FILES);
                             load_scroll = 0;
                             app_state = APP_LOAD_PICKER;
@@ -739,7 +762,7 @@ int main(int argc, char* argv[])
             C2D_SceneBegin(bottom);
             C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_BOTTOM, true);
             if (app_state == APP_START_MENU) {
-                render_start_menu();
+                render_start_menu(continue_file[0] ? continue_label : NULL);
             } else if (app_state == APP_NEW_GAME) {
                 char rv[8];
                 snprintf(rv, sizeof(rv), "%d", ng.rivals);

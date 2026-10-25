@@ -304,7 +304,14 @@ void render_diplomacy_panel(int stage, const char *counterpart_name,
 #define STARTMENU_NEW_Y   80
 #define STARTMENU_LOAD_Y  (STARTMENU_NEW_Y + STARTMENU_BTN_H + 20)
 
-void render_start_menu(void);
+// Title-screen buttons, top to bottom: [Continue,] New Game, Load Game.
+// slot 0 = Continue (only when a save exists), 1 = New Game, 2 = Load Game.
+static inline int startmenu_slot_y(int slot, bool has_continue)
+{
+    return has_continue ? 52 + slot * 52 : STARTMENU_NEW_Y + (slot - 1) * (STARTMENU_BTN_H + 20);
+}
+// continue_label: e.g. "Turn 12, 3450 BC" for the newest save, or NULL.
+void render_start_menu(const char *continue_label);
 
 // New Game setup (bottom: rows of  label  [-] value [+], Start/Back;
 // top: summary). Values arrive pre-formatted.
