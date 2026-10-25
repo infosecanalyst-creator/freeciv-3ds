@@ -699,6 +699,15 @@ static void draw_route(const RoutePreview *r, int cam_x, int cam_y, float scale)
     font_draw(lbl, bx + 5, by - 1, 0.852f, 0.42f, 0xFFFFFFFF);
 }
 
+static char s_bar_labels[UNITBAR_MAX][20];
+static int s_bar_n;
+void render_set_unit_bar(const char labels[][20], int n)
+{
+    if (n > UNITBAR_MAX) n = UNITBAR_MAX;
+    for (int i = 0; i < n; i++) snprintf(s_bar_labels[i], sizeof(s_bar_labels[i]), "%s", labels[i]);
+    s_bar_n = n;
+}
+
 static short s_range_x[256], s_range_y[256];
 static int s_range_n;
 void render_set_move_range(const short *xs, const short *ys, int n)
@@ -739,6 +748,15 @@ void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,
             C2D_DrawRectSolid(x + 1, y + T - 2, 0.681f, T - 2, 1, edge);
             C2D_DrawRectSolid(x + 1, y + 1, 0.681f, 1, T - 2, edge);
             C2D_DrawRectSolid(x + T - 2, y + 1, 0.681f, 1, T - 2, edge);
+        }
+    }
+
+    // Quick orders for the selected unit (one tap instead of unit + menu).
+    if (s_bar_n > 0 && !popup) {
+        float bw = 320.0f / s_bar_n;
+        for (int i = 0; i < s_bar_n; i++) {
+            bool more = i == s_bar_n - 1 && strcmp(s_bar_labels[i], "More...") == 0;
+            draw_button(i * bw + 1, UNITBAR_Y, bw - 2, UNITBAR_H, 0.89f, s_bar_labels[i], 0.47f, true, !more && i == 0);
         }
     }
 

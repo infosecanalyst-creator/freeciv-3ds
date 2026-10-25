@@ -56,6 +56,12 @@ int hud_hit_test(int px, int py);
 
 // Bottom screen. unit_x/unit_y is the commanded unit's tile (-1 if none);
 // popup may be NULL. all_moved highlights End Turn.
+// Quick-order bar for the selected unit, just above the HUD row: up to 4
+// buttons (the last is usually "More..."). n = 0 hides it.
+#define UNITBAR_H 24
+#define UNITBAR_Y (HUD_Y - UNITBAR_H - 2)
+#define UNITBAR_MAX 4
+void render_set_unit_bar(const char labels[][20], int n);
 // Squares the selected unit can reach this turn (tinted on the map).
 void render_set_move_range(const short *xs, const short *ys, int n);
 void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,

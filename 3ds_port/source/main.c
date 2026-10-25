@@ -243,6 +243,7 @@ enum { POPUP_NONE, POPUP_UNIT, POPUP_CONFIRM_DISBAND, POPUP_STACK, POPUP_MENU, P
 #define PID_DESELECT    101
 #define PID_DISBAND_ASK 102
 #define PID_OPEN_CITY   (-100)
+#define PID_MORE        (-101)          // quick-order bar: open the full orders menu
 #define PID_YES         1
 #define PID_NO          0
 #define PID_CITY_ACTION 1000            // + Freeciv action id
@@ -522,6 +523,8 @@ int main(int argc, char* argv[])
     int smart_city = -1, smart_x = -1, smart_y = -1;
     char smart_label[40] = "End Turn";
     int want_smart = -1;  // tapped while it offered a decision; handled while !busy
+    // Quick-order bar: popup ids for the visible buttons, and a tapped one.
+    int bar_ids[UNITBAR_MAX]; int bar_n = 0; int bar_tap = -1;
     int pending_goto_x = -1, pending_goto_y = -1; // first tap of a two-tap route
     UnitInfo unit_info;
     memset(&unit_info, 0, sizeof(unit_info));
@@ -566,6 +569,11 @@ int main(int argc, char* argv[])
     // where the server is busy (see fc3ds_server_is_busy() below) and the
     // snapshot can't be safely refreshed.
     TileInfo sel_info;
+    // Long-press "peek": square details on top without acting on the map.
+    int t_hold = 0;                 // frames the stylus has rested without dragging
+    int peek_sx = -1, peek_sy = -1; // screen point to resolve while !busy
+    int peek_timer = 0, peek_x = -1, peek_y = -1;
+    TileInfo peek_info;
     bool have_sel = false;
 
     // City-screen / civ-control modal state (handoff.md goals A/B).
@@ -1026,6 +1034,8 @@ int main(int argc, char* argv[])
             if (kDown & KEY_TOUCH) {
                 touchPosition touch;
                 hidTouchRead(&touch);
+                t_hold = 0;
+                peek_timer = 0; // any new touch puts a peek away
                 t_active = true;
                 t_dragging = false;
                 t_consumed = false;
@@ -1041,6 +1051,12 @@ int main(int argc, char* argv[])
                     t_consumed = !(hit == -1 && popup_kind_was == POPUP_UNIT);
                 } else {
                     int h = hud_hit_test(t_x0, t_y0);
+                    if (h == HUD_NONE && bar_n > 0 && !report_tap
+                        && t_y0 >= UNITBAR_Y && t_y0 < UNITBAR_Y + UNITBAR_H) {
+                        bar_tap = t_x0 * bar_n / 320; // handled below while !busy
+                        if (bar_tap >= bar_n) bar_tap = bar_n - 1;
+                        t_consumed = true;
+                    }
                     if (h == HUD_NONE && report_tap) t_consumed = true;
                     if (h != HUD_NONE) {
                         t_consumed = true;
@@ -1069,6 +1085,11 @@ int main(int argc, char* argv[])
                 hidTouchRead(&touch);
                 int dx = touch.px - t_x0, dy = touch.py - t_y0;
                 if (!t_dragging && abs(dx) + abs(dy) > 8) t_dragging = true;
+                // Held still for ~half a second on the map: peek, don't act.
+                if (!t_dragging && ++t_hold == 30 && t_y0 < UNITBAR_Y && popup_kind == POPUP_NONE) {
+                    peek_sx = t_x0; peek_sy = t_y0;
+                    t_consumed = true;
+                }
                 if (t_dragging) {
                     cam_x = t_cam_x0 - (int)(dx / zoom);
                     cam_y = t_cam_y0 - (int)(dy / zoom);
@@ -1394,6 +1415,23 @@ int main(int argc, char* argv[])
                 }
             }
 
+            // A quick-order bar button: same path as picking it from the
+            // unit's orders menu ("More..." just opens that menu).
+            if (bar_tap >= 0) {
+                int id = bar_tap < bar_n ? bar_ids[bar_tap] : -1;
+                bar_tap = -1;
+                if (selected_unit_id >= 0 && unit_info.valid && id != -1) {
+                    build_unit_popup(&popup, &unit_info);
+                    int ux, uy;
+                    tile_to_screen(unit_info.x, unit_info.y, cam_x, cam_y, zoom, &ux, &uy);
+                    popup_layout(&popup, ux + (int)(15 * zoom), uy + (int)(15 * zoom));
+                    popup_kind = POPUP_UNIT;
+                    if (id != PID_MORE) {
+                        for (int i = 0; i < popup.n; i++) if (popup.id[i] == id) popup_choice = i;
+                    }
+                }
+            }
+
             // A tapped popup item.
             if (popup_choice >= 0 && popup_kind != POPUP_NONE && popup_choice < popup.n) {
                 int id = popup.id[popup_choice];
@@ -1652,6 +1690,15 @@ int main(int argc, char* argv[])
                 }
             }
 
+            if (peek_sx >= 0) {
+                if (screen_to_tile(peek_sx, peek_sy, cam_x, cam_y, zoom, &peek_x, &peek_y)) {
+                    get_tile_info(peek_x, peek_y, &peek_info);
+                    peek_timer = 240; // ~4 s, or until the next touch
+                }
+                peek_sx = peek_sy = -1;
+            }
+            if (peek_timer > 0) peek_timer--;
+
             // Movement range of the commanded unit, recomputed only when it
             // changes (pathfinding is not free on a 3DS).
             {
@@ -1665,6 +1712,32 @@ int main(int argc, char* argv[])
                     render_set_move_range(rx, ry, rn);
                     r_id = id; r_x = unit_info.x; r_y = unit_info.y; r_moves = unit_info.moves_left; r_turn = t;
                 }
+            }
+
+            // Quick-order bar contents: the unit's most useful orders first.
+            bar_n = 0;
+            if (ui_mode == UI_MAP && popup_kind == POPUP_NONE && selected_unit_id >= 0 && unit_info.valid
+                && report_n == 0 && pending_goto_x < 0) {
+                static const struct { int kind; const char *label; } pri[] = {
+                    { UNIT_ACTION_FOUND_CITY, "Build City" }, { UNIT_ACTION_AUTO_WORK, "Auto Work" },
+                    { UNIT_ACTION_JOIN_CITY, "Join City" },   { UNIT_ACTION_FORTIFY, "Fortify" },
+                    { UNIT_ACTION_EXPLORE, "Explore" },       { UNIT_ACTION_IRRIGATE, "Irrigate" },
+                    { UNIT_ACTION_MINE, "Mine" },             { UNIT_ACTION_ROAD, "Road" },
+                    { UNIT_ACTION_SENTRY, "Sentry" },         { UNIT_ACTION_WAKE, "Cancel" },
+                };
+                char labels[UNITBAR_MAX][20];
+                for (int i = 0; i < (int)(sizeof(pri) / sizeof(pri[0])) && bar_n < UNITBAR_MAX - 2; i++) {
+                    if (unit_info.actions & (1u << pri[i].kind)) {
+                        bar_ids[bar_n] = pri[i].kind;
+                        snprintf(labels[bar_n], sizeof(labels[0]), "%s", pri[i].label);
+                        bar_n++;
+                    }
+                }
+                bar_ids[bar_n] = PID_SKIP; snprintf(labels[bar_n], sizeof(labels[0]), "Wait"); bar_n++;
+                bar_ids[bar_n] = PID_MORE; snprintf(labels[bar_n], sizeof(labels[0]), "More..."); bar_n++;
+                render_set_unit_bar(labels, bar_n);
+            } else {
+                render_set_unit_bar(NULL, 0);
             }
 
             // Are any units still waiting for orders? (End Turn lights up.)
@@ -1960,6 +2033,9 @@ int main(int argc, char* argv[])
                 ti.tile = have_sel ? &sel_info : NULL;
                 ti.tile_x = sel_x; ti.tile_y = sel_y;
                 ti.unit = (selected_unit_id >= 0 && unit_info.valid) ? &unit_info : NULL;
+                if (peek_timer > 0) { // long-press details win over the unit card
+                    ti.tile = &peek_info; ti.tile_x = peek_x; ti.tile_y = peek_y; ti.unit = NULL;
+                }
                 ti.stack = stack; ti.stack_n = stack_n;
                 ti.cam_x = cam_x; ti.cam_y = cam_y; ti.zoom = zoom;
                 ti.report = report; ti.report_n = report_n; ti.report_more = report_more;
