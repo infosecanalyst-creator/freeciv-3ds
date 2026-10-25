@@ -2047,11 +2047,11 @@ int main(int argc, char* argv[])
                 ti.tile = have_sel ? &sel_info : NULL;
                 ti.tile_x = sel_x; ti.tile_y = sel_y;
                 ti.unit = (selected_unit_id >= 0 && unit_info.valid) ? &unit_info : NULL;
+                ti.stack = stack; ti.stack_n = stack_n;
                 if (peek_timer > 0) { // long-press details win over the unit card
                     ti.tile = &peek_info; ti.tile_x = peek_x; ti.tile_y = peek_y; ti.unit = NULL;
                     ti.stack = peek_stack; ti.stack_n = peek_stack_n;
                 }
-                ti.stack = stack; ti.stack_n = stack_n;
                 ti.cam_x = cam_x; ti.cam_y = cam_y; ti.zoom = zoom;
                 ti.report = report; ti.report_n = report_n; ti.report_more = report_more;
                 if (popup_kind == POPUP_UNIT) {
