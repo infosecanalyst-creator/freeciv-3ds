@@ -517,6 +517,11 @@ int main(int argc, char* argv[])
     int turn_select_frames = 0;      // keep trying to pick a first unit at turn start
     int done_frames = 0;             // frames the commanded unit has had no moves left
     bool all_moved = false;
+    // Smart End Turn button: what it does right now.
+    enum { SMART_END, SMART_RESEARCH, SMART_PROD } smart_kind = SMART_END;
+    int smart_city = -1, smart_x = -1, smart_y = -1;
+    char smart_label[40] = "End Turn";
+    int want_smart = -1;  // tapped while it offered a decision; handled while !busy
     int pending_goto_x = -1, pending_goto_y = -1; // first tap of a two-tap route
     UnitInfo unit_info;
     memset(&unit_info, 0, sizeof(unit_info));
@@ -1048,6 +1053,8 @@ int main(int argc, char* argv[])
                             set_zoom(zoom_idx - 1, &zoom_idx, &zoom, &cam_x, &cam_y);
                         } else if (h == HUD_ZIN) {
                             set_zoom(zoom_idx + 1, &zoom_idx, &zoom, &cam_x, &cam_y);
+                        } else if (h == HUD_END && smart_kind != SMART_END && !busy) {
+                            want_smart = smart_kind; // open the decision instead of ending the turn
                         } else if (h == HUD_END) {
                             report_seen = get_message_total();
                             end_turn_pending = true; // sent after this frame is drawn (and the map captured)
@@ -1651,6 +1658,33 @@ int main(int argc, char* argv[])
                 int a1, a2, a3;
                 moved_refresh = 0;
                 all_moved = !find_next_idle_unit(-1, skip_ids, nskip, &a1, &a2, &a3);
+                char cname[32];
+                smart_city = get_pending_production(cname, sizeof(cname), &smart_x, &smart_y);
+                if (research_needs_choice()) {
+                    smart_kind = SMART_RESEARCH;
+                    snprintf(smart_label, sizeof(smart_label), "Choose Research");
+                } else if (smart_city >= 0) {
+                    smart_kind = SMART_PROD;
+                    snprintf(smart_label, sizeof(smart_label), "%.16s: Build", cname);
+                } else {
+                    smart_kind = SMART_END;
+                    snprintf(smart_label, sizeof(smart_label), "End Turn");
+                }
+            }
+            // A decision the smart button offered was tapped.
+            if (want_smart >= 0) {
+                if (want_smart == SMART_RESEARCH) {
+                    ui_mode = UI_RESEARCH; ui_scroll = 0; ui_tech_tree_view = false;
+                } else if (want_smart == SMART_PROD && smart_city >= 0) {
+                    dismiss_pending_production(smart_city);
+                    ui_mode = UI_CITY;
+                    ui_city_id = smart_city;
+                    ui_scroll = 0; ui_garrison_sel = 0;
+                    ui_worklist_queue_mode = false; ui_city_tab = CITY_TAB_BUILD; city_sell_armed = -1;
+                    popup_kind = POPUP_NONE;
+                }
+                want_smart = -1;
+                moved_refresh = 20; // re-evaluate the button straight away
             }
 
             // The units on the selected tile, for the top screen.
@@ -1968,7 +2002,7 @@ int main(int argc, char* argv[])
                                   armed && unit_info.moves_left > 0, gx, gy,
                                   popup_kind != POPUP_NONE ? &popup : NULL,
                                   zoom_idx > 0, zoom_idx < ZOOM_COUNT - 1, all_moved,
-                                  pending_goto_x >= 0 ? &route : NULL);
+                                  pending_goto_x >= 0 ? &route : NULL, smart_label);
                 cap_valid = true; // shown, with the banner, until this step finishes
             }
             capture_next = false;
@@ -2033,7 +2067,7 @@ int main(int argc, char* argv[])
                                       armed && unit_info.moves_left > 0, gx, gy,
                                       popup_kind != POPUP_NONE ? &popup : NULL,
                                       zoom_idx > 0, zoom_idx < ZOOM_COUNT - 1, all_moved,
-                                      pending_goto_x >= 0 ? &route : NULL);
+                                      pending_goto_x >= 0 ? &route : NULL, smart_label);
                     if (save_toast_frames > 0) render_toast("Saved");
                 }
                 break;

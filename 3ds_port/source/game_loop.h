@@ -451,6 +451,12 @@ typedef struct {
 } GameMessage;
 // Total messages received so far (a running counter, never reset).
 int get_message_total(void);
+// Smart End Turn button. A city that finished something this turn, oldest
+// first: returns its id (or -1) and fills its name and map position.
+int get_pending_production(char *name, int len, int *x, int *y);
+void dismiss_pending_production(int city_id);
+// True when nothing is being researched (the player should pick).
+bool research_needs_choice(void);
 // Copies message number `index` (0 = first ever) if it's still in the log.
 bool get_message(int index, GameMessage *out);
 #define MESSAGE_LOG_SIZE 128

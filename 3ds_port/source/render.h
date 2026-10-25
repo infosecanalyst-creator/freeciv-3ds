@@ -59,7 +59,7 @@ int hud_hit_test(int px, int py);
 void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,
                        int unit_x, int unit_y, bool unit_can_move, int goto_x, int goto_y,
                        const PopupMenu *popup, bool can_zoom_out, bool can_zoom_in, bool all_moved,
-                       const RoutePreview *route);
+                       const RoutePreview *route, const char *end_label);
 
 // Top screen contents.
 typedef struct {

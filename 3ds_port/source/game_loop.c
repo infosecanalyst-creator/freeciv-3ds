@@ -596,6 +596,44 @@ static bool message_wanted(enum event_type e)
 
 // Called from server/notify.c (see port-patches) for every event addressed
 // to a player; runs on the server thread.
+#define PROD_PENDING_MAX 16
+static int s_prod_pending[PROD_PENDING_MAX];
+static int s_prod_n;
+
+int get_pending_production(char *name, int len, int *x, int *y)
+{
+    struct player *pov = get_pov_player();
+    while (s_prod_n > 0) {
+        struct city *pc = game_city_by_number(s_prod_pending[0]);
+        if (pov && pc && city_owner(pc) == pov) {
+            fc_strlcpy(name, city_name_get(pc), len);
+            index_to_native_pos(x, y, tile_index(city_tile(pc)));
+            return pc->id;
+        }
+        memmove(s_prod_pending, s_prod_pending + 1, (--s_prod_n) * sizeof(int)); // city gone
+    }
+    return -1;
+}
+
+void dismiss_pending_production(int city_id)
+{
+    for (int i = 0; i < s_prod_n; i++) {
+        if (s_prod_pending[i] == city_id) {
+            memmove(s_prod_pending + i, s_prod_pending + i + 1, (s_prod_n - i - 1) * sizeof(int));
+            s_prod_n--;
+            return;
+        }
+    }
+}
+
+bool research_needs_choice(void)
+{
+    struct player *pov = get_pov_player();
+    if (!pov) return false;
+    const struct research *r = research_get(pov);
+    return r && (r->researching == A_UNSET || r->researching == A_UNKNOWN);
+}
+
 void freeciv3ds_event_hook(const struct packet_chat_msg *packet, int pidx)
 {
     struct player *pov = get_pov_player();
@@ -631,6 +669,19 @@ void freeciv3ds_event_hook(const struct packet_chat_msg *packet, int pidx)
         if (t) index_to_native_pos(&m->x, &m->y, tile_index(t));
     }
     s_msg_total++;
+
+    // A city finished something (or its plan ran out): queue it for the
+    // smart End Turn button's "Choose production" step.
+    if ((e == E_IMP_BUILD || e == E_UNIT_BUILT || e == E_UNIT_BUILT_POP_COST || e == E_WORKLIST
+         || e == E_IMP_AUTO || e == E_CITY_CANTBUILD) && packet->tile >= 0) {
+        struct tile *t = index_to_tile(&(wld.map), packet->tile);
+        struct city *pc = t ? tile_city(t) : NULL;
+        if (pc && city_owner(pc) == pov) {
+            bool have = false;
+            for (int i = 0; i < s_prod_n; i++) if (s_prod_pending[i] == pc->id) have = true;
+            if (!have && s_prod_n < PROD_PENDING_MAX) s_prod_pending[s_prod_n++] = pc->id;
+        }
+    }
 
     // Hear it when you're attacked, and when a wonder is finished.
     if (e == E_UNIT_LOST_DEF || e == E_UNIT_WIN_DEF || e == E_CITY_LOST) push_sound("f_generic");

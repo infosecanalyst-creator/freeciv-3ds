@@ -702,7 +702,7 @@ static void draw_route(const RoutePreview *r, int cam_x, int cam_y, float scale)
 void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,
                        int unit_x, int unit_y, bool unit_can_move, int goto_x, int goto_y,
                        const PopupMenu *popup, bool can_zoom_out, bool can_zoom_in, bool all_moved,
-                       const RoutePreview *route)
+                       const RoutePreview *route, const char *end_label)
 {
     render_map_view(cam_x, cam_y, scale, 320, 240, sel_x, sel_y, unit_x >= 0, goto_x, goto_y);
     draw_route(route, cam_x, cam_y, scale);
@@ -741,7 +741,18 @@ void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,
     draw_button(HUD_NEXT_X, by, HUD_NEXT_W, bh, Z, "Next", 0.5f, !all_moved, false);
     draw_button(HUD_ZOUT_X, by, HUD_ZOOM_W, bh, Z, "-", 0.7f, can_zoom_out, false);
     draw_button(HUD_ZIN_X,  by, HUD_ZOOM_W, bh, Z, "+", 0.7f, can_zoom_in, false);
-    draw_button(HUD_END_X,  by, HUD_END_W,  bh, Z, "End Turn", 0.5f, true, all_moved);
+    // The smart button: "Choose Research" / "Wien: Production" / "End Turn".
+    bool decision = end_label && strcmp(end_label, "End Turn") != 0;
+    if (decision) {
+        // amber, so a pending decision reads differently from a plain End Turn
+        C2D_DrawRectSolid(HUD_END_X, by, Z, HUD_END_W, bh, C2D_Color32(0x8A, 0x5A, 0x10, 0xF0));
+        C2D_DrawRectSolid(HUD_END_X, by, Z + 0.001f, HUD_END_W, 2, C2D_Color32(0xFF, 0xC8, 0x50, 0xFF));
+        float s2 = 0.5f, tw = text_width(end_label, s2);
+        while (tw > HUD_END_W - 6 && s2 > 0.32f) { s2 -= 0.02f; tw = text_width(end_label, s2); }
+        draw_text_z(HUD_END_X + (HUD_END_W - tw) / 2, by + (bh - 30 * s2) / 2 + 1, Z + 0.002f, s2, 0xFFFFFFFF, end_label);
+    } else {
+        draw_button(HUD_END_X, by, HUD_END_W, bh, Z, "End Turn", 0.5f, true, all_moved);
+    }
 
     if (popup) draw_popup(popup);
 }
