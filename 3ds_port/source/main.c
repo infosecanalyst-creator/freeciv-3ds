@@ -474,7 +474,9 @@ int main(int argc, char* argv[])
     C3D_RenderTarget *cap = C3D_RenderTargetCreateFromTex(&cap_tex, GPU_TEXFACE_2D, 0, GPU_RB_DEPTH16);
     static const Tex3DS_SubTexture cap_sub = { 320, 240, 0.0f, 1.0f, 320.0f / 512.0f, 1.0f - 240.0f / 256.0f };
     C2D_Image cap_img = { &cap_tex, &cap_sub };
-    bool have_cap = false;
+    bool cap_valid = false;    // cap_tex holds the map as it was when this step began
+    bool capture_next = false; // set by End Turn / Save: capture the map this frame
+    bool end_turn_pending = false;
     int busy_frames = 0;
 
     AppState app_state = APP_START_MENU;
@@ -777,7 +779,8 @@ int main(int argc, char* argv[])
 
         if (ui_mode == UI_MAP && (kDown & KEY_START) && !(kHeld & KEY_SELECT)) {
             report_seen = get_message_total();
-            fc3ds_server_request_end_turn();
+            end_turn_pending = true; // sent after this frame is drawn (and the map captured)
+            capture_next = true;
             popup_kind = POPUP_NONE;
             pending_goto_x = pending_goto_y = -1;
         }
@@ -991,7 +994,8 @@ int main(int argc, char* argv[])
                             set_zoom(zoom_idx + 1, &zoom_idx, &zoom, &cam_x, &cam_y);
                         } else if (h == HUD_END) {
                             report_seen = get_message_total();
-                            fc3ds_server_request_end_turn();
+                            end_turn_pending = true; // sent after this frame is drawn (and the map captured)
+                            capture_next = true;
                             pending_goto_x = pending_goto_y = -1;
                         }
                     }
@@ -1408,6 +1412,7 @@ int main(int argc, char* argv[])
                         freeciv_request_save_game();
                         save_toast_frames = SAVE_TOAST_FRAMES;
                         save_in_flight = true;
+                        capture_next = true;
                         break;
                     case MENU_MUSIC:
                     case MENU_EFFECTS:
@@ -1767,7 +1772,10 @@ int main(int argc, char* argv[])
         busy_frames = busy ? busy_frames + 1 : 0;
         // Full-screen page only while the world is first generated (no map
         // yet); otherwise the captured map stays up with a bottom banner.
-        bool full_overlay = busy && ui_mode == UI_MAP && (!fc3ds_server_is_ready() || !have_cap || !cap);
+        // A long step with no captured picture (e.g. a move that triggered
+        // something slow) still gets the brief banner over a dark screen
+        // rather than the old full-screen page, except for world generation.
+        bool full_overlay = busy && ui_mode == UI_MAP && !fc3ds_server_is_ready();
         bool show_busy_indicator = busy && ui_mode != UI_MAP;
         bool map_screen = !(game_over && !game_over_shown) && ui_mode == UI_MAP;
 
@@ -1892,8 +1900,8 @@ int main(int argc, char* argv[])
 
             // Map screen: draw into the capture texture (only while the map
             // can be read), then show the texture below.
-            bool drew_cap = false;
-            if (map_screen && cap && !busy) {
+            if (!busy) cap_valid = false;
+            if (map_screen && cap && !busy && capture_next) {
                 C2D_TargetClear(cap, C2D_Color32(0x10, 0x10, 0x10, 0xFF));
                 C2D_SceneBegin(cap);
                 int gx = pending_goto_x >= 0 ? pending_goto_x : ui_goto_x;
@@ -1905,9 +1913,9 @@ int main(int argc, char* argv[])
                                   popup_kind != POPUP_NONE ? &popup : NULL,
                                   zoom_idx > 0, zoom_idx < ZOOM_COUNT - 1, all_moved,
                                   pending_goto_x >= 0 ? &route : NULL);
-                if (save_toast_frames > 0) render_toast("Saved");
-                have_cap = drew_cap = true;
+                cap_valid = true; // shown, with the banner, until this step finishes
             }
+            capture_next = false;
 
             C2D_TargetClear(bottom, C2D_Color32(0x10, 0x10, 0x10, 0xFF)); // Dark gray
             C2D_SceneBegin(bottom);
@@ -1954,20 +1962,34 @@ int main(int argc, char* argv[])
                 break;
             case UI_MAP:
             default:
-                if (have_cap) {
-                    C2D_DrawImageAt(cap_img, 0, 0, 0.0f, NULL, 1.0f, 1.0f);
-                    // Brief steps (a unit move) finish in a frame or two;
-                    // only a real wait gets the banner.
-                    if (busy && busy_frames > 6)
+                if (busy) {
+                    // Last picture of the map (captured when End Turn / Save
+                    // was pressed), with the banner once the wait is real.
+                    if (cap_valid) C2D_DrawImageAt(cap_img, 0, 0, 0.0f, NULL, 1.0f, 1.0f);
+                    if (busy_frames > 6)
                         render_turn_banner(save_in_flight ? PROC_SAVING : PROC_TURN, busy_frames);
+                } else {
+                    int gx = pending_goto_x >= 0 ? pending_goto_x : ui_goto_x;
+                    int gy = pending_goto_x >= 0 ? pending_goto_y : ui_goto_y;
+                    bool armed = selected_unit_id >= 0 && unit_info.valid;
+                    render_bottom_map(cam_x, cam_y, zoom, sel_x, sel_y,
+                                      armed ? unit_info.x : -1, armed ? unit_info.y : -1,
+                                      armed && unit_info.moves_left > 0, gx, gy,
+                                      popup_kind != POPUP_NONE ? &popup : NULL,
+                                      zoom_idx > 0, zoom_idx < ZOOM_COUNT - 1, all_moved,
+                                      pending_goto_x >= 0 ? &route : NULL);
+                    if (save_toast_frames > 0) render_toast("Saved");
                 }
-                (void)drew_cap;
                 break;
             }
             if (show_busy_indicator) render_busy_indicator(SCREEN_WIDTH_BOT);
         }
 
         C3D_FrameEnd(0);
+        if (end_turn_pending) {
+            end_turn_pending = false;
+            fc3ds_server_request_end_turn();
+        }
     }
 
     // Exit path.
