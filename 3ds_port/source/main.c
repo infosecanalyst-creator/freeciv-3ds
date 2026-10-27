@@ -620,6 +620,7 @@ int main(int argc, char* argv[])
     bool ui_worklist_queue_mode = false; // NOW (false) / QUEUE (true) toggle, reset per city open (handoff.md §6)
     int ui_dipl_stage = 1; // 1=player picker, 2=clause editor (handoff.md §7.4)
     int ui_city_tab = CITY_TAB_BUILD;
+    int msg_sel = -1;        // Messages: the row tapped once (shown in full on top)
     bool from_smart = false; // panel opened by the End Turn button: close after the pick
     bool quit_now = false;   // Menu -> Quit / Save & Quit finished
     bool buy_armed = false;  // Buy tapped once; a second tap spends the gold
@@ -680,13 +681,9 @@ int main(int argc, char* argv[])
         SaveFile newest[1];
         if (get_save_files(newest, 1) > 0) {
             snprintf(continue_file, sizeof(continue_file), "%s", newest[0].filename);
-            int turn = 0, year = 0;
-            // freeciv-T0012-Y-3450-auto.sav.gz  (Y-3450 = 3450 BC)
-            if (sscanf(continue_file, "freeciv-T%d-Y%d", &turn, &year) == 2)
-                snprintf(continue_label, sizeof(continue_label), "Turn %d, %d %s", turn,
-                         year < 0 ? -year : year, year < 0 ? "BC" : "AD");
-            else
-                snprintf(continue_label, sizeof(continue_label), "%.40s", continue_file);
+            save_file_label(continue_file, continue_label, sizeof(continue_label));
+            char *paren = strstr(continue_label, "  ("); // the title row is narrow
+            if (paren) *paren = 0;
         }
     }
     if (continue_file[0]) title_sel = TI_CONTINUE; // the likeliest choice, chosen already
@@ -962,6 +959,7 @@ int main(int argc, char* argv[])
             // D-Pad up/down scrolls the open list; B closes the panel.
             if ((kDown & KEY_DUP) && ui_scroll > 0) ui_scroll--; // never negative, even mid-step
             if (kDown & KEY_DDOWN) ui_scroll++;
+            if (kDown & (KEY_DUP | KEY_DDOWN)) msg_sel = -1; // the top follows the scroll again
             if (kDown & KEY_B) {
                 // B always fully exits to UI_MAP (universal escape hatch,
                 // same as every other panel) - but from the diplomacy
@@ -1352,6 +1350,9 @@ int main(int argc, char* argv[])
                     // as the grey/dim boxes being drawn non-tappable.
                     if (idx >= 0 && ui_tech_tree[idx].state == 1) {
                         freeciv_request_set_research(ui_tech_tree[idx].tech);
+                        if (from_smart) ui_mode = UI_MAP;
+                    } else if (idx >= 0 && ui_tech_tree[idx].state == 0) {
+                        freeciv_request_set_goal(ui_tech_tree[idx].tech); // the steps follow on their own
                     } else if (idx < 0 && py >= PANEL_FOOTER_Y) {
                         if (px < 160) { ui_tech_tree_view = false; ui_scroll = 0; } // "List view"
                         else ui_mode = UI_MAP;
@@ -1463,8 +1464,10 @@ int main(int argc, char* argv[])
                 }
             } else if (ui_mode == UI_MESSAGES) {
                 int row = hit_test_scroll_list(py, ui_scroll, msg_view_n);
-                if (row >= 0) {
-                    if (msg_view[row].x >= 0) {
+                if (row >= 0 && row != msg_sel) {
+                    msg_sel = row;               // first tap: read it in full on top
+                } else if (row >= 0) {
+                    if (msg_view[row].x >= 0) {  // second tap: go there
                         sel_x = msg_view[row].x; sel_y = msg_view[row].y;
                         prev_sel_x = sel_x; prev_sel_y = sel_y;
                         center_on_tile(sel_x, sel_y, zoom, &cam_x, &cam_y);
@@ -1672,7 +1675,7 @@ int main(int argc, char* argv[])
                     case MENU_RATES:      ui_mode = UI_RATES; ui_scroll = 0; break;
                     case MENU_GOVERNMENT: ui_mode = UI_GOVERNMENT; ui_scroll = 0; gov_armed = -1; break;
                     case MENU_DIPLOMACY:  ui_mode = UI_DIPLOMACY; ui_scroll = 0; ui_dipl_stage = 1; break;
-                    case MENU_MESSAGES:   ui_mode = UI_MESSAGES; ui_scroll = 0; break;
+                    case MENU_MESSAGES:   ui_mode = UI_MESSAGES; ui_scroll = 0; msg_sel = -1; break;
                     case MENU_SPACESHIP:  ui_mode = UI_SPACESHIP; break;
                     case MENU_TEXT:
                         font_set_bias(font_get_bias() ? 0 : 1);
@@ -2070,13 +2073,7 @@ int main(int argc, char* argv[])
                     // Scroll counts tier-rows (a consecutive same-tier run in
                     // the tier-sorted array - see TechNode's comment), not
                     // techs, so clamp against the row count, not the tech count.
-                    int tier_rows = 0, last_tier = -1;
-                    for (int i = 0; i < ui_tech_tree_count; i++) {
-                        if (ui_tech_tree[i].tier != last_tier) {
-                            tier_rows++;
-                            last_tier = ui_tech_tree[i].tier;
-                        }
-                    }
+                    int tier_rows = techtree_display_rows(ui_tech_tree, ui_tech_tree_count);
                     int max_scroll = tier_rows > PANEL_ROWS_VISIBLE ? tier_rows - PANEL_ROWS_VISIBLE : 0;
                     if (ui_scroll < 0) ui_scroll = 0;
                     if (ui_scroll > max_scroll) ui_scroll = max_scroll;
@@ -2245,7 +2242,10 @@ int main(int argc, char* argv[])
                                  pedia_sel >= 0 ? pedia_icon_tag : NULL, pedia_icon_alt, pedia_icon_unit);
                 break;
             case UI_MESSAGES:
-                render_messages_top(msg_view_n > 0 ? &msg_view[ui_scroll < msg_view_n ? ui_scroll : 0] : NULL);
+                {
+                    int mi = msg_sel >= 0 && msg_sel < msg_view_n ? msg_sel : ui_scroll < msg_view_n ? ui_scroll : 0;
+                    render_messages_top(msg_view_n > 0 ? &msg_view[mi] : NULL);
+                }
                 break;
             case UI_MAP:
             default:
@@ -2281,22 +2281,22 @@ int main(int argc, char* argv[])
                 } else if (popup_kind != POPUP_NONE) {
                     ti.hint = "Tap a choice, or tap outside the menu to close it.";
                 } else if (pending_goto_x >= 0) {
-                    ti.hint = route.reachable ? "Tap the marked tile again to send the unit there.  B: cancel"
+                    ti.hint = route.reachable ? "Tap the marked square again to go there.  B: cancel"
                                               : "No way to get there from here.  B: cancel";
                     ti.hint_color = C2D_Color32(0xFF, 0xC0, 0x40, 0xFF);
                 } else if (selected_unit_id >= 0 && unit_info.valid) {
                     ti.hint = unit_info.moves_left > 0
-                        ? "Tap next to it: move.  Farther: route.  Tap the unit: orders."
-                        : "No moves left. Tap it for orders, or Next.";
+                        ? "Tap next to it: move.  Farther: route.  Tap it: all orders."
+                        : "No moves left.  Tap it for orders, or Next.";
                     ti.hint_color = C2D_Color32(0xFF, 0xF0, 0x80, 0xFF);
                 } else if (all_moved) {
-                    ti.hint = "Every unit has its orders - tap End Turn (or START).";
+                    ti.hint = "Every unit has its orders: tap End Turn (or START).";
                     ti.hint_color = C2D_Color32(0x90, 0xE8, 0x90, 0xFF);
                 } else {
-                    ti.hint = "Tap a unit to command it. Drag to scroll. Next / A: next unit.";
+                    ti.hint = "Tap a unit or city.  Drag to scroll.  Hold: details.";
                 }
                 if (peek_timer > 0) {
-                    ti.hint = "Square details (held stylus). Tap anywhere to carry on.";
+                    ti.hint = "Square details.  Tap anywhere to carry on.";
                     ti.hint_color = C2D_Color32(0xB0, 0xD8, 0xFF, 0xFF);
                 }
                 render_top_info(&ti);
@@ -2348,6 +2348,7 @@ int main(int argc, char* argv[])
                 break;
             case UI_RESEARCH:
                 if (ui_tech_tree_view) {
+                    render_set_tech_goal(ui_civ_info.goal);
                     render_tech_tree_panel(ui_tech_tree, ui_tech_tree_count, ui_scroll);
                 } else {
                     render_research_panel(ui_tech_opts, ui_tech_count, ui_scroll);
@@ -2367,7 +2368,7 @@ int main(int argc, char* argv[])
                 render_pedia_panel(pedia_kind, pedia_list, pedia_n, ui_scroll, pedia_sel);
                 break;
             case UI_MESSAGES:
-                render_messages_panel(msg_view, msg_view_n, ui_scroll, ui_scroll);
+                render_messages_panel(msg_view, msg_view_n, ui_scroll, msg_sel >= 0 ? msg_sel : ui_scroll);
                 break;
             case UI_DIPLOMACY:
                 render_diplomacy_panel(ui_dipl_stage, ui_dipl_counterpart_name,

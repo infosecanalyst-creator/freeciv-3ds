@@ -160,8 +160,8 @@ void render_toast(const char *text);
 // these same rects, so draw and hit-test never drift apart.
 #define PANEL_HEADER_H     30
 #define PANEL_LIST_Y       90
-#define PANEL_ROW_H        20
-#define PANEL_ROWS_VISIBLE 6
+#define PANEL_ROW_H        24   // a comfortable stylus target
+#define PANEL_ROWS_VISIBLE 5
 #define PANEL_FOOTER_Y     (PANEL_LIST_Y + PANEL_ROW_H * PANEL_ROWS_VISIBLE) // 210
 
 // One already-formatted, already-scrolled-into-view row for draw_scroll_list()
@@ -263,10 +263,12 @@ void render_research_panel(const TechOption *opts, int n, int scroll);
 // tier-rows, not techs - a different unit from the flat list's scroll, so
 // main.c resets it to 0 when toggling views.
 #define TECHTREE_TIER_LABEL_W      28
-#define TECHTREE_BOX_W             58
-#define TECHTREE_BOX_GAP           2
-// (320 - 8 left margin - TECHTREE_TIER_LABEL_W) / (BOX_W + GAP), floored.
-#define TECHTREE_MAX_BOXES_PER_ROW 4
+#define TECHTREE_BOX_W             92
+#define TECHTREE_BOX_GAP           3
+#define TECHTREE_PER_ROW           3   // a tier with more techs wraps onto more rows
+// Display rows the tree needs (the scroll unit), and the goal box to ring.
+int techtree_display_rows(const TechNode *nodes, int n);
+void render_set_tech_goal(int tech);
 void render_tech_tree_panel(const TechNode *nodes, int n, int scroll);
 
 // Hit-tests a bottom-screen tap against the tiered tech-tree view above.
@@ -377,6 +379,8 @@ void render_new_game_top(bool is_new_3ds, const char *summary);
 // unchanged - same "draw and hit-test share one set of constants" rule as
 // every other scrollable list panel.
 #define MAX_SAVE_FILES 32
+// Friendly name for a save file ("Turn 12, 3450 BC  (autosave)").
+void save_file_label(const char *fn, char *out, int n);
 void render_load_picker(const SaveFile *files, int n, int scroll);
 
 // Message log (Menu > Messages): bottom list newest first, top shows the

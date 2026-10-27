@@ -307,6 +307,7 @@ typedef enum {
     CMD_CITY_PRODUCTION,  // a=city_id, b=universals_n kind, c=value
     CMD_CITY_BUY,         // a=city_id
     CMD_SET_RESEARCH,     // a=tech id
+    CMD_SET_GOAL,         // a=tech id (research goal: the path is followed automatically)
     CMD_SET_RATES,        // a=tax, b=lux, c=sci
     CMD_SET_GOVERNMENT,   // a=government id (Government_type_id)
     CMD_CITY_WORKLIST_APPEND,  // a=city_id, b=universals_n kind, c=value
@@ -412,6 +413,11 @@ void freeciv_request_city_buy(int city_id)
 void freeciv_request_set_research(int tech)
 {
     enqueue_cmd(CMD_SET_RESEARCH, tech, 0, 0, 0);
+}
+
+void freeciv_request_set_goal(int tech)
+{
+    enqueue_cmd(CMD_SET_GOAL, tech, 0, 0, 0);
 }
 
 void freeciv_request_set_rates(int tax, int lux, int sci)
@@ -1575,6 +1581,9 @@ void freeciv3ds_process_pending_actions(void)
         case CMD_SET_RESEARCH:
             handle_player_research(pov, cmd.a);
             break;
+        case CMD_SET_GOAL:
+            handle_player_tech_goal(pov, cmd.a);
+            break;
         case CMD_SET_RATES:
             handle_player_rates(pov, cmd.a, cmd.b, cmd.c);
             break;
@@ -1637,7 +1646,7 @@ void freeciv3ds_process_pending_actions(void)
             // pass. cwd is already sdmc:/3ds/freeciv/saves (init_freeciv(),
             // game_loop.c), so this bare filename lands there.
             char name[64];
-            fc_snprintf(name, sizeof(name), "3ds-T%d", game.info.turn);
+            fc_snprintf(name, sizeof(name), "3ds-T%04d-Y%d", game.info.turn, game.info.year); // read back by save_file_label()
             save_game(name, "User request", FALSE);
             break;
         }
@@ -1886,6 +1895,11 @@ void get_city_info(int city_id, CityInfo *out)
     out->prod_cost = city_production_build_shield_cost(pcity);
     out->prod_turns = city_production_turns_to_build(pcity, TRUE);
     out->grow_turns = city_turns_to_grow(pcity);
+    out->happy = pcity->feel[CITIZEN_HAPPY][FEELING_FINAL];
+    out->content = pcity->feel[CITIZEN_CONTENT][FEELING_FINAL];
+    out->unhappy = pcity->feel[CITIZEN_UNHAPPY][FEELING_FINAL];
+    out->angry = pcity->feel[CITIZEN_ANGRY][FEELING_FINAL];
+    out->disorder = pcity->anarchy > 0 || city_unhappy(pcity);
 
     // Mirrors really_handle_city_buy()'s (server/cityhand.c) validity checks,
     // without performing the buy - so the panel can hide/disable the Buy
@@ -2013,6 +2027,7 @@ void get_civ_info(CivInfo *out)
     }
 
     out->gold = pov->economic.gold;
+    out->gold_per_turn = player_get_expected_income(pov);
     out->tax = pov->economic.tax;
     out->lux = pov->economic.luxury;
     out->sci = pov->economic.science;
@@ -2020,6 +2035,7 @@ void get_civ_info(CivInfo *out)
 
     struct research *research = research_get(pov);
     out->researching = research->researching;
+    out->goal = research->tech_goal;
     const char *rname = research_advance_name_translation(research, research->researching);
     if (rname) {
         fc_strlcpy(out->research_name, rname, sizeof(out->research_name));
@@ -2202,6 +2218,10 @@ int get_researchable(TechOption *out, int max)
         return 0;
     }
     struct research *research = research_get(pov);
+    int bpt = 0;
+    city_list_iterate(pov->cities, pcity) {
+        bpt += pcity->surplus[O_SCIENCE];
+    } city_list_iterate_end;
 
     int n = 0;
     advance_iterate(padvance) {
@@ -2211,6 +2231,11 @@ int get_researchable(TechOption *out, int max)
             out[n].tech = tech;
             const char *tname = research_advance_name_translation(research, tech);
             fc_strlcpy(out[n].name, tname ? tname : "?", sizeof(out[n].name));
+            out[n].current = research->researching == tech;
+            int need = research_total_bulbs_required(research, tech, FALSE);
+            if (out[n].current) need -= research->bulbs_researched;
+            if (need < 0) need = 0;
+            out[n].turns = bpt > 0 ? (need + bpt - 1) / bpt : -1;
             n++;
         }
     } advance_iterate_end;

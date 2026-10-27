@@ -924,7 +924,7 @@ void render_top_info(const TopInfo *ti)
         snprintf(line, sizeof(line), "Turn %d", turn);
         draw_text(5, 1, 0.52f, white, line);
         if (ti->civ) {
-            snprintf(line, sizeof(line), "Gold %d", ti->civ->gold);
+            snprintf(line, sizeof(line), "Gold %d (%+d)", ti->civ->gold, ti->civ->gold_per_turn);
             draw_text(78, 1, 0.52f, gold, line);
             snprintf(line, sizeof(line), "%s  Tax %d Lux %d Sci %d", ti->civ->government_name,
                      ti->civ->tax, ti->civ->lux, ti->civ->sci);
@@ -1011,8 +1011,7 @@ void render_top_info(const TopInfo *ti)
         }
     } else if (ti->tile && ti->tile_x >= 0) {
         const TileInfo *t = ti->tile;
-        snprintf(line, sizeof(line), "Tile %d, %d", ti->tile_x, ti->tile_y);
-        draw_text(CX + 2, 28, 0.45f, label, line);
+        draw_text(CX + 2, 28, 0.45f, label, "This square");
         if (t->visibility == 0) {
             draw_text(CX + 2, 46, 0.6f, soft, "Unexplored");
         } else {
@@ -1066,7 +1065,7 @@ void render_top_info(const TopInfo *ti)
         // Shrink long hints (e.g. combat odds with long unit names) to fit the strip.
         float hs = 0.45f, w = text_width(ti->hint, hs);
         if (w > 390) hs = hs * 390 / w;
-        if (hs < 0.34f) hs = 0.34f;
+        if (hs < 0.40f) hs = 0.40f; // legibility floor: hints are written to fit
         draw_text(5, 240 - 16 + (0.45f - hs) * 14, hs, ti->hint_color ? ti->hint_color : soft, ti->hint);
     }
 }
@@ -1340,10 +1339,10 @@ static void draw_city_banners(void)
         // Your cities: what's being built and in how many turns, at the
         // closer zoom levels (Civ Rev / Civ VI style).
         if (b->prod[0] && TILE_PX * s_ms >= 22) {
-            float pw = font_width(b->prod, 0.34f) + 6, ph = 11;
+            float pw = font_width(b->prod, 0.38f) + 6, ph = 12;
             float px = floorf(b->x - pw / 2), py = y + h + 1;
             C2D_DrawRectSolid(px, py, 0.80f, pw, ph, C2D_Color32(0x0C, 0x12, 0x1E, 0xD0));
-            font_draw(b->prod, px + 3, py - 2.5f, 0.803f, 0.34f, C2D_Color32(0xF0, 0xC0, 0x70, 0xFF));
+            font_draw(b->prod, px + 3, py - 2.5f, 0.803f, 0.38f, C2D_Color32(0xF0, 0xC0, 0x70, 0xFF));
         }
     }
 }
@@ -1682,6 +1681,25 @@ void render_city_top(const CityInfo *info, int garrison_sel)
     float sw = text_width(line, 0.55f);
     C2D_DrawRectSolid(392 - sw - 12, 6, 0.01f, sw + 12, 20, oc);
     draw_text_z(392 - sw - 6, 4, 0.02f, 0.55f, contrast_text(oc), line);
+    // Mood, left of the size badge: disorder is the classic early surprise.
+    {
+        char mood[64];
+        float right = 392 - sw - 20, nw = text_width(info->name[0] ? info->name : "?", 0.85f) + 22;
+        if (info->disorder) {
+            snprintf(mood, sizeof(mood), "DISORDER");
+            float mw = text_width(mood, 0.5f) + 10;
+            C2D_DrawRectSolid(right - mw, 7, 0.01f, mw, 18, C2D_Color32(0xC0, 0x30, 0x28, 0xFF));
+            draw_text_z(right - mw + 5, 6, 0.02f, 0.5f, 0xFFFFFFFF, mood);
+        } else {
+            snprintf(mood, sizeof(mood), "%d happy  %d content  %d unhappy",
+                     info->happy, info->content, info->unhappy + info->angry);
+            float ms = 0.45f;
+            while (ms > 0.4f && text_width(mood, ms) > right - nw) ms -= 0.01f;
+            if (text_width(mood, ms) <= right - nw)
+                draw_text_z(right - text_width(mood, ms), 8, 0.02f, ms,
+                            info->unhappy + info->angry > info->happy ? C2D_Color32(0xFF, 0xB0, 0x70, 0xFF) : soft, mood);
+        }
+    }
 
     // Left column: yields, growth, production.
     layer(2.5f);
@@ -1757,7 +1775,7 @@ void draw_scroll_list(int x, const ScrollRow *rows, int count)
 {
     for (int i = 0; i < count; i++) {
         float y = PANEL_LIST_Y + i * PANEL_ROW_H;
-        draw_text(x, y + 2, 0.45f, rows[i].color, rows[i].text);
+        draw_text(x, y + 4, 0.45f, rows[i].color, rows[i].text);
     }
 }
 
@@ -1916,11 +1934,11 @@ void render_city_buildings_panel(const CityInfo *info, const BuildingInfo *b, in
         C2D_DrawRectSolid(4, y + 1, 0.0f, 306, PANEL_ROW_H - 2,
                           arm ? C2D_Color32(0x6A, 0x24, 0x20, 0xFF) : (i & 1) ? C2D_Color32(0x1A, 0x24, 0x34, 0xFF)
                                                                        : C2D_Color32(0x20, 0x2C, 0x3E, 0xFF));
-        draw_text_z(12, y + 1, 0.01f, 0.47f, white, b[idx].name);
+        draw_text_z(12, y + 3, 0.01f, 0.47f, white, b[idx].name);
         if (arm) snprintf(line, sizeof(line), "tap again: sell %dg", b[idx].sell_gold);
         else if (b[idx].can_sell) snprintf(line, sizeof(line), "sell %dg", b[idx].sell_gold);
         else line[0] = 0;
-        if (line[0]) draw_text_z(304 - text_width(line, 0.4f), y + 2, 0.01f, 0.4f,
+        if (line[0]) draw_text_z(304 - text_width(line, 0.4f), y + 4, 0.01f, 0.4f,
                                  arm ? C2D_Color32(0xFF, 0xC0, 0xB0, 0xFF) : soft, line);
     }
     draw_button(4, PANEL_FOOTER_Y + 2, 312, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
@@ -1963,12 +1981,12 @@ void render_city_panel(const CityInfo *info, const BuildOption *opts, int n, int
                                           : (i & 1) ? C2D_Color32(0x1A, 0x24, 0x34, 0xFF) : C2D_Color32(0x20, 0x2C, 0x3E, 0xFF));
         char nm[32];
         snprintf(nm, sizeof(nm), "%.20s", opt->name);
-        draw_text_z(10, y + 1, 0.01f, 0.45f, opt->is_current ? cur : white, nm);
+        draw_text_z(10, y + 3, 0.01f, 0.45f, opt->is_current ? cur : white, nm);
         // Turns first (what players plan by), as in the Civ games.
         if (opt->cost < 0) snprintf(line, sizeof(line), "gold");
         else if (opt->turns > 0 && opt->turns < 999) snprintf(line, sizeof(line), "%d turn%s", opt->turns, opt->turns == 1 ? "" : "s");
         else snprintf(line, sizeof(line), "%d", opt->cost);
-        draw_text_z(CITY_WORKLIST_COL_X - 12 - text_width(line, 0.42f), y + 2, 0.01f, 0.42f, soft, line);
+        draw_text_z(CITY_WORKLIST_COL_X - 12 - text_width(line, 0.42f), y + 4, 0.01f, 0.42f, soft, line);
     }
     if (n > PANEL_ROWS_VISIBLE) {
         // scroll position
@@ -1984,7 +2002,7 @@ void render_city_panel(const CityInfo *info, const BuildOption *opts, int n, int
                           C2D_Color32(0x2A, 0x24, 0x18, 0xFF));
         char nm[32];
         snprintf(nm, sizeof(nm), "%d. %.12s", i + 1, worklist[i].name);
-        draw_text_z(CITY_WORKLIST_COL_X + 4, y + 1, 0.01f, 0.42f, soft, nm);
+        draw_text_z(CITY_WORKLIST_COL_X + 4, y + 3, 0.01f, 0.42f, soft, nm);
     }
 
     // Footer: Buy (left half) / Close (right half) - matches main.c's hit test.
@@ -2040,8 +2058,8 @@ void render_civ_top(const CivInfo *civ, const char *title)
     C2D_DrawRectSolid(0, 0, 0.01f, 6, 32, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
     C2D_DrawRectSolid(0, 32, 0.0f, 400, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
     draw_text(14, 3, 0.85f, white, title);
-    snprintf(line, sizeof(line), "Gold %d", civ->gold);
-    draw_text(392 - text_width(line, 0.6f), 6, 0.6f, c_tax, line);
+    snprintf(line, sizeof(line), "Gold %d  (%+d a turn)", civ->gold, civ->gold_per_turn);
+    draw_text(392 - text_width(line, 0.55f), 7, 0.55f, civ->gold_per_turn < 0 ? C2D_Color32(0xFF, 0x80, 0x70, 0xFF) : c_tax, line);
 
     // Research card.
     layer(3.0f);
@@ -2106,8 +2124,16 @@ void render_research_panel(const TechOption *opts, int n, int scroll)
     for (int i = 0; i < PANEL_ROWS_VISIBLE; i++) {
         int idx = scroll + i;
         if (idx >= n) break;
-        list_row(i, 4, 306, false, true);
-        draw_text_z(12, PANEL_LIST_Y + i * PANEL_ROW_H + 1, 0.01f, 0.47f, white, opts[idx].name);
+        list_row(i, 4, 306, opts[idx].current, true);
+        float y = PANEL_LIST_Y + i * PANEL_ROW_H;
+        u32 c = opts[idx].current ? C2D_Color32(0xFF, 0xE0, 0x60, 0xFF) : white;
+        draw_text_z(12, y + 3, 0.01f, 0.47f, c, opts[idx].name);
+        char t[24];
+        if (opts[idx].turns >= 0)
+            snprintf(t, sizeof(t), "%s%d turn%s", opts[idx].current ? "now, " : "", opts[idx].turns, opts[idx].turns == 1 ? "" : "s");
+        else
+            snprintf(t, sizeof(t), "%s", opts[idx].current ? "now" : "");
+        if (t[0]) draw_text_z(304 - text_width(t, 0.42f), y + 4, 0.01f, 0.42f, opts[idx].current ? c : soft, t);
     }
     scroll_thumb(n, scroll, 313);
     draw_button(4, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Tree view", 0.5f, true, false);
@@ -2120,102 +2146,97 @@ void render_research_panel(const TechOption *opts, int n, int scroll)
 // (get_tech_tree()'s contract). Starting at *idx, finds the run of entries
 // sharing one tier - that run is exactly one displayable row - and reports
 // its [start, end) range plus the tier value; advances *idx past it.
-static void tech_tier_row_range(const TechNode *nodes, int n, int *idx, int *start, int *end, int *tier)
+static int s_tech_goal = -1;
+void render_set_tech_goal(int tech) { s_tech_goal = tech; }
+
+// The tree is shown as display rows of up to TECHTREE_PER_ROW boxes; a tier
+// with more techs wraps onto extra rows (only its first row is labelled).
+// Shared by drawing, hit-testing and main.c's scroll clamp so they agree.
+typedef struct { int start, count, tier; bool first; } TechRow;
+
+static int tech_rows(const TechNode *nodes, int n, TechRow *out, int max)
 {
-    *start = *idx;
-    *tier = nodes[*idx].tier;
-    int i = *idx;
-    while (i < n && nodes[i].tier == *tier) {
-        i++;
+    int rows = 0, i = 0;
+    while (i < n) {
+        int tier = nodes[i].tier, s0 = i;
+        while (i < n && nodes[i].tier == tier) i++;
+        for (int k = s0; k < i; k += TECHTREE_PER_ROW) {
+            if (out && rows < max) {
+                out[rows].start = k;
+                out[rows].count = i - k < TECHTREE_PER_ROW ? i - k : TECHTREE_PER_ROW;
+                out[rows].tier = tier;
+                out[rows].first = k == s0;
+            }
+            rows++;
+        }
     }
-    *end = i;
-    *idx = i;
+    return rows;
 }
+
+int techtree_display_rows(const TechNode *nodes, int n) { return tech_rows(nodes, n, NULL, 0); }
 
 void render_tech_tree_panel(const TechNode *nodes, int n, int scroll)
 {
     C2D_TextBufClear(g_textBuf);
     u32 soft   = C2D_Color32(0xA8, 0xB4, 0xC4, 0xFF);
+    u32 gold   = C2D_Color32(0xFF, 0xD8, 0x60, 0xFF);
     char label[8];
+    static TechRow rows[160];
 
-    panel_bg("Tech Tree", "by tier");
-    // Legend.
+    panel_bg("Tech Tree", "by era");
     C2D_DrawRectSolid(8, PANEL_HEADER_H + 12, 0.0f, 10, 10, C2D_Color32(0x2E, 0x6A, 0x34, 0xFF));
     draw_text(22, PANEL_HEADER_H + 6, 0.42f, soft, "Can research");
     C2D_DrawRectSolid(118, PANEL_HEADER_H + 12, 0.0f, 10, 10, C2D_Color32(0x24, 0x38, 0x52, 0xFF));
     draw_text(132, PANEL_HEADER_H + 6, 0.42f, soft, "Known");
     C2D_DrawRectSolid(190, PANEL_HEADER_H + 12, 0.0f, 10, 10, C2D_Color32(0x1C, 0x1E, 0x24, 0xFF));
     draw_text(204, PANEL_HEADER_H + 6, 0.42f, soft, "Locked");
-    draw_text(8, PANEL_HEADER_H + 30, 0.42f, soft, "Tap a green technology to research it.");
+    draw_text(8, PANEL_HEADER_H + 30, 0.42f, soft, "Green: research now.  Locked: set as goal.");
 
-    int idx = 0, tier_row = 0, display_row = 0;
-    while (idx < n && display_row < PANEL_ROWS_VISIBLE) {
-        int start, end, tier;
-        tech_tier_row_range(nodes, n, &idx, &start, &end, &tier);
-        if (tier_row++ < scroll) continue;
-        float y = PANEL_LIST_Y + display_row * PANEL_ROW_H;
-        snprintf(label, sizeof(label), "%d", tier);
-        draw_text(6, y + 1, 0.42f, soft, label);
-        int shown = end - start;
-        if (shown > TECHTREE_MAX_BOXES_PER_ROW) shown = TECHTREE_MAX_BOXES_PER_ROW;
-        for (int i = 0; i < shown; i++) {
-            const TechNode *node = &nodes[start + i];
+    int nr = tech_rows(nodes, n, rows, 160);
+    if (nr > 160) nr = 160;
+    for (int r = 0; r < PANEL_ROWS_VISIBLE && scroll + r < nr; r++) {
+        const TechRow *row = &rows[scroll + r];
+        float y = PANEL_LIST_Y + r * PANEL_ROW_H;
+        if (row->first) {
+            snprintf(label, sizeof(label), "%d", row->tier);
+            draw_text(6, y + 2, 0.42f, soft, label);
+        }
+        for (int i = 0; i < row->count; i++) {
+            const TechNode *node = &nodes[row->start + i];
             float bx = TECHTREE_TIER_LABEL_W + i * (TECHTREE_BOX_W + TECHTREE_BOX_GAP);
-            // state: 0 unknown, 1 prerequisites known (tappable), 2 known.
             u32 bg = node->state == 1 ? C2D_Color32(0x2E, 0x6A, 0x34, 0xFF)
                    : node->state == 2 ? C2D_Color32(0x24, 0x38, 0x52, 0xFF) : C2D_Color32(0x1C, 0x1E, 0x24, 0xFF);
-            u32 fg = node->state == 1 ? 0xFFFFFFFF : node->state == 2 ? soft : C2D_Color32(0x68, 0x70, 0x7C, 0xFF);
-            C2D_DrawRectSolid(bx, y + 1, 0.0f, TECHTREE_BOX_W, PANEL_ROW_H - 2, bg);
-            char nm[16];
+            u32 fg = node->state == 1 ? 0xFFFFFFFF : node->state == 2 ? soft : C2D_Color32(0x8C, 0x94, 0xA0, 0xFF);
+            bool goal = node->tech == s_tech_goal && node->state != 2;
+            if (goal) {
+                C2D_DrawRectSolid(bx - 1, y, 0.0f, TECHTREE_BOX_W + 2, PANEL_ROW_H, gold);
+                fg = gold;
+            }
+            C2D_DrawRectSolid(bx, y + 1, 0.001f, TECHTREE_BOX_W, PANEL_ROW_H - 2, bg);
+            char nm[32];
             snprintf(nm, sizeof(nm), "%s", node->name);
-            // Trim to fit the box.
-            while (nm[0] && font_width(nm, 0.36f) > TECHTREE_BOX_W - 4) nm[strlen(nm) - 1] = 0;
-            draw_text_z(bx + 2, y + 1, 0.01f, 0.36f, fg, nm);
+            float sc = 0.42f;
+            while (sc > 0.36f && font_width(nm, sc) > TECHTREE_BOX_W - 6) sc -= 0.02f;
+            while (nm[0] && font_width(nm, sc) > TECHTREE_BOX_W - 6) nm[strlen(nm) - 1] = 0;
+            draw_text_z(bx + 3, y + 4, 0.01f, sc, fg, nm);
         }
-        if (end - start > shown) {
-            float bx = TECHTREE_TIER_LABEL_W + shown * (TECHTREE_BOX_W + TECHTREE_BOX_GAP);
-            char more[16];
-            snprintf(more, sizeof(more), "+%d", end - start - shown);
-            draw_text(bx + 2, y + 1, 0.4f, soft, more);
-        }
-        display_row++;
     }
+    if (nr > PANEL_ROWS_VISIBLE) scroll_thumb(nr, scroll, 316);
     draw_button(4, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, "List view", 0.5f, true, false);
     draw_button(164, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
 }
 
 int techtree_hit_test(const TechNode *nodes, int n, int scroll, int px, int py)
 {
+    static TechRow rows[160];
     int rel_y = py - PANEL_LIST_Y;
-    if (rel_y < 0 || rel_y >= PANEL_ROW_H * PANEL_ROWS_VISIBLE) {
-        return -1;
-    }
-    if (px < TECHTREE_TIER_LABEL_W) {
-        return -1; // over the "T<n>" label, not a box - and guards the % below against a negative numerator
-    }
-    int target_display_row = rel_y / PANEL_ROW_H;
-
-    int idx = 0, tier_row = 0, display_row = 0;
-    while (idx < n) {
-        int start, end, tier;
-        tech_tier_row_range(nodes, n, &idx, &start, &end, &tier);
-        if (tier_row++ < scroll) {
-            continue;
-        }
-        if (display_row == target_display_row) {
-            int shown = end - start;
-            if (shown > TECHTREE_MAX_BOXES_PER_ROW) {
-                shown = TECHTREE_MAX_BOXES_PER_ROW;
-            }
-            int box = (px - TECHTREE_TIER_LABEL_W) / (TECHTREE_BOX_W + TECHTREE_BOX_GAP);
-            int box_x_rel = (px - TECHTREE_TIER_LABEL_W) % (TECHTREE_BOX_W + TECHTREE_BOX_GAP);
-            if (box >= 0 && box < shown && box_x_rel < TECHTREE_BOX_W) {
-                return start + box;
-            }
-            return -1;
-        }
-        display_row++;
-    }
+    if (rel_y < 0 || rel_y >= PANEL_ROW_H * PANEL_ROWS_VISIBLE || px < TECHTREE_TIER_LABEL_W) return -1;
+    int nr = tech_rows(nodes, n, rows, 160);
+    int r = scroll + rel_y / PANEL_ROW_H;
+    if (r >= nr || r >= 160) return -1;
+    int box = (px - TECHTREE_TIER_LABEL_W) / (TECHTREE_BOX_W + TECHTREE_BOX_GAP);
+    int box_x_rel = (px - TECHTREE_TIER_LABEL_W) % (TECHTREE_BOX_W + TECHTREE_BOX_GAP);
+    if (box < rows[r].count && box_x_rel < TECHTREE_BOX_W) return rows[r].start + box;
     return -1;
 }
 
@@ -2272,10 +2293,10 @@ void render_government_panel(const GovOption *opts, int n, int scroll, int curre
         bool arm = idx == s_gov_armed && !is_cur;
         list_row(i, 4, 306, is_cur || arm, opt->available);
         float y = PANEL_LIST_Y + i * PANEL_ROW_H;
-        draw_text_z(12, y + 1, 0.01f, 0.47f, is_cur || arm ? cur : opt->available ? white : grey, opt->name);
+        draw_text_z(12, y + 3, 0.01f, 0.47f, is_cur || arm ? cur : opt->available ? white : grey, opt->name);
         const char *tag = is_cur ? "current" : arm ? "tap again: revolution" : opt->available ? "" : "needs tech";
-        if (arm) { draw_text_z(304 - text_width(tag, 0.42f), y + 2, 0.01f, 0.42f, cur, tag); continue; }
-        if (tag[0]) draw_text_z(304 - text_width(tag, 0.4f), y + 2, 0.01f, 0.4f, is_cur ? cur : grey, tag);
+        if (arm) { draw_text_z(304 - text_width(tag, 0.42f), y + 4, 0.01f, 0.42f, cur, tag); continue; }
+        if (tag[0]) draw_text_z(304 - text_width(tag, 0.4f), y + 4, 0.01f, 0.4f, is_cur ? cur : grey, tag);
     }
     scroll_thumb(n, scroll, 313);
     draw_button(4, PANEL_FOOTER_Y + 2, 312, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
@@ -2485,9 +2506,9 @@ void render_diplomacy_panel(int stage, const char *counterpart_name,
             if (idx >= player_count) break;
             list_row(i, 4, 306, false, true);
             float y = PANEL_LIST_Y + i * PANEL_ROW_H;
-            draw_text_z(12, y + 1, 0.01f, 0.47f, white, players[idx].name);
+            draw_text_z(12, y + 3, 0.01f, 0.47f, white, players[idx].name);
             const char *st = diplstate_name(players[idx].diplstate);
-            draw_text_z(304 - text_width(st, 0.42f), y + 2, 0.01f, 0.42f, diplstate_color(players[idx].diplstate), st);
+            draw_text_z(304 - text_width(st, 0.42f), y + 4, 0.01f, 0.42f, diplstate_color(players[idx].diplstate), st);
         }
         scroll_thumb(player_count, scroll, 313);
         draw_button(4, PANEL_FOOTER_Y + 2, 312, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
@@ -2505,7 +2526,7 @@ void render_diplomacy_panel(int stage, const char *counterpart_name,
               diplo->clause_count ? "Terms (tap to remove):" : "No terms yet - add one above.");
     for (int i = 0; i < PANEL_ROWS_VISIBLE && i < diplo->clause_count; i++) {
         list_row(i, 4, 312, false, true);
-        draw_text_z(12, PANEL_LIST_Y + i * PANEL_ROW_H + 1, 0.01f, 0.45f, white, diplo->clauses[i].desc);
+        draw_text_z(12, PANEL_LIST_Y + i * PANEL_ROW_H + 3, 0.01f, 0.45f, white, diplo->clauses[i].desc);
     }
     float fh = 240 - PANEL_FOOTER_Y - 4;
     draw_button(2, PANEL_FOOTER_Y + 2, DIPLO_FOOTER_SPLIT1 - 4, fh, 0.02f,
@@ -2807,7 +2828,7 @@ void render_messages_panel(const GameMessage *msgs, int n, int scroll, int highl
         char t[160];
         snprintf(t, sizeof(t), "%s", m->text);
         while (t[0] && font_width(t, 0.42f) > 284) t[strlen(t) - 1] = 0;
-        draw_text_z(18, y + 2, 0.01f, 0.42f, 0xFFFFFFFF, t);
+        draw_text_z(18, y + 4, 0.01f, 0.42f, 0xFFFFFFFF, t);
     }
     scroll_thumb(n, scroll, 313);
     draw_button(4, PANEL_FOOTER_Y + 2, 312, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
@@ -2830,7 +2851,7 @@ void render_messages_top(const GameMessage *m)
         C2D_DrawRectSolid(16, 54, 0.01f, 8, 8, msg_color(m->category));
         draw_text(30, 48, 0.47f, msg_color(m->category), line);
         draw_wrapped(m->text, 18, 72, 364, 0.55f, 0xFFFFFFFF, 7, 19, 0.01f);
-        if (m->x >= 0) draw_text(18, 190, 0.42f, soft, "Tap it below to see where it happened.");
+        if (m->x >= 0) draw_text(18, 190, 0.42f, soft, "Tap it again below to go there.");
     } else {
         draw_text(18, 52, 0.55f, soft, "Nothing has happened yet.");
     }
@@ -2852,7 +2873,7 @@ void render_pedia_panel(int kind, const PediaEntry *list, int n, int scroll, int
         int idx = scroll + i;
         if (idx >= n) break;
         list_row(i, 4, 306, idx == selected, true);
-        draw_text_z(12, PANEL_LIST_Y + i * PANEL_ROW_H + 1, 0.01f, 0.47f, 0xFFFFFFFF, list[idx].name);
+        draw_text_z(12, PANEL_LIST_Y + i * PANEL_ROW_H + 3, 0.01f, 0.47f, 0xFFFFFFFF, list[idx].name);
     }
     scroll_thumb(n, scroll, 313);
     draw_button(4, PANEL_FOOTER_Y + 2, 312, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
@@ -3026,6 +3047,21 @@ void render_game_over_bottom(void)
     draw_button(165, GAMEOVER_BTN_Y, 145, 44, 0.02f, "Quit", 0.5f, true, true);
 }
 
+// "freeciv-T0012-Y-3450-auto.sav.gz" -> "Turn 12, 3450 BC  (autosave)";
+// "3ds-T0012-Y-3450.sav.gz" -> "Turn 12, 3450 BC  (saved)".
+void save_file_label(const char *fn, char *out, int n)
+{
+    int turn = 0, year = 0;
+    bool manual = !strncmp(fn, "3ds-", 4);
+    if (sscanf(fn, manual ? "3ds-T%d-Y%d" : "freeciv-T%d-Y%d", &turn, &year) == 2)
+        snprintf(out, n, "Turn %d, %d %s%s", turn, year < 0 ? -year : year, year < 0 ? "BC" : "AD",
+                 manual ? "  (saved)" : strstr(fn, "auto") ? "  (autosave)" : "");
+    else if (manual && sscanf(fn, "3ds-T%d", &turn) == 1)
+        snprintf(out, n, "Turn %d  (saved)", turn);
+    else
+        snprintf(out, n, "%.40s", fn);
+}
+
 void render_load_picker(const SaveFile *files, int n, int scroll)
 {
     C2D_TextBufClear(g_textBuf);
@@ -3044,13 +3080,13 @@ void render_load_picker(const SaveFile *files, int n, int scroll)
         for (int i = 0; i < PANEL_ROWS_VISIBLE; i++) {
             int idx = scroll + i;
             if (idx >= n) break;
-            snprintf(rows[visible].text, sizeof(rows[visible].text), "%s", files[idx].filename);
+            save_file_label(files[idx].filename, rows[visible].text, sizeof(rows[visible].text));
             rows[visible].color = white;
             visible++;
         }
         draw_scroll_list(8, rows, visible);
     }
 
-    C2D_DrawRectSolid(0, PANEL_FOOTER_Y, 0.0f, 320, 240 - PANEL_FOOTER_Y, C2D_Color32(0x20, 0x20, 0x20, 0xFF));
-    draw_text(200, PANEL_FOOTER_Y + 6, 0.55f, white, "Back");
+    if (n > 0) draw_text(8, PANEL_HEADER_H + 8, 0.45f, dim, "Newest first. Tap one to load it.");
+    draw_button(4, PANEL_FOOTER_Y + 2, 312, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Back", 0.5f, true, false);
 }

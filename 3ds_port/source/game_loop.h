@@ -164,6 +164,8 @@ typedef struct {
     int  grow_turns;         // <0 => not growing (shrinking or stagnant)
     bool can_buy;
     int  buy_cost;
+    int  happy, content, unhappy, angry; // citizens' mood (specialists not counted)
+    bool disorder;           // in civil disorder now, or will be next turn
     int  garrison_count;                          // # of pov-owned units in the city, clamped to CITY_MAX_GARRISON
     int  garrison_ids[CITY_MAX_GARRISON];          // server-side unit ids, parallel to garrison_names
     char garrison_names[CITY_MAX_GARRISON][32];
@@ -191,9 +193,11 @@ typedef struct {
 // Snapshot of the pov player's civilization-level state (economy + research).
 typedef struct {
     int  gold;
+    int  gold_per_turn;      // expected net income next turn
     int  tax, lux, sci;
     int  max_rate;
     int  researching;        // tech id; A_UNSET/A_FUTURE are valid values
+    int  goal;               // research goal tech id (A_UNSET if none)
     char research_name[48];
     int  bulbs, bulbs_needed;
     int  research_turns;     // -1 if undeterminable (no science surplus)
@@ -216,6 +220,8 @@ typedef struct {
 typedef struct {
     int  tech;
     char name[48];
+    int  turns;              // at the current science rate, -1 if none
+    bool current;            // being researched now
 } TechOption;
 
 // One entry in the full tech tree (handoff.md §8) - every tech in the
@@ -559,6 +565,8 @@ void freeciv_request_city_buy(int city_id);
 // (or A_FUTURE). No-ops server-side (via handle_player_research()) if the
 // tech's prereqs aren't met.
 void freeciv_request_set_research(int tech);
+// Research goal: Freeciv picks each step toward it automatically.
+void freeciv_request_set_goal(int tech);
 
 // Queue a tax/luxury/science rate change for the pov player. No-ops
 // server-side (via handle_player_rates()) unless tax+lux+sci==100 and each
