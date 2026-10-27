@@ -262,8 +262,8 @@ void render_research_panel(const TechOption *opts, int n, int scroll);
 // UNKNOWN (both non-tappable). No connecting lines in v1. scroll counts
 // tier-rows, not techs - a different unit from the flat list's scroll, so
 // main.c resets it to 0 when toggling views.
-#define TECHTREE_TIER_LABEL_W      28
-#define TECHTREE_BOX_W             92
+#define TECHTREE_TIER_LABEL_W      16
+#define TECHTREE_BOX_W             97
 #define TECHTREE_BOX_GAP           3
 #define TECHTREE_PER_ROW           3   // a tier with more techs wraps onto more rows
 // Display rows the tree needs (the scroll unit), and the goal box to ring.

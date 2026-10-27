@@ -198,6 +198,7 @@ typedef struct {
     int  max_rate;
     int  researching;        // tech id; A_UNSET/A_FUTURE are valid values
     int  goal;               // research goal tech id (A_UNSET if none)
+    char goal_name[48];      // "" if none
     char research_name[48];
     int  bulbs, bulbs_needed;
     int  research_turns;     // -1 if undeterminable (no science surplus)

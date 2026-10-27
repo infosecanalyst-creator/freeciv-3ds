@@ -2073,6 +2073,10 @@ void render_civ_top(const CivInfo *civ, const char *title)
     else
         snprintf(line, sizeof(line), "%d/%d bulbs, no science", civ->bulbs, civ->bulbs_needed);
     draw_text(16, 96, 0.42f, soft, line);
+    if (civ->goal_name[0]) {
+        snprintf(line, sizeof(line), "Goal: %s", civ->goal_name);
+        draw_text(16, 108, 0.42f, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF), line);
+    }
 
     // Government card.
     C2D_DrawRectSolid(204, 40, 0.0f, 188, 84, card);
@@ -2199,7 +2203,7 @@ void render_tech_tree_panel(const TechNode *nodes, int n, int scroll)
         float y = PANEL_LIST_Y + r * PANEL_ROW_H;
         if (row->first) {
             snprintf(label, sizeof(label), "%d", row->tier);
-            draw_text(6, y + 2, 0.42f, soft, label);
+            draw_text(3, y + 4, 0.42f, soft, label);
         }
         for (int i = 0; i < row->count; i++) {
             const TechNode *node = &nodes[row->start + i];
@@ -2221,7 +2225,7 @@ void render_tech_tree_panel(const TechNode *nodes, int n, int scroll)
             draw_text_z(bx + 3, y + 4, 0.01f, sc, fg, nm);
         }
     }
-    if (nr > PANEL_ROWS_VISIBLE) scroll_thumb(nr, scroll, 316);
+    if (nr > PANEL_ROWS_VISIBLE) scroll_thumb(nr, scroll, 317);
     draw_button(4, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, "List view", 0.5f, true, false);
     draw_button(164, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
 }
@@ -2804,6 +2808,7 @@ void render_new_game_top(bool is_new_3ds, const char *summary)
     draw_backdrop(f, 400, 240, 0xC8);
     draw_text_z(16, 20, 0.2f, 0.9f, white, "Freeciv 3DS");
     draw_wrapped(summary, 16, 56, 368, 0.5f, soft, 4, 17, 0.2f);
+    if (!strncmp(summary, "Pick a saved", 12)) return; // load picker: the hardware notes are for new games
     draw_text_z(16, 150, 0.2f, 0.45f, label, is_new_3ds
         ? "New 3DS detected: 804 MHz, room for big maps."
         : "Old 3DS detected: smaller maps keep turns quick.");

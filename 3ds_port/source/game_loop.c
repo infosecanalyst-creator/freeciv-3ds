@@ -2038,6 +2038,11 @@ void get_civ_info(CivInfo *out)
     struct research *research = research_get(pov);
     out->researching = research->researching;
     out->goal = research->tech_goal;
+    if (research->tech_goal != A_UNSET && research->tech_goal != A_NONE
+        && research_invention_state(research, research->tech_goal) != TECH_KNOWN) {
+        const char *gname = research_advance_name_translation(research, research->tech_goal);
+        if (gname) fc_strlcpy(out->goal_name, gname, sizeof(out->goal_name));
+    }
     const char *rname = research_advance_name_translation(research, research->researching);
     if (rname) {
         fc_strlcpy(out->research_name, rname, sizeof(out->research_name));

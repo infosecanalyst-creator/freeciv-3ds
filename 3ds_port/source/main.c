@@ -1738,7 +1738,9 @@ int main(int argc, char* argv[])
                         MoveDir dir;
                         select_here = false;
                         if (tx == unit_info.x && ty == unit_info.y) {
-                            if (mine_n > 1 && !own_city) select_here = true; // pick from the stack
+                            // Your city always opens (its Units tab reaches the units);
+                            // a stack picks a unit; a lone unit shows all its orders.
+                            if (own_city || mine_n > 1) select_here = true;
                             else want_unit_popup = true;
                         } else if (adjacent_dir(unit_info.x, unit_info.y, tx, ty, &dir)) {
                             pending_goto_x = pending_goto_y = -1;
