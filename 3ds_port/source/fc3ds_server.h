@@ -101,4 +101,17 @@ void fc3ds_server_resume(void);
 // of tearing down the whole process.
 bool fc3ds_server_is_quitting(void);
 
+// Wait up to ms for a just-released step to park (short steps finish fast).
+void fc3ds_server_wait_parked(int ms);
+// True on the engine's own thread (used by __wrap_exit/__wrap_abort).
+bool fc3ds_server_on_server_thread(void);
+// The engine hit a fatal error (bad save, abort): it will never park again.
+void fc3ds_server_mark_failed(void);
+bool fc3ds_server_failed(void);
+// The game has ended (victory, defeat, spacerace, end turn): the engine is
+// parked in S_S_OVER with the final state still readable.
+bool fc3ds_server_game_ended(void);
+// Called by the patched srv_main() right after srv_scores().
+void fc3ds_server_game_over_park(void);
+
 #endif // FC3DS_SERVER_H

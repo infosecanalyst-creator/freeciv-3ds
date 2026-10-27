@@ -1044,7 +1044,7 @@ void render_top_info(const TopInfo *ti)
             }
             for (int i = 0; i < ti->stack_n && i < 5; i++) {
                 snprintf(line, sizeof(line), "%s%s", ti->stack[i].name,
-                         is_pov_unit_owner(ti->stack[i].owner) && !ti->stack[i].can_move ? "  (done)" : "");
+                         ti->stack[i].mine && !ti->stack[i].can_move ? "  (done)" : "");
                 draw_text(CX + 2, y, 0.47f, owner_color(ti->stack[i].owner), line);
                 y += 16;
             }
@@ -2575,6 +2575,10 @@ static void backdrop_init(void)
 // The slow map flight behind the title. dim: 0..255 darkening for legibility.
 static void draw_backdrop(int frame, float w, float h, int dim)
 {
+    if (!g_spriteSheet) { // no tiles: a plain dark backdrop rather than a crash
+        C2D_DrawRectSolid(0, 0, 0.0f, w, h, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
+        return;
+    }
     backdrop_init();
     int idx[7] = { sprites_ocean_idx, sprites_plains_idx, sprites_grassland_idx, sprites_forest_idx,
                    sprites_hills_idx, sprites_mountains_idx, sprites_desert_idx };
@@ -2726,6 +2730,14 @@ void render_title_controls_top(int frame)
 void render_title_loading_bottom(const char *msg, int frame)
 {
     C2D_TextBufClear(g_textBuf);
+    if (frame < 0) { // an error, not progress
+        draw_backdrop(0, 320, 240, 0xD0);
+        float tw = text_width(msg, 0.55f);
+        draw_text_z((320 - tw) / 2, 92, 0.2f, 0.55f, C2D_Color32(0xFF, 0xB0, 0xA0, 0xFF), msg);
+        const char *sub = "Press START to quit, then try another save.";
+        draw_text_z((320 - text_width(sub, 0.45f)) / 2, 124, 0.2f, 0.45f, 0xFFFFFFFF, sub);
+        return;
+    }
     draw_backdrop(frame + 900, 320, 240, 0xB0);
     char line[64];
     int dots = (frame / 20) % 4;
@@ -2766,9 +2778,9 @@ void render_new_game_top(bool is_new_3ds, const char *summary)
     u32 white = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
     u32 soft  = C2D_Color32(0xB8, 0xC8, 0xDC, 0xFF);
     u32 label = C2D_Color32(0x8C, 0xA0, 0xB4, 0xFF);
-    static int f;
+    int f = (int)(osGetTime() / 17); // same for both eyes
     layer(0.0f);
-    draw_backdrop(++f, 400, 240, 0xC8);
+    draw_backdrop(f, 400, 240, 0xC8);
     draw_text_z(16, 20, 0.2f, 0.9f, white, "Freeciv 3DS");
     draw_wrapped(summary, 16, 56, 368, 0.5f, soft, 4, 17, 0.2f);
     draw_text_z(16, 150, 0.2f, 0.45f, label, is_new_3ds

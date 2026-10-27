@@ -86,6 +86,7 @@ typedef struct {
     char name[48];           // translated
     char rule_name[48];
     bool can_move;           // moves left and idle
+    bool mine;               // owned by the player (snapshot: safe to use mid-step)
 } UnitBrief;
 
 

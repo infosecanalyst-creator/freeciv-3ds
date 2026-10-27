@@ -337,20 +337,22 @@ static PendingCmd s_cmd_ring[CMD_RING_SIZE];
 // the next pump (see fc3ds_server.h), so plain volatile suffices on the
 // current single-core config - no other producer/consumer overlap is
 // possible. Revisit with a memory barrier if core-affinity ever changes that.
-static volatile int s_cmd_head = 0;
-static volatile int s_cmd_tail = 0;
+static int s_cmd_head = 0; // accessed with __atomic_* (acquire/release)
+static int s_cmd_tail = 0;
 
 static void enqueue_cmd(PendingCmdKind kind, int a, int b, int c, int d)
 {
-    int head = s_cmd_head;
+    int head = __atomic_load_n(&s_cmd_head, __ATOMIC_RELAXED);
     int next = (head + 1) % CMD_RING_SIZE;
-    if (next == s_cmd_tail) {
+    if (next == __atomic_load_n(&s_cmd_tail, __ATOMIC_ACQUIRE)) {
         // Ring full - drop. With one command queued per button press/tap and
         // CMD_RING_SIZE=8, this is not expected to trigger in practice.
         return;
     }
     s_cmd_ring[head] = (PendingCmd){ .kind = kind, .a = a, .b = b, .c = c, .d = d };
-    s_cmd_head = next; // publish
+    // The engine runs on another core (New 3DS): publish the payload before
+    // the new head becomes visible.
+    __atomic_store_n(&s_cmd_head, next, __ATOMIC_RELEASE);
     fc3ds_server_mark_work_pending();
 }
 
@@ -1335,6 +1337,7 @@ int get_tile_units(int x, int y, UnitBrief *out, int max)
             b->owner = player_index(unit_owner(punit));
             fc_strlcpy(b->name, unit_name_translation(punit), sizeof(b->name));
             fc_strlcpy(b->rule_name, unit_rule_name(punit), sizeof(b->rule_name));
+            b->mine = mine;
             b->can_move = punit->moves_left > 0 && punit->activity == ACTIVITY_IDLE && !unit_has_orders(punit);
         } unit_list_iterate_end;
     }
@@ -1376,9 +1379,10 @@ void freeciv3ds_process_pending_actions(void)
         return;
     }
 
-    while (s_cmd_tail != s_cmd_head) {
-        PendingCmd cmd = s_cmd_ring[s_cmd_tail];
-        s_cmd_tail = (s_cmd_tail + 1) % CMD_RING_SIZE;
+    int tail;
+    while ((tail = __atomic_load_n(&s_cmd_tail, __ATOMIC_RELAXED)) != __atomic_load_n(&s_cmd_head, __ATOMIC_ACQUIRE)) {
+        PendingCmd cmd = s_cmd_ring[tail];
+        __atomic_store_n(&s_cmd_tail, (tail + 1) % CMD_RING_SIZE, __ATOMIC_RELEASE);
 
         switch (cmd.kind) {
         case CMD_UNIT_MOVE: {
@@ -2089,6 +2093,9 @@ int get_other_players(PlayerOption *out, int max)
         if (pplayer == pov || is_barbarian(pplayer) || !pplayer->is_alive) {
             continue;
         }
+        if (player_diplstate_get(pov, pplayer)->type == DS_NO_CONTACT) {
+            continue; // never met: no meeting is possible
+        }
         out[n].player_id = player_number(pplayer);
         const char *nm = player_name(pplayer);
         fc_strlcpy(out[n].name, nm ? nm : "?", sizeof(out[n].name));
@@ -2310,7 +2317,8 @@ static bool is_savegame_name(const char *name)
 // and rewrite the index compacted (latest record per existing file) so it stays
 // bounded and never lists a deleted file.
 #define SAVE_INDEX_PATH  "sdmc:/3ds/freeciv/saves/.saveindex"
-#define SAVE_INDEX_CAP   400
+#define SAVE_INDEX_CAP   2048 // must cover every save on the card, or old ones would read as new
+#define SAVE_EXIST_CAP   2048 // files on the card (autosaves pile up: one per turn)
 
 typedef struct { char name[64]; long size; } SaveIndexEntry;
 
@@ -2326,7 +2334,7 @@ int get_save_files(SaveFile *out, int max)
 {
     static const char *SAVES_DIR = "sdmc:/3ds/freeciv/saves";
     static SaveIndexEntry idx[SAVE_INDEX_CAP];
-    static char existing[SAVE_INDEX_CAP][64];
+    static char existing[SAVE_EXIST_CAP][64];
     int nidx = 0, nexist = 0;
 
     // 1. Load the existing order index (oldest-first).
@@ -2357,7 +2365,7 @@ int get_save_files(SaveFile *out, int max)
         if (!is_savegame_name(ent->d_name)) {
             continue;
         }
-        if (nexist < SAVE_INDEX_CAP) {
+        if (nexist < SAVE_EXIST_CAP) {
             fc_strlcpy(existing[nexist++], ent->d_name, sizeof(existing[0]));
         }
         long dsize = saves_file_size(SAVES_DIR, ent->d_name);
@@ -2374,7 +2382,11 @@ int get_save_files(SaveFile *out, int max)
         // an entry so it can never silently vanish from the picker). Known file
         // -> only bump to newest on a real, positive size change.
         bool bump = !found || (dsize >= 0 && dsize != last);
-        if (bump && nidx < SAVE_INDEX_CAP) {
+        if (bump) {
+            if (nidx == SAVE_INDEX_CAP) { // full: forget the oldest record, keep the newest
+                memmove(idx, idx + 1, (SAVE_INDEX_CAP - 1) * sizeof(idx[0]));
+                nidx--;
+            }
             idx[nidx].size = dsize;
             fc_strlcpy(idx[nidx].name, ent->d_name, sizeof(idx[nidx].name));
             nidx++;

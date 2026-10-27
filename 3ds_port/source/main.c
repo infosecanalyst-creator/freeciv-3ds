@@ -27,8 +27,13 @@ void __wrap_exit(int status) {
     // During app shutdown, the Freeciv server thread runs server_quit() which
     // ends in exit(). Turn that into a clean end of *just that thread* so the
     // main thread can then tear libctru down without a racing thread.
-    if (fc3ds_server_is_quitting()) {
-        threadExit(0); // never returns
+    if (fc3ds_server_on_server_thread()) {
+        if (fc3ds_server_is_quitting()) threadExit(0); // never returns
+        // The engine gave up (bad save, fatal error): tell the UI, park here.
+        printf("FATAL ENGINE EXIT: %d\n", status);
+        fflush(stdout);
+        fc3ds_server_mark_failed();
+        while (1) svcSleepThread(1000000000);
     }
 
     if (status == 0) {
@@ -52,6 +57,7 @@ void __wrap_exit(int status) {
 }
 
 void __wrap_abort(void) {
+    if (fc3ds_server_on_server_thread()) fc3ds_server_mark_failed();
     void *caller = __builtin_return_address(0);
     printf("FATAL ABORT from %p\n", caller);
     fflush(stdout);
@@ -465,7 +471,7 @@ int main(int argc, char* argv[])
     romfsInit();
     audio_init();
     C3D_Init(C3D_DEFAULT_CMDBUF_SIZE);
-    C2D_Init(C2D_DEFAULT_MAX_OBJECTS);
+    C2D_Init(12288); // wide zoom + minimap + 3D eyes run past the 4096 default
     C2D_Prepare();
     render_init();
 
@@ -498,9 +504,10 @@ int main(int argc, char* argv[])
     // screen, so while a turn runs (and the map can't be read) the last
     // picture stays up under a small banner instead of a full-screen page.
     static C3D_Tex cap_tex;
-    C3D_TexInitVRAM(&cap_tex, 512, 256, GPU_RGBA8);
-    C3D_TexSetFilter(&cap_tex, GPU_NEAREST, GPU_NEAREST);
-    C3D_RenderTarget *cap = C3D_RenderTargetCreateFromTex(&cap_tex, GPU_TEXFACE_2D, 0, GPU_RB_DEPTH16);
+    bool cap_ok = C3D_TexInitVRAM(&cap_tex, 512, 256, GPU_RGBA8);
+    if (cap_ok) C3D_TexSetFilter(&cap_tex, GPU_NEAREST, GPU_NEAREST);
+    // No VRAM for it: no captured picture, just the banner over a dark screen.
+    C3D_RenderTarget *cap = cap_ok ? C3D_RenderTargetCreateFromTex(&cap_tex, GPU_TEXFACE_2D, 0, GPU_RB_DEPTH16) : NULL;
     static const Tex3DS_SubTexture cap_sub = { 320, 240, 0.0f, 1.0f, 320.0f / 512.0f, 1.0f - 240.0f / 256.0f };
     C2D_Image cap_img = { &cap_tex, &cap_sub };
     bool cap_valid = false;    // cap_tex holds the map as it was when this step began
@@ -706,7 +713,7 @@ int main(int argc, char* argv[])
 
         // Quit: START on the start menu, SELECT+START in a game (START alone
         // ends the turn there). HOME -> Close also works at any time.
-        if ((kDown & KEY_START) && app_state != APP_GAME) {
+        if ((kDown & KEY_START) && (app_state == APP_START_MENU || fc3ds_server_failed())) {
             break; // fc3ds_server_shutdown() (below, after the loop) does the rest
         }
         if ((kDown & KEY_START) && (kHeld & KEY_SELECT) && app_state == APP_GAME) {
@@ -723,10 +730,12 @@ int main(int argc, char* argv[])
         // it only handles its own touch input and renders its own screens,
         // then `continue`s past the entire game loop body below.
         if (app_state != APP_GAME) {
-            if (kDown & KEY_TOUCH) {
+            bool start_key = app_state == APP_NEW_GAME && (kDown & KEY_START); // START = Start
+            if ((kDown & KEY_TOUCH) || start_key) {
                 touchPosition touch;
                 hidTouchRead(&touch);
                 int px = (int)touch.px, py = (int)touch.py;
+                if (start_key) { px = SETUP_START_X + 1; py = SETUP_FOOT_Y + 1; }
 
                 if (app_state == APP_NEW_GAME) {
                     int row = (py - SETUP_ROW_Y0) / SETUP_ROW_H;
@@ -951,7 +960,7 @@ int main(int argc, char* argv[])
         if (ui_mode == UI_CITY || ui_mode == UI_RESEARCH || ui_mode == UI_GOVERNMENT
             || ui_mode == UI_DIPLOMACY || ui_mode == UI_MESSAGES || ui_mode == UI_PEDIA) {
             // D-Pad up/down scrolls the open list; B closes the panel.
-            if (kDown & KEY_DUP)   ui_scroll--;
+            if ((kDown & KEY_DUP) && ui_scroll > 0) ui_scroll--; // never negative, even mid-step
             if (kDown & KEY_DDOWN) ui_scroll++;
             if (kDown & KEY_B) {
                 // B always fully exits to UI_MAP (universal escape hatch,
@@ -982,7 +991,7 @@ int main(int argc, char* argv[])
             // onto the map and arm it for D-Pad movement. A unit sharing a
             // city tile is otherwise unreachable, since tapping the tile
             // opens the city.
-            if (ui_mode == UI_CITY && (kDown & KEY_Y)
+            if (ui_mode == UI_CITY && (kDown & KEY_Y) && !fc3ds_server_is_busy()
                 && ui_garrison_sel >= 0 && ui_garrison_sel < ui_city_info.garrison_count) {
                 int uid = ui_city_info.garrison_ids[ui_garrison_sel];
                 selected_unit_id = uid;
@@ -1091,7 +1100,13 @@ int main(int argc, char* argv[])
         // run before the busy check below so a step queued THIS frame is
         // already reflected in `busy` - the server coroutine may start
         // mutating game state as early as this call.
-        fc3ds_server_pump();
+        {
+            bool was = fc3ds_server_is_busy();
+            fc3ds_server_pump();
+            // A step just released (a move, an order): most finish in a few
+            // ms, so wait a moment rather than drawing a blank frame.
+            if (!was && fc3ds_server_is_busy() && !capture_next) fc3ds_server_wait_parked(12);
+        }
         bool busy = fc3ds_server_is_busy();
         // ---- Performance log (read back from sdmc:/freeciv_out.log) ----
         // Engine steps longer than 250 ms (AI turns, saves, world gen), and
@@ -1146,10 +1161,11 @@ int main(int argc, char* argv[])
                 touchPosition touch;
                 hidTouchRead(&touch);
                 t_hold = 0;
+                bool was_peeking = peek_timer > 0;
                 peek_timer = 0; // any new touch puts a peek away
                 t_active = true;
                 t_dragging = false;
-                t_consumed = false;
+                t_consumed = was_peeking; // ...and does nothing else
                 t_x0 = touch.px; t_y0 = touch.py;
                 t_cam_x0 = cam_x; t_cam_y0 = cam_y;
                 int popup_kind_was = popup_kind;
@@ -1222,7 +1238,11 @@ int main(int argc, char* argv[])
                 t_active = false;
             }
         }
-        if (ui_mode == UI_MAP) clamp_camera(zoom, &cam_x, &cam_y);
+        if (ui_mode == UI_MAP && !busy) clamp_camera(zoom, &cam_x, &cam_y);
+        if (world_view && popup_kind != POPUP_NONE) { // menus are drawn on the normal map
+            world_view = false;
+            render_set_world_view(false);
+        }
 
         // Touch inside a modal panel: a single tap (kDown, not kHeld) hits
         // a list row or a footer button. Rects here must match what
@@ -1776,6 +1796,7 @@ int main(int argc, char* argv[])
                             popup_kind = POPUP_STACK;
                             selected_unit_id = -1;
                         } else if (own_city) {
+                            dismiss_pending_production(t.city_id);
                             ui_mode = UI_CITY;
                             ui_city_id = t.city_id;
                             ui_scroll = 0;
@@ -2142,7 +2163,8 @@ int main(int argc, char* argv[])
         // A long step with no captured picture (e.g. a move that triggered
         // something slow) still gets the brief banner over a dark screen
         // rather than the old full-screen page, except for world generation.
-        bool full_overlay = busy && ui_mode == UI_MAP && !fc3ds_server_is_ready();
+        bool engine_failed = fc3ds_server_failed();
+        bool full_overlay = engine_failed || (busy && ui_mode == UI_MAP && !fc3ds_server_is_ready());
         bool show_busy_indicator = busy && ui_mode != UI_MAP;
         bool map_screen = !(game_over && !game_over_shown) && ui_mode == UI_MAP;
 
@@ -2176,7 +2198,11 @@ int main(int argc, char* argv[])
             C2D_TargetClear(bottom, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
             C2D_SceneBegin(bottom);
             C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_BOTTOM, true);
-            render_title_loading_bottom(what, title_frame + load_frame);
+            if (engine_failed)
+                render_title_loading_bottom(s_started_from_save && !fc3ds_server_is_ready()
+                                            ? "That save couldn't be loaded." : "The game stopped unexpectedly.", -1);
+            else
+                render_title_loading_bottom(what, title_frame + load_frame);
         } else {
             // Top screen, once per eye while the 3D slider is up.
             float slider = osGet3DSliderState();
@@ -2314,10 +2340,11 @@ int main(int argc, char* argv[])
                     render_city_buildings_panel(&ui_city_info, city_bldg, city_bldg_n, ui_scroll, city_sell_armed);
                 else if (ui_city_tab == CITY_TAB_UNITS)
                     render_city_units_panel(&ui_city_info, ui_scroll);
-                else
+                else {
                     render_set_buy_armed(buy_armed);
                     render_city_panel(&ui_city_info, ui_build_opts, ui_build_count, ui_scroll,
                                       ui_worklist, ui_worklist_count, ui_worklist_queue_mode);
+                }
                 break;
             case UI_RESEARCH:
                 if (ui_tech_tree_view) {

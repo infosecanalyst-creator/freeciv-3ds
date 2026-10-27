@@ -248,6 +248,25 @@ index a8530f8..6089e58 100644
    }
  
    fc_sockaddr_list_destroy(list);
+diff --git a/server/srv_main.c b/server/srv_main.c
+index 6eae94b..8b4f83b 100644
+--- a/server/srv_main.c
++++ b/server/srv_main.c
+@@ -3643,6 +3643,14 @@ void fc__noreturn srv_main(void)
+       srv_ready(); /* srv_ready() sets server state to S_S_RUNNING. */
+       srv_running();
+       srv_scores();
++#ifdef __3DS__
++      {
++        /* 3DS: park with the final game state intact so the client can show
++         * the result (fc3ds_server.c). Returns when the app quits. */
++        extern void fc3ds_server_game_over_park(void);
++        fc3ds_server_game_over_park();
++      }
++#endif
+     }
+ 
+     /* Remain in S_S_OVER until players log out */
 diff --git a/utility/shared.h b/utility/shared.h
 index 42a7777..d623d4e 100644
 --- a/utility/shared.h

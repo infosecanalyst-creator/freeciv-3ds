@@ -27,6 +27,9 @@ static volatile bool s_paused       = false;
 static volatile bool s_quitting     = false;
 static volatile bool s_ready        = false;
 static volatile bool s_work_pending = false;
+static volatile bool s_failed       = false;
+static volatile bool s_game_ended   = false;
+static volatile bool s_step_in_flight = false; // pump released a step, not parked yet
 
 // Start-choice gate (handoff-nohw.md §A.3): the server thread parks here,
 // before touching anything Freeciv-specific, until the main thread calls
@@ -56,7 +59,9 @@ static void fc3ds_apt_hook(APT_HookType hook, void *param)
     case APTHOOK_ONSUSPEND:
     case APTHOOK_ONSLEEP:
         fc3ds_server_pause();
-        if (LightEvent_WaitTimeout(&s_ev_parked, 5ULL * 1000 * 1000 * 1000) != 0) {
+        // Only a step that is actually running needs waiting for (on the
+        // title / setup / load screens nothing has been released).
+        if (s_step_in_flight && !s_failed && LightEvent_WaitTimeout(&s_ev_parked, 5ULL * 1000 * 1000 * 1000) != 0) {
             // Timed out with the server still mid-step - a stuck step is a
             // separate bug class; don't hang APT suspend forever over it.
             printf("fc3ds_server: APT suspend timed out waiting for park\n");
@@ -78,6 +83,7 @@ static void fc3ds_server_coro(void *arg)
     // Freeciv-specific has run yet (srv_init() hasn't even been called), so
     // this costs nothing beyond the wait itself.
     LightEvent_Wait(&s_ev_start_chosen);
+    if (s_quitting) return; // app closed before a game was picked
 
     srv_init(); // resets srvarg, including load_filename - must run first
 
@@ -132,6 +138,12 @@ void fc3ds_server_start(bool is_new_3ds)
     svcGetThreadPriority(&priority, CUR_THREAD_HANDLE);
     int dest_core = is_new_3ds ? 2 : -1;
     s_srv_thread = threadCreate(fc3ds_server_coro, NULL, 512 * 1024, priority + 1, dest_core, false);
+    if (!s_srv_thread && dest_core != -1)
+        s_srv_thread = threadCreate(fc3ds_server_coro, NULL, 512 * 1024, priority + 1, -1, false);
+    if (!s_srv_thread) {
+        printf("fc3ds_server: could not create the engine thread\n");
+        s_failed = true;
+    }
 
     // Registered once; the pause/resume it drives is a no-op if a suspend
     // arrives before the server thread reaches its first park (fc3ds_server_
@@ -202,6 +214,7 @@ void fc3ds_server_pump(void)
         return; // nothing to do - stay parked, zero CPU
     }
     s_work_pending = false;
+    s_step_in_flight = true;
     // Consume the park signal before releasing the server - otherwise
     // is_busy() would keep reporting "parked" (stale) the instant the
     // server starts running again, since RESET_STICKY doesn't self-clear.
@@ -244,9 +257,51 @@ void fc3ds_server_shutdown(void)
         LightEvent_Clear(&s_ev_parked);
         LightEvent_Signal(&s_ev_go);
     }
+    LightEvent_Signal(&s_ev_start_chosen); // still on the title screen: let it return
 
-    threadJoin(s_srv_thread, 5ULL * 1000 * 1000 * 1000);
-    s_quitting = false;
+    // A failed engine thread is parked in an endless sleep: don't wait on it.
+    if (s_srv_thread && !s_failed)
+        threadJoin(s_srv_thread, 5ULL * 1000 * 1000 * 1000);
+    // s_quitting stays set: if the join timed out, the engine thread's later
+    // exit() must still end only that thread (see __wrap_exit).
+}
+
+void fc3ds_server_wait_parked(int ms)
+{
+    LightEvent_WaitTimeout(&s_ev_parked, (u64)ms * 1000 * 1000);
+}
+
+bool fc3ds_server_on_server_thread(void)
+{
+    return s_srv_thread && threadGetCurrent() == s_srv_thread;
+}
+
+void fc3ds_server_mark_failed(void)
+{
+    s_failed = true;
+}
+
+bool fc3ds_server_failed(void)
+{
+    return s_failed;
+}
+
+bool fc3ds_server_game_ended(void)
+{
+    return s_game_ended;
+}
+
+void fc3ds_server_game_over_park(void)
+{
+    if (s_quitting) return;
+    s_game_ended = true;
+    // Park for good with the final state intact, so the UI can show the
+    // result; any further steps the UI releases just park again.
+    while (!s_quitting) {
+        s_step_in_flight = false;
+        LightEvent_Signal(&s_ev_parked);
+        LightEvent_Wait(&s_ev_go);
+    }
 }
 
 // Called from freeciv/server/sernet.c's server_sniff_all_input(), on the
@@ -267,6 +322,7 @@ void fc3ds_server_yield(void)
     }
     // Publishes this step's game-state writes to whichever core observes
     // fc3ds_server_is_busy() next - see the s_ev_parked comment up top.
+    s_step_in_flight = false;
     LightEvent_Signal(&s_ev_parked);
 
     LightEvent_Wait(&s_ev_go); // PARK - zero CPU until the main loop ticks us

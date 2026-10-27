@@ -272,16 +272,28 @@ static int music_fill(s16 *dst)
     return total;
 }
 
-void audio_set_music(MusicMode mode)
+// Music state belongs to whoever runs music_update() (the audio thread);
+// the main thread only posts the wanted mode, so it never waits on romfs.
+static volatile int s_req_mode = MUSIC_NONE;
+
+static void music_apply_mode(void)
 {
-    if (!s_ok || mode == s_mode) return;
-    LightLock_Lock(&s_lock);
+    MusicMode mode = (MusicMode)s_req_mode;
+    if (mode == s_mode) return;
     s_mode = mode;
     ndspChnWaveBufClear(MUSIC_CH);
     ima_close(&s_mfile);
     s_gap_frames = mode == MUSIC_GAME ? 90 : 0;
-    if (mode == MUSIC_MENU) music_open_next();
-    LightLock_Unlock(&s_lock);
+    // A track that won't open leaves s_mode as is (silence), rather than
+    // resetting to NONE and being retried every frame.
+    if (mode == MUSIC_MENU && !music_open_next()) ima_close(&s_mfile);
+}
+
+void audio_set_music(MusicMode mode)
+{
+    if (!s_ok || mode == (MusicMode)s_req_mode) return;
+    s_req_mode = mode;
+    if (!s_thread) music_apply_mode();
 }
 
 // The audio thread: feeds the music and decodes new sound effects, so the
@@ -290,9 +302,8 @@ static void audio_thread(void *arg)
 {
     (void)arg;
     while (s_thread_run) {
-        LightLock_Lock(&s_lock);
-        music_update();
-        LightLock_Unlock(&s_lock);
+        music_apply_mode();
+        music_update();     // file I/O, outside the lock
         // Decode queued effects outside the lock (slow), then play them.
         for (;;) {
             LightLock_Lock(&s_lock);
@@ -311,8 +322,8 @@ void audio_update(void)
 {
     // The audio thread does this; only if it couldn't start, do it here.
     if (!s_ok || s_thread) return;
-    LightLock_Lock(&s_lock);
     music_update();
+    LightLock_Lock(&s_lock);
     const char *file = s_sfx_qn > 0 ? s_sfx_queue[--s_sfx_qn] : NULL;
     LightLock_Unlock(&s_lock);
     if (file) {
@@ -326,7 +337,7 @@ static void music_update(void)
     if (!s_ok || s_mode == MUSIC_NONE) return;
     if (!s_mfile.f) {
         if (s_gap_frames > 0) { s_gap_frames--; return; }
-        if (!music_open_next()) { s_mode = MUSIC_NONE; return; }
+        if (!music_open_next()) { s_gap_frames = 600; return; } // try again later, quietly
     }
     bool ended = false;
     for (int i = 0; i < MUSIC_BUFS; i++) {
