@@ -2487,6 +2487,204 @@ void render_start_menu(const char *continue_label)
     draw_text(8, 220, 0.45f, dim, "Tap to choose");
 }
 
+// ---------------------------------------------------------------- title
+static C2D_SpriteSheet s_title_sheet;
+static unsigned char s_bd[24][64];   // backdrop terrain kinds
+static bool s_bd_ready;
+
+static void backdrop_init(void)
+{
+    if (s_bd_ready) return;
+    // A few overlapping "continents": sum of random blobs, thresholded.
+    float hgt[24][64] = {{0}}, wet[24][64] = {{0}};
+    srand(1234);
+    for (int k = 0; k < 18; k++) {
+        float cx = rand() % 64, cy = rand() % 24, r = 3 + rand() % 7, a = 0.5f + (rand() % 50) / 100.0f;
+        float wx = rand() % 64, wy = rand() % 24;
+        for (int y = 0; y < 24; y++) for (int x = 0; x < 64; x++) {
+            float dx = fabsf(x - cx); if (dx > 32) dx = 64 - dx;   // wraps
+            float d = sqrtf(dx * dx + (y - cy) * (y - cy));
+            if (d < r) hgt[y][x] += a * (1 - d / r);
+            float ex = fabsf(x - wx); if (ex > 32) ex = 64 - ex;
+            float e = sqrtf(ex * ex + (y - wy) * (y - wy));
+            if (e < 6) wet[y][x] += 1 - e / 6;
+        }
+    }
+    for (int y = 0; y < 24; y++) for (int x = 0; x < 64; x++) {
+        float h = hgt[y][x];
+        int k;
+        if (h < 0.30f) k = 0;                       // ocean
+        else if (h < 0.55f) k = wet[y][x] > 0.6f ? 2 : (wet[y][x] < 0.15f && y > 14 ? 6 : 1); // plains/grass/desert
+        else if (h < 0.80f) k = 3;                  // forest
+        else if (h < 1.05f) k = 4;                  // hills
+        else k = 5;                                 // mountains
+        s_bd[y][x] = (unsigned char)k;
+    }
+    s_bd_ready = true;
+}
+
+// The slow map flight behind the title. dim: 0..255 darkening for legibility.
+static void draw_backdrop(int frame, float w, float h, int dim)
+{
+    backdrop_init();
+    int idx[7] = { sprites_ocean_idx, sprites_plains_idx, sprites_grassland_idx, sprites_forest_idx,
+                   sprites_hills_idx, sprites_mountains_idx, sprites_desert_idx };
+    const float T = 30.0f;
+    float off = frame * 0.25f;            // px; ~15 px/s at 60 fps
+    float wrap = 64 * T;
+    off = fmodf(off, wrap);
+    int x0 = (int)(off / T);
+    float fx = -(off - x0 * T);
+    for (int ty = 0; ty * T < h; ty++) {
+        for (int i = 0; fx + i * T < w; i++) {
+            int tx = (x0 + i) % 64;
+            int k = s_bd[ty % 24][tx];
+            C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, idx[k]), fx + i * T, ty * T, 0.0f, NULL, 1.0f, 1.0f);
+        }
+    }
+    if (dim > 0) C2D_DrawRectSolid(0, 0, 0.01f, w, h, C2D_Color32(0x06, 0x0A, 0x12, dim));
+}
+
+int title_rows(bool has_continue, int *items)
+{
+    int n = 0;
+    for (int i = has_continue ? TI_CONTINUE : TI_NEW; i < TI_COUNT; i++) items[n++] = i;
+    return n;
+}
+
+int title_hit(int px, int py, bool has_continue)
+{
+    int items[TI_COUNT], n = title_rows(has_continue, items);
+    if (px < TITLE_ROW_X || px >= TITLE_ROW_X + TITLE_ROW_W || py < TITLE_ROW_Y0) return -1;
+    int r = (py - TITLE_ROW_Y0) / TITLE_ROW_H;
+    if (r >= n || (py - TITLE_ROW_Y0) % TITLE_ROW_H >= TITLE_ROW_H - 5) return -1;
+    return items[r];
+}
+
+void render_title_top(int frame, const char *line, const char *headline)
+{
+    C2D_TextBufClear(g_textBuf);
+    layer(0.0f);
+    draw_backdrop(frame, 400, 240, 0x70);
+    // Logo floats in front (stereo), with a gentle bob.
+    if (!s_title_sheet) s_title_sheet = C2D_SpriteSheetLoad("romfs:/gfx/title.t3x");
+    layer(4.0f);
+    float bob = sinf(frame * 0.03f) * 1.5f;
+    if (s_title_sheet) {
+        C2D_Image logo = C2D_SpriteSheetGetImage(s_title_sheet, 0);
+        float lw = logo.subtex->width;
+        C2D_DrawImageAt(logo, (400 - lw) / 2, 44 + bob, 0.5f, NULL, 1.0f, 1.0f);
+    } else {
+        draw_text(120, 50, 0.9f, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF), "FREECIV");
+    }
+    layer(2.0f);
+    const char *tag = headline ? headline : "Build a civilization, on two screens";
+    float tw = text_width(tag, 0.55f);
+    draw_text((400 - tw) / 2, 116 + bob * 0.5f, 0.55f, C2D_Color32(0xF4, 0xEC, 0xD8, 0xFF), tag);
+    layer(0.0f);
+    if (line && line[0]) {
+        C2D_DrawRectSolid(0, 240 - 30, 0.02f, 400, 30, C2D_Color32(0x06, 0x0A, 0x12, 0xC8));
+        C2D_DrawRectSolid(0, 240 - 30, 0.03f, 400, 1, C2D_Color32(0xFF, 0xD8, 0x60, 0x90));
+        draw_wrapped(line, 10, 240 - 26, 380, 0.47f, C2D_Color32(0xE0, 0xE6, 0xEE, 0xFF), 2, 15, 0.04f);
+    }
+}
+
+static void title_row(float y, const char *label, const char *sub, bool sel)
+{
+    u32 bg = sel ? C2D_Color32(0x5A, 0x44, 0x12, 0xF0) : C2D_Color32(0x16, 0x22, 0x34, 0xE8);
+    u32 edge = sel ? C2D_Color32(0xFF, 0xD8, 0x60, 0xFF) : C2D_Color32(0x4C, 0x6C, 0x90, 0xFF);
+    float h = TITLE_ROW_H - 5;
+    C2D_DrawRectSolid(TITLE_ROW_X, y, 0.10f, TITLE_ROW_W, h, bg);
+    C2D_DrawRectSolid(TITLE_ROW_X, y, 0.11f, TITLE_ROW_W, 2, edge);
+    C2D_DrawRectSolid(TITLE_ROW_X, y + h - 1, 0.11f, TITLE_ROW_W, 1, edge);
+    if (sel) C2D_DrawRectSolid(TITLE_ROW_X, y, 0.11f, 4, h, edge);
+    u32 tc = sel ? C2D_Color32(0xFF, 0xF2, 0xC8, 0xFF) : 0xFFFFFFFF;
+    if (sub && sub[0]) {
+        draw_text_z(TITLE_ROW_X + 14, y + 1, 0.12f, 0.55f, tc, label);
+        float sw = text_width(sub, 0.42f);
+        draw_text_z(TITLE_ROW_X + TITLE_ROW_W - 10 - sw, y + 9, 0.12f, 0.42f,
+                    sel ? C2D_Color32(0xFF, 0xE0, 0x90, 0xFF) : C2D_Color32(0xA8, 0xC0, 0xD8, 0xFF), sub);
+    } else {
+        draw_text_z(TITLE_ROW_X + 14, y + 4, 0.12f, 0.55f, tc, label);
+    }
+}
+
+void render_title_bottom(int sel, bool has_continue, const char *continue_label, int frame)
+{
+    C2D_TextBufClear(g_textBuf);
+    draw_backdrop(frame + 900, 320, 240, 0xB0);  // the same map, further along
+    static const char *labels[TI_COUNT] = { "Continue", "New Game", "Load Game", "Settings", "Controls", "Quit" };
+    int items[TI_COUNT], n = title_rows(has_continue, items);
+    for (int r = 0; r < n; r++) {
+        int it = items[r];
+        title_row(TITLE_ROW_Y0 + r * TITLE_ROW_H, labels[it], it == TI_CONTINUE ? continue_label : NULL, it == sel);
+    }
+}
+
+void render_title_settings(int music, int sfx, int text_large)
+{
+    C2D_TextBufClear(g_textBuf);
+    draw_backdrop(900, 320, 240, 0xC0);
+    C2D_DrawRectSolid(0, 0, 0.1f, 320, 26, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
+    draw_text_z(8, 3, 0.12f, 0.6f, 0xFFFFFFFF, "Settings");
+    const char *names[3] = { "Music", "Effects", "Text size" };
+    char vals[3][16];
+    snprintf(vals[0], sizeof(vals[0]), "%d", music);
+    snprintf(vals[1], sizeof(vals[1]), "%d", sfx);
+    snprintf(vals[2], sizeof(vals[2]), "%s", text_large ? "Large" : "Normal");
+    int v[3] = { music, sfx, text_large }, hi[3] = { 10, 10, 1 };
+    for (int i = 0; i < 3; i++) {
+        float y = SETUP_ROW_Y0 + i * SETUP_ROW_H;
+        draw_text_z(12, y + 2, 0.12f, 0.5f, 0xFFFFFFFF, names[i]);
+        draw_button(SETUP_MINUS_X, y, SETUP_BTN_W, SETUP_BTN_H, 0.12f, "-", 0.6f, v[i] > 0, false);
+        float vw = text_width(vals[i], 0.5f);
+        draw_text_z(SETUP_MINUS_X + SETUP_BTN_W + (SETUP_PLUS_X - SETUP_MINUS_X - SETUP_BTN_W - vw) / 2, y + 2, 0.12f, 0.5f,
+                    C2D_Color32(0xFF, 0xE8, 0xA0, 0xFF), vals[i]);
+        draw_button(SETUP_PLUS_X, y, SETUP_BTN_W, SETUP_BTN_H, 0.12f, "+", 0.6f, v[i] < hi[i], false);
+    }
+    draw_button(SETUP_BACK_X, SETUP_FOOT_Y, SETUP_FOOT_W, SETUP_FOOT_H, 0.12f, "Back", 0.55f, true, false);
+}
+
+void render_title_controls_top(int frame)
+{
+    C2D_TextBufClear(g_textBuf);
+    layer(0.0f);
+    draw_backdrop(frame, 400, 240, 0xD0);
+    draw_text(12, 6, 0.6f, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF), "Controls");
+    static const char *rows[][2] = {
+        { "Tap a unit", "select it; its orders appear above the buttons" },
+        { "Tap next to it", "move   (farther: tap twice to send it there)" },
+        { "Hold the stylus", "details of a square, without moving anything" },
+        { "Drag", "scroll the map      Map: tap to jump anywhere" },
+        { "End Turn button", "shows what needs you first (research, cities)" },
+        { "A / X", "orders / next unit        B: back or cancel" },
+        { "D-Pad / Circle Pad", "move the unit / scroll" },
+        { "L / R", "research / tax rates     ZL / ZR: zoom" },
+        { "START", "end turn         SELECT + START: quit" },
+    };
+    for (int i = 0; i < (int)(sizeof(rows) / sizeof(rows[0])); i++) {
+        float y = 32 + i * 22;
+        draw_text(12, y, 0.47f, C2D_Color32(0xFF, 0xE8, 0xA0, 0xFF), rows[i][0]);
+        draw_text(150, y, 0.45f, C2D_Color32(0xE0, 0xE6, 0xEE, 0xFF), rows[i][1]);
+    }
+}
+
+void render_title_loading_bottom(const char *msg, int frame)
+{
+    C2D_TextBufClear(g_textBuf);
+    draw_backdrop(frame + 900, 320, 240, 0xB0);
+    char line[64];
+    int dots = (frame / 20) % 4;
+    snprintf(line, sizeof(line), "%s%.*s", msg, dots, "...");
+    float tw = text_width(msg, 0.6f);
+    draw_text((320 - tw) / 2, 104, 0.6f, 0xFFFFFFFF, line);
+    // a little progress shimmer
+    float x = fmodf(frame * 2.0f, 360.0f) - 40;
+    C2D_DrawRectSolid(60, 134, 0.1f, 200, 4, C2D_Color32(0x20, 0x2C, 0x40, 0xFF));
+    float a = x < 60 ? 60 : x, b = x + 40 > 260 ? 260 : x + 40;
+    if (b > a) C2D_DrawRectSolid(a, 134, 0.11f, b - a, 4, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF));
+}
+
 void render_new_game_setup(const char *labels[SETUP_ROWS], const char *values[SETUP_ROWS],
                            const bool can_dec[SETUP_ROWS], const bool can_inc[SETUP_ROWS])
 {

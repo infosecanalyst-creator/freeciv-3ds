@@ -326,6 +326,27 @@ static inline int startmenu_slot_y(int slot, bool has_continue)
 // continue_label: e.g. "Turn 12, 3450 BC" for the newest save, or NULL.
 void render_start_menu(const char *continue_label);
 
+// ---- Title screen (handheld style, like the SimGolf port) ----
+// Top: the logo over a slow flight across a map, and a line about the chosen
+// row. Bottom: big rows for the stylus, D-pad + A as well.
+enum { TI_CONTINUE, TI_NEW, TI_LOAD, TI_SETTINGS, TI_CONTROLS, TI_QUIT, TI_COUNT };
+#define TITLE_ROW_X  28
+#define TITLE_ROW_W  264
+#define TITLE_ROW_Y0 10
+#define TITLE_ROW_H  37   // 32 px row + 5 px gap
+// Rows shown (Continue only with a save); returns how many, items in order.
+int  title_rows(bool has_continue, int *items);
+int  title_hit(int px, int py, bool has_continue);   // TI_* or -1
+// line: the description strip text; headline: replaces the tagline (loading).
+void render_title_top(int frame, const char *line, const char *headline);
+void render_title_bottom(int sel, bool has_continue, const char *continue_label, int frame);
+// Settings page (rows like New Game: label, -, value, +) and a Back button.
+void render_title_settings(int music, int sfx, int text_large);
+// Controls page on the top screen.
+void render_title_controls_top(int frame);
+// Loading splash on the bottom while a game starts.
+void render_title_loading_bottom(const char *msg, int frame);
+
 // New Game setup (bottom: rows of  label  [-] value [+], Start/Back;
 // top: summary). Values arrive pre-formatted.
 #define SETUP_ROWS      6

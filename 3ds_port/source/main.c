@@ -74,7 +74,8 @@ typedef enum { UI_MAP, UI_CITY, UI_RESEARCH, UI_RATES, UI_GOVERNMENT, UI_DIPLOMA
 // is called - so APP_START_MENU/APP_LOAD_PICKER must never call
 // fc3ds_server_pump()/is_busy() or read any game state; they render their
 // own screens and only transition to APP_GAME once a choice is made.
-typedef enum { APP_START_MENU, APP_NEW_GAME, APP_LOAD_PICKER, APP_GAME } AppState;
+typedef enum { APP_START_MENU, APP_NEW_GAME, APP_LOAD_PICKER, APP_GAME, APP_SETTINGS, APP_CONTROLS } AppState;
+static bool s_started_from_save; // loading splash wording
 
 // Frames the "Saved" toast stays visible after a SAVE action-bar tap
 // (§A.2) - ~1.5s at the 3DS's fixed 60fps.
@@ -637,6 +638,7 @@ int main(int argc, char* argv[])
     // Newest save (autosave or manual) for the title screen's Continue button.
     static char continue_file[64], continue_label[48];
     continue_file[0] = continue_label[0] = 0;
+    int title_sel = TI_NEW, title_choose = -1, title_frame = 0;
     {
         SaveFile newest[1];
         if (get_save_files(newest, 1) > 0) {
@@ -650,6 +652,7 @@ int main(int argc, char* argv[])
                 snprintf(continue_label, sizeof(continue_label), "%.40s", continue_file);
         }
     }
+    if (continue_file[0]) title_sel = TI_CONTINUE; // the likeliest choice, chosen already
 
     // Main loop
     while (aptMainLoop())
@@ -716,38 +719,74 @@ int main(int argc, char* argv[])
                         }
                     }
                 } else if (app_state == APP_START_MENU) {
-                    bool cont = continue_file[0] != 0;
-                    int yc = startmenu_slot_y(0, cont), yn = startmenu_slot_y(1, cont), yl = startmenu_slot_y(2, cont);
-                    if (px >= STARTMENU_BTN_X && px < STARTMENU_BTN_X + STARTMENU_BTN_W) {
-                        if (cont && py >= yc && py < yc + STARTMENU_BTN_H) {
-                            fc3ds_server_begin_load_game(continue_file);
-                            app_state = APP_GAME;
-                        } else if (py >= yn && py < yn + STARTMENU_BTN_H) {
-                            bool dev = (kHeld & KEY_L) && (kHeld & KEY_R); // hold both shoulders = dev quick game
-                            if (dev) {
-                                fc3ds_server_begin_new_game(true);
-                                app_state = APP_GAME;
-                            } else {
-                                app_state = APP_NEW_GAME;
-                            }
-                        } else if (py >= yl && py < yl + STARTMENU_BTN_H) {
-                            save_file_count = get_save_files(save_files, MAX_SAVE_FILES);
-                            load_scroll = 0;
-                            app_state = APP_LOAD_PICKER;
-                        }
+                    int it = title_hit(px, py, continue_file[0] != 0);
+                    if (it >= 0) { title_sel = it; title_choose = it; }
+                } else if (app_state == APP_SETTINGS) {
+                    int row = (py - SETUP_ROW_Y0) / SETUP_ROW_H;
+                    bool in_rows = py >= SETUP_ROW_Y0 && row < 3 && (py - SETUP_ROW_Y0) % SETUP_ROW_H < SETUP_BTN_H;
+                    int d = 0;
+                    if (in_rows && px >= SETUP_MINUS_X && px < SETUP_MINUS_X + SETUP_BTN_W) d = -1;
+                    if (in_rows && px >= SETUP_PLUS_X && px < SETUP_PLUS_X + SETUP_BTN_W) d = 1;
+                    if (d) {
+                        int mv = audio_music_volume(), fx = audio_sfx_volume(), tb = font_get_bias() ? 1 : 0;
+                        if (row == 0) mv += d; else if (row == 1) fx += d; else tb = d > 0;
+                        audio_set_volumes(mv, fx);
+                        font_set_bias(tb);
+                        if (row == 1) audio_play("e_city_build");
+                        save_settings();
+                    } else if (py >= SETUP_FOOT_Y && px >= SETUP_BACK_X && px < SETUP_BACK_X + SETUP_FOOT_W) {
+                        app_state = APP_START_MENU;
                     }
+                } else if (app_state == APP_CONTROLS) {
+                    app_state = APP_START_MENU; // any tap goes back
                 } else { // APP_LOAD_PICKER
                     if (py >= PANEL_FOOTER_Y) {
                         app_state = APP_START_MENU;
                     } else {
                         int row = hit_test_scroll_list(py, load_scroll, save_file_count);
                         if (row >= 0) {
+                            s_started_from_save = true;
                             fc3ds_server_begin_load_game(save_files[row].filename);
                             app_state = APP_GAME;
                         }
                     }
                 }
             }
+            if (app_state == APP_START_MENU) {
+                int items[TI_COUNT], n = title_rows(continue_file[0] != 0, items), cur = 0;
+                for (int i = 0; i < n; i++) if (items[i] == title_sel) cur = i;
+                if (kDown & KEY_DUP)   cur = (cur + n - 1) % n;
+                if (kDown & KEY_DDOWN) cur = (cur + 1) % n;
+                title_sel = items[cur];
+                if (kDown & KEY_A) title_choose = title_sel;
+            } else if ((app_state == APP_SETTINGS || app_state == APP_CONTROLS) && (kDown & (KEY_B | KEY_A))) {
+                app_state = APP_START_MENU;
+            }
+            if (title_choose >= 0) {
+                int it = title_choose;
+                title_choose = -1;
+                if (it == TI_CONTINUE && continue_file[0]) {
+                    s_started_from_save = true;
+                    fc3ds_server_begin_load_game(continue_file);
+                    app_state = APP_GAME;
+                } else if (it == TI_NEW) {
+                    bool dev = (kHeld & KEY_L) && (kHeld & KEY_R); // hold both shoulders = dev quick game
+                    if (dev) { fc3ds_server_begin_new_game(true); app_state = APP_GAME; }
+                    else app_state = APP_NEW_GAME;
+                } else if (it == TI_LOAD) {
+                    save_file_count = get_save_files(save_files, MAX_SAVE_FILES);
+                    load_scroll = 0;
+                    app_state = APP_LOAD_PICKER;
+                } else if (it == TI_SETTINGS) {
+                    app_state = APP_SETTINGS;
+                } else if (it == TI_CONTROLS) {
+                    app_state = APP_CONTROLS;
+                } else if (it == TI_QUIT) {
+                    break; // leaves the main loop: normal shutdown
+                }
+                if (app_state == APP_GAME) continue; // straight into the game loop next frame
+            }
+            title_frame++;
             if (app_state == APP_NEW_GAME && (kDown & KEY_B)) app_state = APP_START_MENU;
             if (app_state == APP_LOAD_PICKER) {
                 if (kDown & KEY_DUP)   load_scroll--;
@@ -770,14 +809,36 @@ int main(int argc, char* argv[])
                 C2D_TargetClear(tgt, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
                 C2D_SceneBegin(tgt);
                 C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_TOP, true);
-                render_new_game_top(isNew3DS, app_state == APP_NEW_GAME ? ng_summary : "Choose New Game or Load Game below.");
+                render_set_stereo(osGet3DSliderState() > 0.02f ? (eye ? 1 : -1) : 0, osGet3DSliderState());
+                if (app_state == APP_START_MENU || app_state == APP_SETTINGS) {
+                    static const char *lines[TI_COUNT] = {
+                        NULL, "Choose the map, your rivals and the rules, then found your first city.",
+                        "Every save, newest first.", "Music, sound effects and text size.",
+                        "How the stylus and the buttons work.", "Back to the Homebrew Launcher." };
+                    char cl[96];
+                    const char *line = lines[title_sel];
+                    if (title_sel == TI_CONTINUE) {
+                        snprintf(cl, sizeof(cl), "Pick up where you left off: %s.", continue_label);
+                        line = cl;
+                    }
+                    if (app_state == APP_SETTINGS) line = "Changes are kept on the SD card.";
+                    render_title_top(title_frame, line, NULL);
+                } else if (app_state == APP_CONTROLS) {
+                    render_title_controls_top(title_frame);
+                } else {
+                    render_new_game_top(isNew3DS, app_state == APP_NEW_GAME ? ng_summary : "Pick a saved game below.");
+                }
+                render_set_stereo(0, 0);
             }
 
             C2D_TargetClear(bottom, C2D_Color32(0x10, 0x10, 0x10, 0xFF));
             C2D_SceneBegin(bottom);
             C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_BOTTOM, true);
-            if (app_state == APP_START_MENU) {
-                render_start_menu(continue_file[0] ? continue_label : NULL);
+            if (app_state == APP_START_MENU || app_state == APP_CONTROLS) {
+                render_title_bottom(app_state == APP_START_MENU ? title_sel : -1, continue_file[0] != 0,
+                                    continue_label, title_frame);
+            } else if (app_state == APP_SETTINGS) {
+                render_title_settings(audio_music_volume(), audio_sfx_volume(), font_get_bias() ? 1 : 0);
             } else if (app_state == APP_NEW_GAME) {
                 char rv[8];
                 snprintf(rv, sizeof(rv), "%d", ng.rivals);
@@ -1982,18 +2043,26 @@ int main(int argc, char* argv[])
                                      : save_in_flight            ? PROC_SAVING
                                                                   : PROC_TURN;
 
+            // Starting a game: the title's look (logo over the map flight)
+            // with what is happening, instead of a plain page.
+            static int load_frame = 0;
+            load_frame++;
+            const char *what = reason == PROC_LOADING ? (s_started_from_save ? "Loading your game" : "Creating the world")
+                             : reason == PROC_SAVING ? "Saving" : "Other civilizations are moving";
             for (int eye = 0; eye < (osGet3DSliderState() > 0.02f ? 2 : 1); eye++) {
                 C3D_RenderTarget *tgt = eye ? top_right : top;
                 C2D_TargetClear(tgt, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
                 C2D_SceneBegin(tgt);
                 C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_TOP, true);
-                render_processing_overlay(SCREEN_WIDTH_TOP, SCREEN_HEIGHT_TOP, reason);
+                render_set_stereo(osGet3DSliderState() > 0.02f ? (eye ? 1 : -1) : 0, osGet3DSliderState());
+                render_title_top(title_frame + load_frame, NULL, NULL);
+                render_set_stereo(0, 0);
             }
 
             C2D_TargetClear(bottom, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
             C2D_SceneBegin(bottom);
             C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_BOTTOM, true);
-            render_processing_overlay(SCREEN_WIDTH_BOT, SCREEN_HEIGHT_BOT, reason);
+            render_title_loading_bottom(what, title_frame + load_frame);
         } else {
             // Top screen, once per eye while the 3D slider is up.
             float slider = osGet3DSliderState();

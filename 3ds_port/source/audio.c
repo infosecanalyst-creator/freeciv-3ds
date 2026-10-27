@@ -10,6 +10,8 @@
 
 static bool s_ok;
 static int s_music_vol = 6, s_sfx_vol = 8;
+static LightLock s_lock;
+static void music_update(void);
 
 // ---------------------------------------------------------------- IMA ADPCM
 static const int k_ima_steps[89] = {
@@ -59,6 +61,9 @@ static bool ima_open(ImaFile *w, const char *path)
 {
     memset(w, 0, sizeof(*w));
     w->f = fopen(path, "rb");
+    // Big reads, rarely: the engine reads rulesets/saves from the same media,
+    // and many 1 KB reads per frame queue behind it and stutter.
+    if (w->f) setvbuf(w->f, NULL, _IOFBF, 32 * 1024);
     if (!w->f) return false;
     u8 h[12];
     if (fread(h, 1, 12, w->f) != 12 || memcmp(h, "RIFF", 4) || memcmp(h + 8, "WAVE", 4)) goto fail;
@@ -141,9 +146,14 @@ static Sfx *load_sfx(const char *file)
     while ((n = ima_next(&w, pcm + total)) > 0) total += n;
     ima_close(&w);
     DSP_FlushDataCache(pcm, total * sizeof(s16));
-    Sfx *s = &s_cache[s_ncache++];
+    // Fill the entry first, then publish it under the lock (audio_play reads
+    // the cache from the main thread).
+    Sfx *s = &s_cache[s_ncache];
     snprintf(s->file, sizeof(s->file), "%s", file);
     s->pcm = pcm; s->samples = total; s->rate = w.rate;
+    LightLock_Lock(&s_lock);
+    s_ncache++;
+    LightLock_Unlock(&s_lock);
     return s;
 }
 
@@ -153,6 +163,15 @@ static const char *lookup(const char *tag)
         if (!strcasecmp(k_sound_table[i].tag, tag)) return k_sound_table[i].file;
     return NULL;
 }
+
+static void play_sfx(Sfx *s);
+
+// Sound effects not yet in memory are decoded on the audio thread, not here.
+#define SFX_QUEUE 8
+static const char *s_sfx_queue[SFX_QUEUE];
+static int s_sfx_qn;
+static Thread s_thread;
+static volatile bool s_thread_run;
 
 void audio_play(const char *tag)
 {
@@ -164,8 +183,16 @@ void audio_play(const char *tag)
         file = lookup(gen);
     }
     if (!file) return;
-    Sfx *s = load_sfx(file);
-    if (!s) return;
+    LightLock_Lock(&s_lock);
+    Sfx *s = NULL;
+    for (int i = 0; i < s_ncache; i++) if (!strcmp(s_cache[i].file, file)) s = &s_cache[i];
+    if (s) play_sfx(s);
+    else if (s_sfx_qn < SFX_QUEUE) s_sfx_queue[s_sfx_qn++] = file; // table strings are static
+    LightLock_Unlock(&s_lock);
+}
+
+static void play_sfx(Sfx *s)
+{
     int ch = -1;
     for (int i = 0; i < SFX_CHANNELS; i++) {
         ndspWaveBuf *b = &s_sfx_buf[i];
@@ -189,7 +216,7 @@ void audio_play(const char *tag)
 
 // ---------------------------------------------------------------- music
 #define MUSIC_CH 0
-#define MUSIC_BUFS 4
+#define MUSIC_BUFS 8          // ~3 s queued, so a busy moment never starves it
 #define MUSIC_BUF_SAMPLES (2041 * 4)
 static s16 *s_mbuf[MUSIC_BUFS];
 static ndspWaveBuf s_mwave[MUSIC_BUFS];
@@ -248,14 +275,53 @@ static int music_fill(s16 *dst)
 void audio_set_music(MusicMode mode)
 {
     if (!s_ok || mode == s_mode) return;
+    LightLock_Lock(&s_lock);
     s_mode = mode;
     ndspChnWaveBufClear(MUSIC_CH);
     ima_close(&s_mfile);
     s_gap_frames = mode == MUSIC_GAME ? 90 : 0;
     if (mode == MUSIC_MENU) music_open_next();
+    LightLock_Unlock(&s_lock);
+}
+
+// The audio thread: feeds the music and decodes new sound effects, so the
+// game's main loop never waits on the SD card / romfs for audio.
+static void audio_thread(void *arg)
+{
+    (void)arg;
+    while (s_thread_run) {
+        LightLock_Lock(&s_lock);
+        music_update();
+        LightLock_Unlock(&s_lock);
+        // Decode queued effects outside the lock (slow), then play them.
+        for (;;) {
+            LightLock_Lock(&s_lock);
+            const char *file = s_sfx_qn > 0 ? s_sfx_queue[0] : NULL;
+            if (file) memmove(s_sfx_queue, s_sfx_queue + 1, (--s_sfx_qn) * sizeof(s_sfx_queue[0]));
+            LightLock_Unlock(&s_lock);
+            if (!file) break;
+            Sfx *s = load_sfx(file);
+            if (s) { LightLock_Lock(&s_lock); play_sfx(s); LightLock_Unlock(&s_lock); }
+        }
+        svcSleepThread(15 * 1000 * 1000ULL); // 15 ms
+    }
 }
 
 void audio_update(void)
+{
+    // The audio thread does this; only if it couldn't start, do it here.
+    if (!s_ok || s_thread) return;
+    LightLock_Lock(&s_lock);
+    music_update();
+    const char *file = s_sfx_qn > 0 ? s_sfx_queue[--s_sfx_qn] : NULL;
+    LightLock_Unlock(&s_lock);
+    if (file) {
+        Sfx *s = load_sfx(file);
+        if (s) { LightLock_Lock(&s_lock); play_sfx(s); LightLock_Unlock(&s_lock); }
+    }
+}
+
+static void music_update(void)
 {
     if (!s_ok || s_mode == MUSIC_NONE) return;
     if (!s_mfile.f) {
@@ -299,11 +365,25 @@ void audio_init(void)
         if (!s_mbuf[i]) { ndspExit(); return; }
     }
     s_ok = true;
+    LightLock_Init(&s_lock);
+    s_thread_run = true;
+    s32 prio = 0x30;
+    svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
+    // A little above the main thread so it gets its few ms when it needs
+    // them; it sleeps the rest of the time.
+    s_thread = threadCreate(audio_thread, NULL, 32 * 1024, prio - 1, -2, false);
+    if (!s_thread) { s_thread_run = false; }
 }
 
 void audio_exit(void)
 {
     if (!s_ok) return;
+    if (s_thread) {
+        s_thread_run = false;
+        threadJoin(s_thread, 1000ULL * 1000 * 1000);
+        threadFree(s_thread);
+        s_thread = NULL;
+    }
     ima_close(&s_mfile);
     for (int i = 0; i < 24; i++) ndspChnWaveBufClear(i);
     ndspExit();

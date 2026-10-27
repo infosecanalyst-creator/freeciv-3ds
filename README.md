@@ -133,5 +133,6 @@ ffmpeg) regenerates the audio. Both outputs are committed, so a normal build nee
 - **Game music** "Exploration", "Harvest Season", "Market Day" and "The Bard's Tale": RandomMind,
   [opengameart.org](https://opengameart.org/users/randommind), CC0.
 - **Inter** font: Rasmus Andersson, SIL Open Font License 1.1 (`licenses/Inter-LICENSE.txt`).
+- **Cinzel** font (title logo): The Cinzel Project Authors, SIL Open Font License 1.1 (`licenses/Cinzel-OFL.txt`).
 
 This program is free software under the GNU General Public License, version 2 or later; see `LICENSE`.
