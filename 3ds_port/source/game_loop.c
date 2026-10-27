@@ -680,7 +680,9 @@ void freeciv3ds_event_hook(const struct packet_chat_msg *packet, int pidx)
 
     // A city finished something (or its plan ran out): queue it for the
     // smart End Turn button's "Choose production" step.
-    if ((e == E_IMP_BUILD || e == E_UNIT_BUILT || e == E_UNIT_BUILT_POP_COST || e == E_WORKLIST
+    // (A plain unit just repeats, which is what players expect; settlers
+    // and other units that cost population do prompt.)
+    if ((e == E_IMP_BUILD || e == E_UNIT_BUILT_POP_COST || e == E_WORKLIST
          || e == E_IMP_AUTO || e == E_CITY_CANTBUILD) && packet->tile >= 0) {
         struct tile *t = index_to_tile(&(wld.map), packet->tile);
         struct city *pc = t ? tile_city(t) : NULL;
