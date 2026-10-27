@@ -2687,10 +2687,10 @@ static void title_row(float y, const char *label, const char *sub, bool sel)
     if (sub && sub[0]) {
         draw_text_z(TITLE_ROW_X + 14, y + 1, 0.12f, 0.55f, tc, label);
         float sw = text_width(sub, 0.42f);
-        draw_text_z(TITLE_ROW_X + TITLE_ROW_W - 10 - sw, y + 9, 0.12f, 0.42f,
+        draw_text_z(TITLE_ROW_X + TITLE_ROW_W - 10 - sw, y + 7, 0.12f, 0.42f,
                     sel ? C2D_Color32(0xFF, 0xE0, 0x90, 0xFF) : C2D_Color32(0xA8, 0xC0, 0xD8, 0xFF), sub);
     } else {
-        draw_text_z(TITLE_ROW_X + 14, y + 4, 0.12f, 0.55f, tc, label);
+        draw_text_z(TITLE_ROW_X + 14, y + 2, 0.12f, 0.55f, tc, label);
     }
 }
 
@@ -2698,7 +2698,7 @@ void render_title_bottom(int sel, bool has_continue, const char *continue_label,
 {
     C2D_TextBufClear(g_textBuf);
     draw_backdrop(frame + 900, 320, 240, 0xB0);  // the same map, further along
-    static const char *labels[TI_COUNT] = { "Continue", "New Game", "Load Game", "Settings", "Controls", "Quit" };
+    static const char *labels[TI_COUNT] = { "Continue", "New Game", "Load Game", "Settings", "Controls", "Manual", "Quit" };
     int items[TI_COUNT], n = title_rows(has_continue, items);
     for (int r = 0; r < n; r++) {
         int it = items[r];
@@ -3101,4 +3101,279 @@ void render_load_picker(const SaveFile *files, int n, int scroll)
 
     if (n > 0) draw_text(8, PANEL_HEADER_H + 8, 0.45f, dim, "Newest first. Tap one to load it.");
     draw_button(4, PANEL_FOOTER_Y + 2, 312, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Back", 0.5f, true, false);
+}
+
+// ---- Instruction manual ---------------------------------------------------
+// Readable from the title screen (Manual) and the in-game Menu (Manual). The
+// top screen is for reading: the section's text, scrolled with the Circle Pad
+// or D-pad. The bottom screen is for choosing: a button per section, and
+// Close. L / R step through sections, B or START closes. It reopens at the
+// section and place it was left at. The text is romfs:/manual.txt; a
+// manual.txt in sdmc:/3ds/freeciv/ replaces it. Format: "# " section,
+// "## " heading, "- " list item, "1. " step, "| a | b" two-column row.
+
+#define MAN_MAX_SECTIONS 24
+#define MAN_MAX_LINES    600
+#define MAN_TEXT_X       12
+#define MAN_TEXT_W       376
+#define MAN_TOP          28
+#define MAN_BOTTOM       222
+#define MAN_SCALE        0.47f
+#define MAN_LH           16
+enum { ML_TEXT, ML_HEAD, ML_ROW, ML_GAP };
+typedef struct { unsigned char kind; unsigned char x; short h; char a[96]; char b[96]; } ManLine;
+
+static char   *s_man_text;
+static char    s_man_title[MAN_MAX_SECTIONS][40];
+static const char *s_man_body[MAN_MAX_SECTIONS], *s_man_end[MAN_MAX_SECTIONS];
+static int     s_man_n;
+static int     s_man_sec, s_man_scroll;      // section, scroll in px
+static ManLine *s_ml;
+static int     s_ml_n, s_ml_sec = -1, s_ml_bias = -1, s_ml_h;
+
+static void man_load(void)
+{
+    if (s_man_text) return;
+    FILE *f = fopen("sdmc:/3ds/freeciv/manual.txt", "rb");
+    if (!f) f = fopen("romfs:/manual.txt", "rb");
+    if (!f) { s_man_text = calloc(1, 1); return; }
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    s_man_text = malloc(n + 1);
+    if (!s_man_text) { fclose(f); return; }
+    n = (long)fread(s_man_text, 1, n, f);
+    fclose(f);
+    s_man_text[n] = 0;
+    // Sections start at lines beginning with "# ".
+    for (const char *p = s_man_text; *p; ) {
+        const char *eol = strchr(p, '\n');
+        const char *next = eol ? eol + 1 : p + strlen(p);
+        if (p[0] == '#' && p[1] == ' ' && s_man_n < MAN_MAX_SECTIONS) {
+            if (s_man_n > 0) s_man_end[s_man_n - 1] = p;
+            int len = (int)((eol ? eol : next) - (p + 2));
+            if (len > 0 && p[2 + len - 1] == '\r') len--;
+            snprintf(s_man_title[s_man_n], sizeof(s_man_title[0]), "%.*s", len, p + 2);
+            s_man_body[s_man_n] = next;
+            s_man_n++;
+        }
+        p = next;
+    }
+    if (s_man_n > 0) s_man_end[s_man_n - 1] = s_man_text + n;
+    s_ml = malloc(sizeof(ManLine) * MAN_MAX_LINES);
+}
+
+static void man_add(int kind, int x, int h, const char *a, const char *b)
+{
+    if (!s_ml || s_ml_n >= MAN_MAX_LINES) return;
+    ManLine *l = &s_ml[s_ml_n++];
+    l->kind = (unsigned char)kind; l->x = (unsigned char)x; l->h = (short)h;
+    snprintf(l->a, sizeof(l->a), "%s", a ? a : "");
+    snprintf(l->b, sizeof(l->b), "%s", b ? b : "");
+    s_ml_h += h;
+}
+
+// Word-wraps text into lines of width w; calls back with each line.
+static void man_wrap(const char *text, float w, float scale, int kind, int x, const char *first_a, bool row)
+{
+    char line[96];
+    int n = 0;
+    bool first = true;
+    const char *p = text;
+    while (*p) {
+        while (*p == ' ') p++;
+        const char *we = p;
+        while (*we && *we != ' ') we++;
+        int wl = (int)(we - p);
+        char trial[96];
+        snprintf(trial, sizeof(trial), "%.*s%s%.*s", n, line, n ? " " : "", wl, p);
+        if (n && font_width(trial, scale) > w) {
+            line[n] = 0;
+            if (row) man_add(ML_ROW, x, MAN_LH, first ? first_a : "", line);
+            else man_add(kind, x, MAN_LH, first ? first_a : "", line);
+            first = false;
+            n = 0;
+            continue; // retry this word on a new line
+        }
+        snprintf(line, sizeof(line), "%s", trial);
+        n = (int)strlen(line);
+        p = we;
+    }
+    if (n || first) {
+        line[n] = 0;
+        man_add(row ? ML_ROW : kind, x, MAN_LH, first ? first_a : "", line);
+    }
+}
+
+static void man_layout(void)
+{
+    if (s_ml_sec == s_man_sec && s_ml_bias == font_get_bias()) return;
+    s_ml_sec = s_man_sec; s_ml_bias = font_get_bias();
+    s_ml_n = 0; s_ml_h = 0;
+    if (s_man_sec < 0 || s_man_sec >= s_man_n) return;
+    const char *p = s_man_body[s_man_sec];
+    const char *end = s_man_end[s_man_sec];
+    char ln[400];
+    while (p < end && *p) {
+        const char *eol = p;
+        while (eol < end && *eol && *eol != '\n') eol++;
+        int len = (int)(eol - p);
+        if (len > (int)sizeof(ln) - 1) len = sizeof(ln) - 1;
+        memcpy(ln, p, len); ln[len] = 0;
+        char *cr = strchr(ln, '\r'); if (cr) *cr = 0;
+        p = *eol ? eol + 1 : eol;
+        if (!ln[0]) { man_add(ML_GAP, 0, 6, NULL, NULL); continue; }
+        if (!strncmp(ln, "## ", 3)) {
+            if (s_ml_n > 0) man_add(ML_GAP, 0, 4, NULL, NULL);
+            man_add(ML_HEAD, 0, 20, ln + 3, NULL);
+        } else if (!strncmp(ln, "- ", 2)) {
+            man_wrap(ln + 2, MAN_TEXT_W - 14, MAN_SCALE, ML_TEXT, 14, "\x01", false); // \x01 = bullet
+        } else if (ln[0] >= '1' && ln[0] <= '9' && ln[1] == '.' && ln[2] == ' ') {
+            char num[4] = { ln[0], '.', 0, 0 };
+            man_wrap(ln + 3, MAN_TEXT_W - 18, MAN_SCALE, ML_TEXT, 18, num, false);
+        } else if (ln[0] == '|') {
+            char *a = ln + 1, *bar = strchr(a, '|');
+            char *b = bar ? bar + 1 : (char *)"";
+            if (bar) *bar = 0;
+            while (*a == ' ') a++;
+            for (char *e = a + strlen(a); e > a && e[-1] == ' '; ) *--e = 0;
+            while (*b == ' ') b++;
+            man_wrap(b, MAN_TEXT_W - 132, 0.45f, ML_ROW, 132, a, true);
+        } else {
+            man_wrap(ln, MAN_TEXT_W, MAN_SCALE, ML_TEXT, 0, "", false);
+        }
+    }
+}
+
+bool manual_available(void) { man_load(); return s_man_n > 0; }
+
+static int man_max_scroll(void)
+{
+    int m = s_ml_h - (MAN_BOTTOM - MAN_TOP);
+    return m > 0 ? m : 0;
+}
+
+void render_manual_top(void)
+{
+    C2D_TextBufClear(g_textBuf);
+    man_load();
+    man_layout();
+    u32 white = 0xFFFFFFFF, soft = C2D_Color32(0xC0, 0xCE, 0xDC, 0xFF), gold = C2D_Color32(0xFF, 0xD8, 0x60, 0xFF);
+    C2D_DrawRectSolid(0, 0, 0.0f, 400, 240, C2D_Color32(0x10, 0x16, 0x22, 0xFF));
+    // Header and footer bands sit in front of the text, hiding what scrolls under them.
+    C2D_DrawRectSolid(0, 0, 0.5f, 400, 24, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
+    C2D_DrawRectSolid(0, 24, 0.5f, 400, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
+    char hdr[64];
+    if (s_man_n == 0) {
+        draw_text_z(10, 3, 0.51f, 0.6f, white, "Manual");
+        draw_text(12, 40, 0.5f, soft, "The manual is missing (romfs:/manual.txt).");
+        return;
+    }
+    draw_text_z(10, 2, 0.51f, 0.6f, white, s_man_title[s_man_sec]);
+    snprintf(hdr, sizeof(hdr), "%d of %d", s_man_sec + 1, s_man_n);
+    draw_text_z(392 - text_width(hdr, 0.45f), 5, 0.51f, 0.45f, C2D_Color32(0xC8, 0xD8, 0xE8, 0xFF), hdr);
+    C2D_DrawRectSolid(0, MAN_BOTTOM + 1, 0.5f, 400, 240 - MAN_BOTTOM - 1, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
+    draw_text_z(5, 240 - 16, 0.51f, 0.45f, soft, "D-Pad / Circle Pad: scroll   L / R: section   B: close");
+
+    int y = MAN_TOP - s_man_scroll;
+    for (int i = 0; i < s_ml_n; i++) {
+        const ManLine *l = &s_ml[i];
+        if (y + l->h > MAN_TOP - 2 && y < MAN_BOTTOM - 10) {
+            float x = MAN_TEXT_X;
+            switch (l->kind) {
+            case ML_HEAD:
+                draw_text_z(x, y + 2, 0.1f, 0.55f, gold, l->a);
+                break;
+            case ML_ROW:
+                if (l->a[0]) draw_text_z(x, y, 0.1f, 0.45f, C2D_Color32(0xFF, 0xE8, 0xA0, 0xFF), l->a);
+                draw_text_z(x + l->x, y, 0.1f, 0.45f, white, l->b);
+                break;
+            case ML_TEXT:
+                if (l->a[0] == 1) C2D_DrawRectSolid(x + 3, y + 7, 0.1f, 4, 4, gold);
+                else if (l->a[0]) draw_text_z(x, y, 0.1f, MAN_SCALE, gold, l->a);
+                draw_text_z(x + l->x, y, 0.1f, MAN_SCALE, white, l->b);
+                break;
+            default: break;
+            }
+        }
+        y += l->h;
+    }
+    // Scroll bar.
+    int ms = man_max_scroll();
+    if (ms > 0) {
+        float track = MAN_BOTTOM - MAN_TOP, th = track * track / (track + ms);
+        C2D_DrawRectSolid(395, MAN_TOP, 0.2f, 3, track, C2D_Color32(0x22, 0x2C, 0x3A, 0xFF));
+        C2D_DrawRectSolid(395, MAN_TOP + (track - th) * s_man_scroll / ms, 0.21f, 3, th, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
+    }
+}
+
+// Bottom screen: 3 columns x 5 rows of section buttons; Close fills the rest.
+#define MAN_COLS 3
+#define MAN_ROWS 5
+static void man_cell(int i, float *x, float *y, float *w, float *h)
+{
+    float cw = (320 - 4.0f * (MAN_COLS + 1)) / MAN_COLS, ch = (240 - 4.0f * (MAN_ROWS + 1)) / MAN_ROWS;
+    *x = 4 + (i % MAN_COLS) * (cw + 4); *y = 4 + (i / MAN_COLS) * (ch + 4); *w = cw; *h = ch;
+}
+
+static int man_hit(int px, int py)
+{
+    int ncell = s_man_n < MAN_COLS * MAN_ROWS ? s_man_n : MAN_COLS * MAN_ROWS - 1;
+    for (int i = 0; i < MAN_COLS * MAN_ROWS; i++) {
+        float x, y, w, h;
+        man_cell(i, &x, &y, &w, &h);
+        if (i >= ncell) { // Close: this cell to the end of the grid
+            float x2, y2, w2, h2;
+            man_cell(MAN_COLS * MAN_ROWS - 1, &x2, &y2, &w2, &h2);
+            if (py >= y && py < y + h && px >= x && px < x2 + w2) return -2;
+            return -1;
+        }
+        if (px >= x && px < x + w && py >= y && py < y + h) return i;
+    }
+    return -1;
+}
+
+void render_manual_bottom(int frame)
+{
+    C2D_TextBufClear(g_textBuf);
+    man_load();
+    draw_backdrop(frame + 900, 320, 240, 0xC8);
+    int ncell = s_man_n < MAN_COLS * MAN_ROWS ? s_man_n : MAN_COLS * MAN_ROWS - 1;
+    for (int i = 0; i < ncell; i++) {
+        float x, y, w, h;
+        man_cell(i, &x, &y, &w, &h);
+        const char *t = s_man_title[i];
+        float sc = 0.47f;
+        while (sc > 0.36f && text_width(t, sc) > w - 8) sc -= 0.01f;
+        draw_button(x, y, w, h, 0.12f, t, sc, true, i == s_man_sec);
+    }
+    float x, y, w, h, x2, y2, w2, h2;
+    man_cell(ncell, &x, &y, &w, &h);
+    man_cell(MAN_COLS * MAN_ROWS - 1, &x2, &y2, &w2, &h2);
+    draw_button(x, y, x2 + w2 - x, h, 0.12f, "Close", 0.5f, true, false);
+    C2D_DrawRectSolid(x, y, 0.13f, x2 + w2 - x, 2, C2D_Color32(0xE0, 0x60, 0x50, 0xFF));
+}
+
+bool manual_input(u32 kDown, u32 kHeld, bool touched, int px, int py, int circle_dy)
+{
+    man_load();
+    if (kDown & (KEY_B | KEY_START)) return false;
+    if (s_man_n == 0) return !(kDown & KEY_TOUCH);
+    int prev = s_man_sec;
+    if (kDown & KEY_L) s_man_sec = (s_man_sec + s_man_n - 1) % s_man_n;
+    if (kDown & KEY_R) s_man_sec = (s_man_sec + 1) % s_man_n;
+    if (touched) {
+        int hit = man_hit(px, py);
+        if (hit == -2) return false;
+        if (hit >= 0) s_man_sec = hit;
+    }
+    if (s_man_sec != prev) s_man_scroll = 0;
+    man_layout();
+    if (kHeld & KEY_DUP)   s_man_scroll -= 4;
+    if (kHeld & KEY_DDOWN) s_man_scroll += 4;
+    if (circle_dy > 20 || circle_dy < -20) s_man_scroll -= circle_dy / 12; // up = scroll up
+    int ms = man_max_scroll();
+    if (s_man_scroll > ms) s_man_scroll = ms;
+    if (s_man_scroll < 0) s_man_scroll = 0;
+    return true;
 }

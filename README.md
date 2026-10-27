@@ -53,6 +53,10 @@ supports the Old 3DS.
 - **Crisp text**: the UI font is pre-rendered at exact pixel sizes, not scaled.
 - Save and load to the SD card, plus autosaves. Suspending with HOME is safe.
 
+## Manual
+
+The full instruction manual is built into the game: Manual on the title screen, or Menu, then Manual, in a game. Its text is [3ds_port/romfs/manual.txt](3ds_port/romfs/manual.txt); a `manual.txt` in `sdmc:/3ds/freeciv/` replaces it.
+
 ## Controls
 
 | | |

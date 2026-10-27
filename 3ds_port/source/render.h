@@ -338,11 +338,18 @@ void render_start_menu(const char *continue_label);
 // ---- Title screen (handheld style, like the SimGolf port) ----
 // Top: the logo over a slow flight across a map, and a line about the chosen
 // row. Bottom: big rows for the stylus, D-pad + A as well.
-enum { TI_CONTINUE, TI_NEW, TI_LOAD, TI_SETTINGS, TI_CONTROLS, TI_QUIT, TI_COUNT };
+enum { TI_CONTINUE, TI_NEW, TI_LOAD, TI_SETTINGS, TI_CONTROLS, TI_MANUAL, TI_QUIT, TI_COUNT };
+
+// Instruction manual (title screen and in-game Menu). manual_input returns
+// false when the reader closes it; it never reads game state.
+bool manual_available(void);
+void render_manual_top(void);
+void render_manual_bottom(int frame);
+bool manual_input(u32 kDown, u32 kHeld, bool touched, int px, int py, int circle_dy);
 #define TITLE_ROW_X  28
 #define TITLE_ROW_W  264
-#define TITLE_ROW_Y0 10
-#define TITLE_ROW_H  37   // 32 px row + 5 px gap
+#define TITLE_ROW_Y0 6
+#define TITLE_ROW_H  33   // 28 px row + 5 px gap
 // Rows shown (Continue only with a save); returns how many, items in order.
 int  title_rows(bool has_continue, int *items);
 int  title_hit(int px, int py, bool has_continue);   // TI_* or -1

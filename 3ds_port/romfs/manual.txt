@@ -1,0 +1,201 @@
+# Welcome
+Freeciv 3DS is the open-source Civilization game, made for the New 3DS. You lead a people from one settler in 4000 BC to the space age, against rival civilizations run by the computer.
+
+You play on the touch screen with the stylus, the way the PC game is played with a mouse. The top screen is your dashboard: it shows what you have selected, your research and the state of your empire.
+
+## Reading this manual
+- Tap a section on the touch screen to open it.
+- Circle Pad or D-pad up and down: scroll.
+- L and R: previous and next section.
+- B or Start: close. The manual opens again where you left it.
+
+# Getting started
+## Installing over Wi-Fi
+1. On the 3DS, open the Homebrew Launcher and start ftpd.
+2. On the PC, upload freeciv3ds.3dsx to sdmc:/3ds/.
+3. Close ftpd and start Freeciv from the Homebrew Launcher.
+
+The same steps install every update. You never need to take the SD card out.
+
+## The title screen
+| Continue | Opens your newest save. It is chosen already when you have one.
+| New Game | Set up a new world, then tap Start.
+| Load Game | Your saves, newest first, by turn and year.
+| Settings | Music and effects volume, text size.
+| Controls | The button chart.
+| Manual | This manual.
+| Quit | Back to the Homebrew Launcher.
+
+Tap a choice, or move with the D-pad and press A.
+
+## Setting up a new game
+| Map size | Small to Huge. Bigger maps mean longer AI turns.
+| Rivals | How many computer civilizations.
+| AI skill | Novice, Easy, Normal or Hard.
+| Rules | Classic, or Civ2Civ3 (more detail, slower).
+| Land | Islands, Continents or Pangaea.
+| Barbarians | Off, huts only, or normal.
+
+Tap - and + to change a setting, then Start (or press START). Your choices are remembered for next time. On an Old 3DS, keep maps small so turns stay quick.
+
+# The screens
+## Bottom screen: the map
+- Tap a unit or city to select or open it.
+- Drag to scroll the map.
+- Hold the stylus still on a square for a moment to see what is there, without moving anything.
+
+The buttons along the bottom:
+| Menu | Research, taxes, government, diplomacy, messages, Civilopedia, saving and options.
+| Next | Jump to the next unit that needs orders.
+| Map | The whole world. Tap anywhere on it to jump there.
+| - and + | Zoom out and in.
+| End Turn | Ends the turn, or first shows what needs you (see Turns).
+
+When a unit is selected, its most useful orders appear in a bar just above these buttons.
+
+## Top screen: the dashboard
+- The top bar: the turn, your gold and how much it changes each turn, your government and tax rates.
+- The minimap, with a box around what the bottom screen shows.
+- Your current research and how many turns it needs.
+- The selected unit, city or square.
+- A hint line along the bottom that says what a tap will do right now.
+
+The 3D slider lifts the dashboard cards and units off the screen.
+
+# Units
+## Selecting
+At the start of each turn the first unit that needs orders is selected for you. Tap any of your units to select it, or tap Next. The selected unit has a yellow box, and the squares it can reach this turn are tinted.
+
+## Moving
+- Tap a square next to the unit: it moves there.
+- Tap a square farther away: a route appears with the number of turns. Tap the same square again to send the unit. It keeps going on later turns by itself.
+- Press B to cancel a route before you send it.
+- The D-pad moves the selected unit one square at a time.
+
+When a unit has used up its moves, the next unit is picked after a moment.
+
+## Attacking
+Tap an enemy next to your unit. A menu shows your chance of winning on the Attack button, for example Attack 64%, and the top screen shows both units' health. Tap Attack, or Cancel.
+
+## Orders
+The bar above the buttons shows the orders that make sense for the unit: Build City, Auto Work, Fortify, Explore, Irrigate, Mine, Road, Sentry. Tap the selected unit again, or More..., for all of them.
+| Wait | Come back to this unit after the others.
+| Skip Turn | Leave this unit alone until next turn.
+| Auto Work | Workers improve the land on their own. They show an A.
+| Explore | The unit explores on its own. It shows an E.
+| Fortify | Dig in. Fortified units defend better.
+| Disband | Asks first.
+
+## Units in a city
+Tapping a city opens the city. Its Units tab lists the units inside, with what each is doing. Tap one to command it on the map.
+
+## Several units on one square
+Tap the square and pick a unit from the list. Units marked (done) have no moves left this turn.
+
+# Cities
+## Founding a city
+Select a Settlers unit and tap Build City. Good sites have grassland, plains, rivers and coast nearby. Hold the stylus on a square to see its terrain first.
+
+## The city screen
+Tap your city on the map. The top screen shows its yields (food, shields, trade and what they become), growth, what it is building and its mood: how many citizens are happy, content and unhappy. A red DISORDER badge means the city has stopped working. Raise luxury, build a Temple, or turn a worker into an entertainer.
+
+## Build tab
+- The list shows what the city can build, with turns to finish.
+- Build / Queue at the top right chooses what a tap does. Build changes production now. Queue adds to the list on the right.
+- Tap an item in the queue to remove it.
+- Buy finishes production now for gold. Tap it twice: the second tap shows the price and spends it.
+
+## Tiles tab
+The squares around the city, with food, shields and trade on each. Tap a square to work it or free its citizen. Tap a specialist to change its kind.
+
+## Buildings tab
+What the city has. Tap a building twice to sell it.
+
+## Units tab
+The units inside the city. Tap one to command it.
+
+# Research
+Press L, or Menu then Research.
+- The list shows what you can study now, with turns to learn each at your current science rate. The current one is highlighted.
+- Tree view shows every technology by era: green you can research, blue you know, grey is locked.
+- Tap a locked technology to make it your goal. Your scientists then work towards it on their own, and the goal shows on the top screen.
+- Y switches between the list and the tree.
+
+# Economy
+## Tax rates
+Press R, or Menu then Tax Rates. Tap - and + to share trade between tax (gold), luxury (happiness) and science. Science gets the rest. Your government sets the highest rate allowed. The top bar shows your gold and how it changes each turn; a negative number means you are losing gold.
+
+## Government
+Menu then Government. Tap a government twice to start a revolution. A few turns of anarchy come first, so choose your moment.
+
+# Turns
+## Ending your turn
+The End Turn button turns green when every unit has its orders. Before it ends the turn, it shows anything that needs you first:
+| Choose Research | Your scientists have nothing to study.
+| City: Build | A city finished something and needs new orders.
+| End Turn | Nothing is waiting. Tap to end the turn.
+
+After you pick, you go straight back to the map. START also ends the turn.
+
+## While the computer plays
+A banner across the bottom shows that the other civilizations are moving. Taps made then are ignored, so nothing happens by accident.
+
+## The turn report
+At the start of each turn the top screen lists what happened: battles, diplomacy, discoveries, cities. It goes away by itself when you do anything. Menu then Messages keeps the full list: tap a message to read it, and tap it again to go to where it happened.
+
+# More panels
+## Diplomacy
+Menu then Diplomacy lists the civilizations you have met. Pick one, add terms (Peace, Ceasefire, Embassy, gold), then Accept. The other side's answer shows beside yours.
+
+## Civilopedia
+Menu then Civilopedia: units, buildings, wonders, technologies and governments, with pictures. L and R scroll the text.
+
+## Spaceship
+Menu then Spaceship appears once you start building one.
+
+# Saving
+- The game saves itself at the start of every turn.
+- Menu then Save Game saves now. "Saved" appears once it is written.
+- Menu then Save & Quit saves, then quits.
+- SELECT and START together asks before quitting.
+- Continue on the title screen opens your newest save.
+
+# Controls
+| Tap | Select a unit or open a city; move next to it
+| Tap twice far away | Send the unit along a route
+| Hold the stylus | Details of a square
+| Drag | Scroll the map
+| D-pad | Move the unit; scroll lists
+| Circle Pad | Scroll the map
+| A | All orders for the selected unit
+| B | Cancel; close a panel
+| X | Next unit
+| Y | In a city: lead a unit out. In research: list or tree
+| L / R | Research / tax rates
+| ZL / ZR | Zoom out / in
+| START | End the turn
+| SELECT + START | Quit (asks first)
+
+# Tips
+- Found your second and third cities early. More cities mean more of everything.
+- Put workers on Auto Work and forget about them.
+- Keep a defender fortified in every city.
+- Watch the gold per turn in the top bar. If it goes negative, raise tax or sell a building.
+- Set a research goal (Monarchy, Currency) so you never get the Choose Research stop.
+- An unhappy city? Raise luxury for a few turns, or build a Temple.
+
+# Troubleshooting
+## There is no sound
+Homebrew needs a dump of the 3DS sound firmware. Run DSP1 from the Homebrew Launcher once, then restart Freeciv. Also check Music and Effects in Settings.
+
+## AI turns are slow
+Bigger maps and more rivals mean more for the computer to think about. Start a game with a smaller map or fewer rivals. On an Old 3DS, Small maps work best.
+
+## A save will not load
+The game says so and START quits. Try the next save in Load Game: there is one for every turn.
+
+## The game crashed
+sdmc:/freeciv_out.log records what the game was doing. Send it along with a note of what happened.
+
+## Changing this manual
+A file named manual.txt in sdmc:/3ds/freeciv/ replaces the built-in text. Sections start with "# ", headings with "## ", list items with "- ", steps with "1. ", and table rows with "| ".

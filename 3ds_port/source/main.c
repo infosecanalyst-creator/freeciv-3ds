@@ -72,7 +72,7 @@ void __wrap_abort(void) {
 // UI mode: drives both input routing and which render path runs each frame.
 // UI_MAP is the existing map/unit-control screen (untouched behavior);
 // UI_CITY/UI_RESEARCH/UI_RATES are the new modal panels from handoff.md.
-typedef enum { UI_MAP, UI_CITY, UI_RESEARCH, UI_RATES, UI_GOVERNMENT, UI_DIPLOMACY, UI_MESSAGES, UI_PEDIA, UI_SPACESHIP } UiMode;
+typedef enum { UI_MAP, UI_CITY, UI_RESEARCH, UI_RATES, UI_GOVERNMENT, UI_DIPLOMACY, UI_MESSAGES, UI_PEDIA, UI_SPACESHIP, UI_MANUAL } UiMode;
 
 // App-level state, one level above UiMode (handoff-nohw.md §A.3). The
 // server coroutine is created in init_freeciv() but blocks before touching
@@ -80,7 +80,7 @@ typedef enum { UI_MAP, UI_CITY, UI_RESEARCH, UI_RATES, UI_GOVERNMENT, UI_DIPLOMA
 // is called - so APP_START_MENU/APP_LOAD_PICKER must never call
 // fc3ds_server_pump()/is_busy() or read any game state; they render their
 // own screens and only transition to APP_GAME once a choice is made.
-typedef enum { APP_START_MENU, APP_NEW_GAME, APP_LOAD_PICKER, APP_GAME, APP_SETTINGS, APP_CONTROLS } AppState;
+typedef enum { APP_START_MENU, APP_NEW_GAME, APP_LOAD_PICKER, APP_GAME, APP_SETTINGS, APP_CONTROLS, APP_MANUAL } AppState;
 static bool s_started_from_save; // loading splash wording
 
 // Frames the "Saved" toast stays visible after a SAVE action-bar tap
@@ -255,7 +255,7 @@ enum { POPUP_NONE, POPUP_UNIT, POPUP_CONFIRM_DISBAND, POPUP_STACK, POPUP_MENU, P
 #define PID_NO          0
 #define PID_CITY_ACTION 1000            // + Freeciv action id
 enum { MENU_RESEARCH = 1, MENU_RATES, MENU_GOVERNMENT, MENU_DIPLOMACY, MENU_SAVE, MENU_MUSIC, MENU_EFFECTS, MENU_CLOSE, MENU_MESSAGES, MENU_PEDIA, MENU_SPACESHIP, MENU_TEXT,
-       MENU_OPTIONS, MENU_SAVE_QUIT, MENU_QUIT, MENU_BACK };
+       MENU_OPTIONS, MENU_SAVE_QUIT, MENU_QUIT, MENU_BACK, MENU_MANUAL };
 static bool s_has_spaceship;   // refreshed while the engine is parked
 static bool s_quit_after_save; // Save & Quit: leave once the save has run
 
@@ -310,6 +310,7 @@ static void open_game_menu(PopupMenu *m)
     if (s_has_spaceship) popup_add(m, MENU_SPACESHIP, "Spaceship", true);
     popup_add(m, MENU_SAVE,       "Save Game", true);
     popup_add(m, MENU_OPTIONS,    "Options", true);
+    popup_add(m, MENU_MANUAL,     "Manual", true);
     popup_add(m, MENU_SAVE_QUIT,  "Save & Quit", true);
     popup_layout(m, HUD_MENU_X, HUD_Y - 10);
     m->x = 2;
@@ -708,6 +709,19 @@ int main(int argc, char* argv[])
         if (quit_now) break;
         if (ui_mode == UI_MAP) from_smart = false;
 
+        // The manual (title or in-game) takes every input while it is open.
+        if (app_state == APP_MANUAL || (app_state == APP_GAME && ui_mode == UI_MANUAL)) {
+            touchPosition mt;
+            hidTouchRead(&mt);
+            circlePosition mc;
+            hidCircleRead(&mc);
+            if (!manual_input(kDown, kHeld, (kDown & KEY_TOUCH) != 0, mt.px, mt.py, mc.dy)) {
+                if (app_state == APP_MANUAL) app_state = APP_START_MENU;
+                else ui_mode = UI_MAP;
+            }
+            kDown = 0; // nothing else reacts to this frame's input
+        }
+
         // Quit: START on the start menu, SELECT+START in a game (START alone
         // ends the turn there). HOME -> Close also works at any time.
         if ((kDown & KEY_START) && (app_state == APP_START_MENU || fc3ds_server_failed())) {
@@ -825,6 +839,8 @@ int main(int argc, char* argv[])
                     app_state = APP_SETTINGS;
                 } else if (it == TI_CONTROLS) {
                     app_state = APP_CONTROLS;
+                } else if (it == TI_MANUAL) {
+                    app_state = APP_MANUAL;
                 } else if (it == TI_QUIT) {
                     break; // leaves the main loop: normal shutdown
                 }
@@ -858,7 +874,8 @@ int main(int argc, char* argv[])
                     static const char *lines[TI_COUNT] = {
                         NULL, "Choose the map, your rivals and the rules, then found your first city.",
                         "Every save, newest first.", "Music, sound effects and text size.",
-                        "How the stylus and the buttons work.", "Back to the Homebrew Launcher." };
+                        "How the stylus and the buttons work.", "How to play, section by section.",
+                        "Back to the Homebrew Launcher." };
                     char cl[96];
                     const char *line = lines[title_sel];
                     if (title_sel == TI_CONTINUE) {
@@ -869,6 +886,8 @@ int main(int argc, char* argv[])
                     render_title_top(title_frame, line, NULL);
                 } else if (app_state == APP_CONTROLS) {
                     render_title_controls_top(title_frame);
+                } else if (app_state == APP_MANUAL) {
+                    render_manual_top();
                 } else {
                     render_new_game_top(isNew3DS, app_state == APP_NEW_GAME ? ng_summary : "Pick a saved game below.");
                 }
@@ -881,6 +900,8 @@ int main(int argc, char* argv[])
             if (app_state == APP_START_MENU || app_state == APP_CONTROLS) {
                 render_title_bottom(app_state == APP_START_MENU ? title_sel : -1, continue_file[0] != 0,
                                     continue_label, title_frame);
+            } else if (app_state == APP_MANUAL) {
+                render_manual_bottom(title_frame);
             } else if (app_state == APP_SETTINGS) {
                 render_title_settings(audio_music_volume(), audio_sfx_volume(), font_get_bias() ? 1 : 0);
             } else if (app_state == APP_NEW_GAME) {
@@ -1677,6 +1698,7 @@ int main(int argc, char* argv[])
                     case MENU_DIPLOMACY:  ui_mode = UI_DIPLOMACY; ui_scroll = 0; ui_dipl_stage = 1; break;
                     case MENU_MESSAGES:   ui_mode = UI_MESSAGES; ui_scroll = 0; msg_sel = -1; break;
                     case MENU_SPACESHIP:  ui_mode = UI_SPACESHIP; break;
+                    case MENU_MANUAL:     ui_mode = UI_MANUAL; break;
                     case MENU_TEXT:
                         font_set_bias(font_get_bias() ? 0 : 1);
                         save_settings();
@@ -2239,6 +2261,9 @@ int main(int argc, char* argv[])
             case UI_SPACESHIP:
                 render_spaceship_top(&ship);
                 break;
+            case UI_MANUAL:
+                render_manual_top();
+                break;
             case UI_PEDIA:
                 render_pedia_top(pedia_sel >= 0 ? pedia_list[pedia_sel].name : "Civilopedia", pedia_text, pedia_text_scroll,
                                  pedia_sel >= 0 ? pedia_icon_tag : NULL, pedia_icon_alt, pedia_icon_unit);
@@ -2365,6 +2390,9 @@ int main(int argc, char* argv[])
                 break;
             case UI_SPACESHIP:
                 render_spaceship_panel(&ship);
+                break;
+            case UI_MANUAL:
+                render_manual_bottom(0);
                 break;
             case UI_PEDIA:
                 render_pedia_panel(pedia_kind, pedia_list, pedia_n, ui_scroll, pedia_sel);
