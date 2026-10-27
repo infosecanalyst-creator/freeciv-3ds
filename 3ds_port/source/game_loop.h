@@ -169,6 +169,7 @@ typedef struct {
     int  garrison_count;                          // # of pov-owned units in the city, clamped to CITY_MAX_GARRISON
     int  garrison_ids[CITY_MAX_GARRISON];          // server-side unit ids, parallel to garrison_names
     char garrison_names[CITY_MAX_GARRISON][32];
+    char garrison_status[CITY_MAX_GARRISON][16];   // "Fortified", "Ready", "Done", ...
 } CityInfo;
 
 // One entry in a city's list of currently-buildable units/improvements.

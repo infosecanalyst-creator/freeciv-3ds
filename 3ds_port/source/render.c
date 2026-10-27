@@ -1824,6 +1824,10 @@ void render_city_units_panel(const CityInfo *info, int scroll)
         C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, get_unit_sprite(info->garrison_names[idx])),
                         8, y + 1, 0.01f, NULL, (CITY_UNIT_ROW_H - 3) / (float)TILE_PX, (CITY_UNIT_ROW_H - 3) / (float)TILE_PX);
         draw_text_z(36, y + 3, 0.01f, 0.47f, white, info->garrison_names[idx]);
+        const char *st = info->garrison_status[idx];
+        bool ready = !strcmp(st, "Ready");
+        draw_text_z(304 - text_width(st, 0.42f), y + 4, 0.01f, 0.42f,
+                    ready ? C2D_Color32(0x90, 0xE8, 0x90, 0xFF) : soft, st);
     }
     if (info->garrison_count > rows) scroll_thumb(info->garrison_count, scroll, 313);
     draw_button(4, PANEL_FOOTER_Y + 2, 312, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
@@ -1960,8 +1964,11 @@ void render_city_panel(const CityInfo *info, const BuildOption *opts, int n, int
     draw_text_z(8, 3, 0.02f, 0.6f, white, info->name[0] ? info->name : "?");
 
     // NOW/QUEUE toggle: what tapping a buildable row does.
-    draw_button(CITY_TOGGLE_X, CITY_TOGGLE_Y, CITY_TOGGLE_W, CITY_TOGGLE_H, 0.03f,
-                queue_mode ? "Add to queue" : "Build now", 0.42f, true, !queue_mode);
+    // Two-part switch: what tapping a row does (lit = active).
+    draw_button(CITY_TOGGLE_X, CITY_TOGGLE_Y, CITY_TOGGLE_W / 2 - 1, CITY_TOGGLE_H, 0.03f,
+                "Build", 0.42f, true, !queue_mode);
+    draw_button(CITY_TOGGLE_X + CITY_TOGGLE_W / 2 + 1, CITY_TOGGLE_Y, CITY_TOGGLE_W / 2 - 1, CITY_TOGGLE_H, 0.03f,
+                "Queue", 0.42f, true, queue_mode);
 
     snprintf(line, sizeof(line), "%s  %d/%d  (%d turn%s)", info->producing[0] ? info->producing : "?",
              info->shield_stock, info->prod_cost, info->prod_turns, info->prod_turns == 1 ? "" : "s");

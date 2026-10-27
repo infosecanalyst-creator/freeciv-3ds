@@ -197,9 +197,9 @@ void draw_scroll_list(int x, const ScrollRow *rows, int count);
 // (y 0..PANEL_HEADER_H), well above the list/footer rows so its hit-test
 // can never collide with them.
 #define CITY_WORKLIST_COL_X   200
-#define CITY_TOGGLE_X         228
+#define CITY_TOGGLE_X         212
 #define CITY_TOGGLE_Y         4
-#define CITY_TOGGLE_W         84
+#define CITY_TOGGLE_W         104
 #define CITY_TOGGLE_H         22
 
 // Top-screen readout for the open city (mirrors render_top_screen's role).

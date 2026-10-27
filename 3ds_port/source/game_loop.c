@@ -1934,6 +1934,12 @@ void get_city_info(int city_id, CityInfo *out)
             out->garrison_ids[idx] = punit->id;
             const char *un = unit_name_translation(punit);
             fc_strlcpy(out->garrison_names[idx], un ? un : "?", sizeof(out->garrison_names[idx]));
+            const char *st = punit->activity == ACTIVITY_FORTIFIED || punit->activity == ACTIVITY_FORTIFYING ? "Fortified"
+                           : punit->activity == ACTIVITY_SENTRY ? "Sentry"
+                           : punit->activity != ACTIVITY_IDLE ? "Working"
+                           : unit_has_orders(punit) ? "On the move"
+                           : punit->moves_left > 0 ? "Ready" : "Done";
+            fc_strlcpy(out->garrison_status[idx], st, sizeof(out->garrison_status[idx]));
             out->garrison_count++;
         } unit_list_iterate_end;
     }

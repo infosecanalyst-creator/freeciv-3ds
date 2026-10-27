@@ -1307,7 +1307,7 @@ int main(int argc, char* argv[])
                 // with them (handoff.md §6.4).
                 if (px >= CITY_TOGGLE_X && px < CITY_TOGGLE_X + CITY_TOGGLE_W
                     && py >= CITY_TOGGLE_Y && py < CITY_TOGGLE_Y + CITY_TOGGLE_H) {
-                    ui_worklist_queue_mode = !ui_worklist_queue_mode;
+                    ui_worklist_queue_mode = px >= CITY_TOGGLE_X + CITY_TOGGLE_W / 2; // left: Build, right: Queue
                 } else if (py >= PANEL_FOOTER_Y) {
                     if (px < 160) {
                         if (ui_city_info.can_buy && buy_armed) {
