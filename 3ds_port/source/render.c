@@ -2652,20 +2652,25 @@ void render_title_controls_top(int frame)
     draw_backdrop(frame, 400, 240, 0xD0);
     draw_text_z(12, 6, 0.2f, 0.6f, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF), "Controls");
     static const char *rows[][2] = {
-        { "Tap a unit", "select it; its orders appear above the buttons" },
-        { "Tap next to it", "move   (farther: tap twice to send it there)" },
-        { "Hold the stylus", "details of a square, without moving anything" },
-        { "Drag", "scroll the map      Map: tap to jump anywhere" },
-        { "End Turn button", "shows what needs you first (research, cities)" },
-        { "A / X", "orders / next unit        B: back or cancel" },
-        { "D-Pad / Circle Pad", "move the unit / scroll" },
-        { "L / R", "research / tax rates     ZL / ZR: zoom" },
-        { "START", "end turn         SELECT + START: quit" },
+        { "Tap a unit",        "select it; orders show above the bar" },
+        { "Tap next to it",    "move there (far away: tap twice)" },
+        { "Hold the stylus",   "peek at a square without moving" },
+        { "Drag",              "scroll the map" },
+        { "Map button",        "whole world; tap to jump there" },
+        { "End Turn",          "shows what needs you first" },
+        { "A / X",             "orders / next unit" },
+        { "B",                 "back or cancel" },
+        { "D-Pad, Circle Pad", "move the unit / scroll" },
+        { "L / R  ZL / ZR",    "research, taxes / zoom" },
+        { "START / SEL+START", "end turn / quit" },
     };
+    u32 key = C2D_Color32(0xFF, 0xE8, 0xA0, 0xFF), val = C2D_Color32(0xE0, 0xE6, 0xEE, 0xFF);
     for (int i = 0; i < (int)(sizeof(rows) / sizeof(rows[0])); i++) {
-        float y = 32 + i * 22;
-        draw_text_z(12, y, 0.2f, 0.47f, C2D_Color32(0xFF, 0xE8, 0xA0, 0xFF), rows[i][0]);
-        draw_text_z(150, y, 0.2f, 0.45f, C2D_Color32(0xE0, 0xE6, 0xEE, 0xFF), rows[i][1]);
+        float y = 30 + i * 19;
+        draw_text_z(12, y, 0.2f, 0.45f, key, rows[i][0]);
+        float sc = 0.45f;
+        while (text_width(rows[i][1], sc) > 400 - 140 - 8 && sc > 0.34f) sc -= 0.01f;
+        draw_text_z(140, y, 0.2f, sc, val, rows[i][1]);
     }
 }
 
