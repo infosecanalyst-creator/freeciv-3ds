@@ -2498,7 +2498,7 @@ static void backdrop_init(void)
     // A few overlapping "continents": sum of random blobs, thresholded.
     float hgt[24][64] = {{0}}, wet[24][64] = {{0}};
     srand(1234);
-    for (int k = 0; k < 18; k++) {
+    for (int k = 0; k < 30; k++) {
         float cx = rand() % 64, cy = rand() % 24, r = 3 + rand() % 7, a = 0.5f + (rand() % 50) / 100.0f;
         float wx = rand() % 64, wy = rand() % 24;
         for (int y = 0; y < 24; y++) for (int x = 0; x < 64; x++) {
@@ -2513,7 +2513,7 @@ static void backdrop_init(void)
     for (int y = 0; y < 24; y++) for (int x = 0; x < 64; x++) {
         float h = hgt[y][x];
         int k;
-        if (h < 0.30f) k = 0;                       // ocean
+        if (h < 0.22f) k = 0;                       // ocean
         else if (h < 0.55f) k = wet[y][x] > 0.6f ? 2 : (wet[y][x] < 0.15f && y > 14 ? 6 : 1); // plains/grass/desert
         else if (h < 0.80f) k = 3;                  // forest
         else if (h < 1.05f) k = 4;                  // hills
@@ -2575,12 +2575,12 @@ void render_title_top(int frame, const char *line, const char *headline)
         float lw = logo.subtex->width;
         C2D_DrawImageAt(logo, (400 - lw) / 2, 44 + bob, 0.5f, NULL, 1.0f, 1.0f);
     } else {
-        draw_text(120, 50, 0.9f, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF), "FREECIV");
+        draw_text_z(120, 50, 0.2f, 0.9f, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF), "FREECIV");
     }
     layer(2.0f);
     const char *tag = headline ? headline : "Build a civilization, on two screens";
     float tw = text_width(tag, 0.55f);
-    draw_text((400 - tw) / 2, 116 + bob * 0.5f, 0.55f, C2D_Color32(0xF4, 0xEC, 0xD8, 0xFF), tag);
+    draw_text_z((400 - tw) / 2, 116 + bob * 0.5f, 0.2f, 0.55f, C2D_Color32(0xF4, 0xEC, 0xD8, 0xFF), tag);
     layer(0.0f);
     if (line && line[0]) {
         C2D_DrawRectSolid(0, 240 - 30, 0.02f, 400, 30, C2D_Color32(0x06, 0x0A, 0x12, 0xC8));
@@ -2650,7 +2650,7 @@ void render_title_controls_top(int frame)
     C2D_TextBufClear(g_textBuf);
     layer(0.0f);
     draw_backdrop(frame, 400, 240, 0xD0);
-    draw_text(12, 6, 0.6f, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF), "Controls");
+    draw_text_z(12, 6, 0.2f, 0.6f, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF), "Controls");
     static const char *rows[][2] = {
         { "Tap a unit", "select it; its orders appear above the buttons" },
         { "Tap next to it", "move   (farther: tap twice to send it there)" },
@@ -2664,8 +2664,8 @@ void render_title_controls_top(int frame)
     };
     for (int i = 0; i < (int)(sizeof(rows) / sizeof(rows[0])); i++) {
         float y = 32 + i * 22;
-        draw_text(12, y, 0.47f, C2D_Color32(0xFF, 0xE8, 0xA0, 0xFF), rows[i][0]);
-        draw_text(150, y, 0.45f, C2D_Color32(0xE0, 0xE6, 0xEE, 0xFF), rows[i][1]);
+        draw_text_z(12, y, 0.2f, 0.47f, C2D_Color32(0xFF, 0xE8, 0xA0, 0xFF), rows[i][0]);
+        draw_text_z(150, y, 0.2f, 0.45f, C2D_Color32(0xE0, 0xE6, 0xEE, 0xFF), rows[i][1]);
     }
 }
 
@@ -2677,7 +2677,7 @@ void render_title_loading_bottom(const char *msg, int frame)
     int dots = (frame / 20) % 4;
     snprintf(line, sizeof(line), "%s%.*s", msg, dots, "...");
     float tw = text_width(msg, 0.6f);
-    draw_text((320 - tw) / 2, 104, 0.6f, 0xFFFFFFFF, line);
+    draw_text_z((320 - tw) / 2, 104, 0.2f, 0.6f, 0xFFFFFFFF, line);
     // a little progress shimmer
     float x = fmodf(frame * 2.0f, 360.0f) - 40;
     C2D_DrawRectSolid(60, 134, 0.1f, 200, 4, C2D_Color32(0x20, 0x2C, 0x40, 0xFF));
@@ -2712,13 +2712,15 @@ void render_new_game_top(bool is_new_3ds, const char *summary)
     u32 white = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
     u32 soft  = C2D_Color32(0xB8, 0xC8, 0xDC, 0xFF);
     u32 label = C2D_Color32(0x8C, 0xA0, 0xB4, 0xFF);
-    C2D_DrawRectSolid(0, 0, 0.0f, 400, 240, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
-    draw_text(16, 20, 0.9f, white, "Freeciv 3DS");
-    draw_wrapped(summary, 16, 56, 368, 0.5f, soft, 4, 17, 0.0f);
-    draw_text(16, 150, 0.45f, label, is_new_3ds
+    static int f;
+    layer(0.0f);
+    draw_backdrop(++f, 400, 240, 0xC8);
+    draw_text_z(16, 20, 0.2f, 0.9f, white, "Freeciv 3DS");
+    draw_wrapped(summary, 16, 56, 368, 0.5f, soft, 4, 17, 0.2f);
+    draw_text_z(16, 150, 0.2f, 0.45f, label, is_new_3ds
         ? "New 3DS detected: 804 MHz, room for big maps."
         : "Old 3DS detected: smaller maps keep turns quick.");
-    draw_text(16, 170, 0.45f, label, "Larger maps and more rivals mean longer AI turns.");
+    draw_text_z(16, 170, 0.2f, 0.45f, label, "Larger maps and more rivals mean longer AI turns.");
 }
 
 void render_messages_panel(const GameMessage *msgs, int n, int scroll, int highlight)
