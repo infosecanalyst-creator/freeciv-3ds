@@ -220,10 +220,17 @@ void render_city_panel(const CityInfo *info, const BuildOption *opts, int n, int
 // City screen tabs (Build / Tiles / Buildings), under the header.
 #define CITY_TAB_Y      56
 #define CITY_TAB_H      26
-#define CITY_TAB_W      100
-#define CITY_TAB_X(i)   (4 + (i) * 104)
-enum { CITY_TAB_BUILD, CITY_TAB_TILES, CITY_TAB_BUILDINGS };
+#define CITY_TAB_W      76
+#define CITY_TAB_X(i)   (4 + (i) * 78)
+enum { CITY_TAB_BUILD, CITY_TAB_TILES, CITY_TAB_BUILDINGS, CITY_TAB_UNITS, CITY_TAB_COUNT };
 void render_city_tabs(int tab);
+// Units tab: one row per unit in the city (sprite + name).
+#define CITY_UNIT_ROW_H 24
+void render_city_units_panel(const CityInfo *info, int scroll);
+int city_units_hit(int py, int scroll, int n);
+// Two-tap confirmations drawn by the city Build tab / Government panel.
+void render_set_buy_armed(bool armed);
+void render_set_gov_armed(int idx);
 // Tiles tab: the city's land as a grid (left) and its specialists (right).
 #define CITY_GRID_X     6
 #define CITY_GRID_Y     88

@@ -657,7 +657,9 @@ static void draw_popup(const PopupMenu *m)
     const float Z = 0.93f;
     C2D_DrawRectSolid(m->x - 1, m->y - 1, Z, m->w + 2, m->h + 2, C2D_Color32(0x8C, 0xB8, 0xE8, 0xFF));
     C2D_DrawRectSolid(m->x, m->y, Z + 0.001f, m->w, m->h, C2D_Color32(0x10, 0x18, 0x26, 0xF4));
-    draw_text_z(m->x + 5, m->y + 2, Z + 0.002f, 0.5f, C2D_Color32(0xFF, 0xE0, 0x80, 0xFF), m->title);
+    float ts = 0.5f; // long titles shrink to fit the menu
+    while (ts > 0.4f && text_width(m->title, ts) > m->w - 8) ts -= 0.02f;
+    draw_text_z(m->x + 5, m->y + 2, Z + 0.002f, ts, C2D_Color32(0xFF, 0xE0, 0x80, 0xFF), m->title);
     int rows = (m->n + m->cols - 1) / m->cols;
     for (int i = 0; i < m->n; i++) {
         int col = i / rows, row = i % rows;
@@ -1759,11 +1761,54 @@ void draw_scroll_list(int x, const ScrollRow *rows, int count)
     }
 }
 
+static void scroll_thumb(int n, int scroll, float x);
+static int s_city_units_n;
+static bool s_buy_armed;
+static int s_gov_armed = -1;
+void render_set_buy_armed(bool armed) { s_buy_armed = armed; }
+void render_set_gov_armed(int idx) { s_gov_armed = idx; }
+
 void render_city_tabs(int tab)
 {
-    static const char *names[3] = { "Build", "Tiles", "Buildings" };
-    for (int i = 0; i < 3; i++)
-        draw_button(CITY_TAB_X(i), CITY_TAB_Y, CITY_TAB_W, CITY_TAB_H, 0.03f, names[i], 0.47f, true, i == tab);
+    char units[16];
+    snprintf(units, sizeof(units), "Units %d", s_city_units_n);
+    const char *names[CITY_TAB_COUNT] = { "Build", "Tiles", "Buildings", units };
+    for (int i = 0; i < CITY_TAB_COUNT; i++)
+        draw_button(CITY_TAB_X(i), CITY_TAB_Y, CITY_TAB_W, CITY_TAB_H, 0.03f, names[i], 0.45f, true, i == tab);
+}
+
+int city_units_hit(int py, int scroll, int n)
+{
+    if (py < PANEL_LIST_Y || py >= PANEL_FOOTER_Y) return -1;
+    int r = scroll + (py - PANEL_LIST_Y) / CITY_UNIT_ROW_H;
+    return r < n ? r : -1;
+}
+
+void render_city_units_panel(const CityInfo *info, int scroll)
+{
+    C2D_TextBufClear(g_textBuf);
+    u32 white = C2D_Color32(0xF0, 0xF0, 0xF0, 0xFF);
+    u32 soft  = C2D_Color32(0xA8, 0xB4, 0xC4, 0xFF);
+    s_city_units_n = info->garrison_count;
+    C2D_DrawRectSolid(0, 0, 0.0f, 320, 240, C2D_Color32(0x10, 0x16, 0x22, 0xFF));
+    C2D_DrawRectSolid(0, 0, 0.01f, 320, PANEL_HEADER_H, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
+    draw_text_z(8, 3, 0.02f, 0.6f, white, info->name[0] ? info->name : "?");
+    draw_text(8, PANEL_HEADER_H + 4, 0.45f, soft,
+              info->garrison_count ? "Tap a unit to command it on the map." : "No units in this city.");
+    render_city_tabs(CITY_TAB_UNITS);
+    int rows = (PANEL_FOOTER_Y - PANEL_LIST_Y) / CITY_UNIT_ROW_H;
+    for (int i = 0; i < rows; i++) {
+        int idx = scroll + i;
+        if (idx >= info->garrison_count) break;
+        float y = PANEL_LIST_Y + i * CITY_UNIT_ROW_H;
+        C2D_DrawRectSolid(4, y + 1, 0.0f, 306, CITY_UNIT_ROW_H - 2,
+                          (i & 1) ? C2D_Color32(0x1A, 0x24, 0x34, 0xFF) : C2D_Color32(0x20, 0x2C, 0x3E, 0xFF));
+        C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, get_unit_sprite(info->garrison_names[idx])),
+                        8, y + 1, 0.01f, NULL, (CITY_UNIT_ROW_H - 3) / (float)TILE_PX, (CITY_UNIT_ROW_H - 3) / (float)TILE_PX);
+        draw_text_z(36, y + 3, 0.01f, 0.47f, white, info->garrison_names[idx]);
+    }
+    if (info->garrison_count > rows) scroll_thumb(info->garrison_count, scroll, 313);
+    draw_button(4, PANEL_FOOTER_Y + 2, 312, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
 }
 
 static u32 terrain_color(int t)
@@ -1798,6 +1843,7 @@ void render_city_tiles_panel(const CityInfo *info, const CityTileInfo *tiles, in
     draw_text_z(8, 3, 0.02f, 0.6f, white, info->name[0] ? info->name : "?");
     snprintf(line, sizeof(line), "Food %+d  Shields %+d  Trade %+d", info->surplus[0], info->surplus[1], info->surplus[2]);
     draw_text(8, PANEL_HEADER_H + 4, 0.45f, soft, line);
+    s_city_units_n = info->garrison_count;
     render_city_tabs(CITY_TAB_TILES);
 
     float c = grid_cell(radius > 0 ? radius : 2);
@@ -1846,8 +1892,7 @@ void render_city_tiles_panel(const CityInfo *info, const CityTileInfo *tiles, in
                     spec[i].count ? C2D_Color32(0xFF, 0xE0, 0x60, 0xFF) : soft, line);
     }
     if (nspec > 1) draw_text(CITY_SPEC_X, CITY_SPEC_Y + nspec * CITY_SPEC_H, 0.4f, soft, "Tap a specialist to switch one.");
-    draw_button(4, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Buy", 0.5f, false, false);
-    draw_button(164, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
+    draw_button(4, PANEL_FOOTER_Y + 2, 312, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
 }
 
 void render_city_buildings_panel(const CityInfo *info, const BuildingInfo *b, int n, int scroll, int armed)
@@ -1861,6 +1906,7 @@ void render_city_buildings_panel(const CityInfo *info, const BuildingInfo *b, in
     draw_text_z(8, 3, 0.02f, 0.6f, white, info->name[0] ? info->name : "?");
     snprintf(line, sizeof(line), "%d building%s", n, n == 1 ? "" : "s");
     draw_text(8, PANEL_HEADER_H + 4, 0.45f, soft, n ? line : "Nothing built yet.");
+    s_city_units_n = info->garrison_count;
     render_city_tabs(CITY_TAB_BUILDINGS);
     for (int i = 0; i < PANEL_ROWS_VISIBLE; i++) {
         int idx = scroll + i;
@@ -1877,8 +1923,7 @@ void render_city_buildings_panel(const CityInfo *info, const BuildingInfo *b, in
         if (line[0]) draw_text_z(304 - text_width(line, 0.4f), y + 2, 0.01f, 0.4f,
                                  arm ? C2D_Color32(0xFF, 0xC0, 0xB0, 0xFF) : soft, line);
     }
-    draw_button(4, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Buy", 0.5f, false, false);
-    draw_button(164, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
+    draw_button(4, PANEL_FOOTER_Y + 2, 312, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
     (void)scroll;
 }
 
@@ -1903,6 +1948,7 @@ void render_city_panel(const CityInfo *info, const BuildOption *opts, int n, int
     snprintf(line, sizeof(line), "%s  %d/%d  (%d turn%s)", info->producing[0] ? info->producing : "?",
              info->shield_stock, info->prod_cost, info->prod_turns, info->prod_turns == 1 ? "" : "s");
     draw_text(8, PANEL_HEADER_H + 4, 0.47f, cur, line);
+    s_city_units_n = info->garrison_count;
     render_city_tabs(CITY_TAB_BUILD);
     if (!worklist_n) draw_text(CITY_WORKLIST_COL_X + 4, PANEL_LIST_Y + 2, 0.42f, soft, "Queue empty");
 
@@ -1942,7 +1988,8 @@ void render_city_panel(const CityInfo *info, const BuildOption *opts, int n, int
     }
 
     // Footer: Buy (left half) / Close (right half) - matches main.c's hit test.
-    if (info->can_buy) snprintf(line, sizeof(line), "Buy (%d gold)", info->buy_cost);
+    if (info->can_buy && s_buy_armed) snprintf(line, sizeof(line), "Tap again: %d gold", info->buy_cost);
+    else if (info->can_buy) snprintf(line, sizeof(line), "Buy (%d gold)", info->buy_cost);
     else snprintf(line, sizeof(line), "Buy");
     draw_button(4, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, line, 0.5f, info->can_buy, false);
     draw_button(164, PANEL_FOOTER_Y + 2, 152, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Close", 0.5f, true, false);
@@ -2222,10 +2269,12 @@ void render_government_panel(const GovOption *opts, int n, int scroll, int curre
         if (idx >= n) break;
         const GovOption *opt = &opts[idx];
         bool is_cur = opt->gov_id == current_gov_id;
-        list_row(i, 4, 306, is_cur, opt->available);
+        bool arm = idx == s_gov_armed && !is_cur;
+        list_row(i, 4, 306, is_cur || arm, opt->available);
         float y = PANEL_LIST_Y + i * PANEL_ROW_H;
-        draw_text_z(12, y + 1, 0.01f, 0.47f, is_cur ? cur : opt->available ? white : grey, opt->name);
-        const char *tag = is_cur ? "current" : opt->available ? "" : "needs tech";
+        draw_text_z(12, y + 1, 0.01f, 0.47f, is_cur || arm ? cur : opt->available ? white : grey, opt->name);
+        const char *tag = is_cur ? "current" : arm ? "tap again: revolution" : opt->available ? "" : "needs tech";
+        if (arm) { draw_text_z(304 - text_width(tag, 0.42f), y + 2, 0.01f, 0.42f, cur, tag); continue; }
         if (tag[0]) draw_text_z(304 - text_width(tag, 0.4f), y + 2, 0.01f, 0.4f, is_cur ? cur : grey, tag);
     }
     scroll_thumb(n, scroll, 313);

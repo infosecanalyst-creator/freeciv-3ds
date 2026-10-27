@@ -248,7 +248,10 @@ enum { POPUP_NONE, POPUP_UNIT, POPUP_CONFIRM_DISBAND, POPUP_STACK, POPUP_MENU, P
 #define PID_YES         1
 #define PID_NO          0
 #define PID_CITY_ACTION 1000            // + Freeciv action id
-enum { MENU_RESEARCH = 1, MENU_RATES, MENU_GOVERNMENT, MENU_DIPLOMACY, MENU_SAVE, MENU_MUSIC, MENU_EFFECTS, MENU_CLOSE, MENU_MESSAGES, MENU_PEDIA, MENU_SPACESHIP, MENU_TEXT };
+enum { MENU_RESEARCH = 1, MENU_RATES, MENU_GOVERNMENT, MENU_DIPLOMACY, MENU_SAVE, MENU_MUSIC, MENU_EFFECTS, MENU_CLOSE, MENU_MESSAGES, MENU_PEDIA, MENU_SPACESHIP, MENU_TEXT,
+       MENU_OPTIONS, MENU_SAVE_QUIT, MENU_QUIT, MENU_BACK };
+static bool s_has_spaceship;   // refreshed while the engine is parked
+static bool s_quit_after_save; // Save & Quit: leave once the save has run
 
 static void popup_add(PopupMenu *m, int id, const char *label, bool enabled)
 {
@@ -284,7 +287,7 @@ static void build_unit_popup(PopupMenu *m, const UnitInfo *u)
     int nca = get_city_actions(u->id, u->x, u->y, ca, 8);
     for (int i = 0; i < nca && m->n < POPUP_MAX - 3; i++) popup_add(m, PID_CITY_ACTION + ca[i].action, ca[i].label, true);
     popup_add(m, PID_SKIP, "Wait", true);
-    popup_add(m, PID_DESELECT, "Done", true);
+    popup_add(m, PID_DESELECT, "Skip Turn", true);
     popup_add(m, PID_DISBAND_ASK, "Disband", true);
 }
 
@@ -298,17 +301,38 @@ static void open_game_menu(PopupMenu *m)
     popup_add(m, MENU_DIPLOMACY,  "Diplomacy", true);
     popup_add(m, MENU_MESSAGES,   "Messages", true);
     popup_add(m, MENU_PEDIA,      "Civilopedia", true);
-    popup_add(m, MENU_SPACESHIP,  "Spaceship", true);
-    popup_add(m, MENU_TEXT,       font_get_bias() ? "Text: Large" : "Text: Normal", true);
+    if (s_has_spaceship) popup_add(m, MENU_SPACESHIP, "Spaceship", true);
     popup_add(m, MENU_SAVE,       "Save Game", true);
+    popup_add(m, MENU_OPTIONS,    "Options", true);
+    popup_add(m, MENU_SAVE_QUIT,  "Save & Quit", true);
+    popup_layout(m, HUD_MENU_X, HUD_Y - 10);
+    m->x = 2;
+}
+
+static void open_options_menu(PopupMenu *m)
+{
+    memset(m, 0, sizeof(*m));
+    snprintf(m->title, sizeof(m->title), "Options");
     char lbl[24];
     snprintf(lbl, sizeof(lbl), "Music: %d", audio_music_volume());
     popup_add(m, MENU_MUSIC, lbl, audio_available());
     snprintf(lbl, sizeof(lbl), "Effects: %d", audio_sfx_volume());
     popup_add(m, MENU_EFFECTS, lbl, audio_available());
-    popup_add(m, MENU_CLOSE,      "Close", true);
+    popup_add(m, MENU_TEXT,       font_get_bias() ? "Text: Large" : "Text: Normal", true);
+    popup_add(m, MENU_BACK,       "Back", true);
     popup_layout(m, HUD_MENU_X, HUD_Y - 10);
     m->x = 2;
+}
+
+static void open_quit_menu(PopupMenu *m)
+{
+    memset(m, 0, sizeof(*m));
+    snprintf(m->title, sizeof(m->title), "Quit the game?");
+    popup_add(m, MENU_SAVE_QUIT,  "Save & Quit", true);
+    popup_add(m, MENU_QUIT,       "Quit, no save", true);
+    popup_add(m, MENU_CLOSE,      "Keep playing", true);
+    popup_layout(m, 160, 110);
+    m->x = (320 - m->w) / 2;
 }
 
 // ---- Settings (sdmc:/3ds/freeciv/settings.ini) ----
@@ -513,8 +537,10 @@ int main(int argc, char* argv[])
     bool want_unit_popup = false;    // open the commanded unit's orders
     bool want_next_unit = false;     // select the next unit needing orders
     int advance_from = -1;           // unit just given orders (skip it once)
-    int skip_ids[64];                // "Wait"ed units this turn
+    int skip_ids[64];                // "Skip Turn" units: done for this turn
     int nskip = 0;
+    int wait_ids[64];                // "Wait" units: come back after the others
+    int nwait = 0;
     int last_turn = -1;
     int turn_select_frames = 0;      // keep trying to pick a first unit at turn start
     int done_frames = 0;             // frames the commanded unit has had no moves left
@@ -587,7 +613,11 @@ int main(int argc, char* argv[])
     bool ui_worklist_queue_mode = false; // NOW (false) / QUEUE (true) toggle, reset per city open (handoff.md §6)
     int ui_dipl_stage = 1; // 1=player picker, 2=clause editor (handoff.md §7.4)
     int ui_city_tab = CITY_TAB_BUILD;
-    int city_sell_armed = -1;
+    bool from_smart = false; // panel opened by the End Turn button: close after the pick
+    bool quit_now = false;   // Menu -> Quit / Save & Quit finished
+    bool buy_armed = false;  // Buy tapped once; a second tap spends the gold
+    int gov_armed = -1;      // government row tapped once; a second tap revolts
+    int city_sell_armed = -1; buy_armed = false;
     static CityTileInfo city_tiles[CITY_TILES_MAX];
     int city_tiles_n = 0, city_radius = 2;
     static SpecialistInfo city_spec[8];
@@ -671,11 +701,19 @@ int main(int argc, char* argv[])
         // city, would mis-fire a production change using the previous city's
         // stale build list.
         UiMode ui_mode_frame_start = ui_mode;
+        if (quit_now) break;
+        if (ui_mode == UI_MAP) from_smart = false;
 
         // Quit: START on the start menu, SELECT+START in a game (START alone
         // ends the turn there). HOME -> Close also works at any time.
-        if ((kDown & KEY_START) && (app_state != APP_GAME || (kHeld & KEY_SELECT))) {
+        if ((kDown & KEY_START) && app_state != APP_GAME) {
             break; // fc3ds_server_shutdown() (below, after the loop) does the rest
+        }
+        if ((kDown & KEY_START) && (kHeld & KEY_SELECT) && app_state == APP_GAME) {
+            if (ui_mode != UI_MAP || get_game_turn() <= 0) break; // nothing to save yet
+            kDown &= ~KEY_START;
+            open_quit_menu(&popup);
+            popup_kind = POPUP_MENU;
         }
 
         // Start menu / load picker (handoff-nohw.md §A.3): the server
@@ -875,10 +913,10 @@ int main(int argc, char* argv[])
         // Any input puts the turn report away (and still does its normal job),
         // except that a tap on the map only closes it rather than also moving
         // the unit or marking a route.
-        bool report_tap = report_n > 0 && (kDown & KEY_TOUCH);
+        bool report_tap = false; // the report never costs a tap
         if (report_n > 0 && kDown) report_n = 0;
 
-        if (ui_mode == UI_MAP && (kDown & KEY_START) && !(kHeld & KEY_SELECT)) {
+        if (ui_mode == UI_MAP && (kDown & KEY_START) && !(kHeld & KEY_SELECT) && !fc3ds_server_is_busy()) {
             report_seen = get_message_total();
             end_turn_pending = true; // sent after this frame is drawn (and the map captured)
             capture_next = true;
@@ -1086,7 +1124,17 @@ int main(int argc, char* argv[])
                 perf_turn = t; nframes = 0; fsum = fmax = 0;
             }
         }
-        if (!busy) save_in_flight = false; // the queued save's busy step has ended
+        if (busy && busy_frames > 6) { tap_pending = false; bar_tap = -1; } // taps during the banner
+        {
+            static bool save_seen_busy = false;
+            static int save_wait = 0;
+            if (save_in_flight && busy) save_seen_busy = true;
+            if (save_in_flight && !busy && (save_seen_busy || ++save_wait > 90)) {
+                if (save_seen_busy) save_toast_frames = SAVE_TOAST_FRAMES; // shown once it's written
+                if (s_quit_after_save) quit_now = true;
+                save_in_flight = false; save_seen_busy = false; save_wait = 0;
+            }
+        }
 
         if (save_toast_frames > 0) save_toast_frames--;
 
@@ -1145,7 +1193,7 @@ int main(int argc, char* argv[])
                             set_zoom(zoom_idx + 1, &zoom_idx, &zoom, &cam_x, &cam_y);
                         } else if (h == HUD_END && smart_kind != SMART_END && !busy) {
                             want_smart = smart_kind; // open the decision instead of ending the turn
-                        } else if (h == HUD_END) {
+                        } else if (h == HUD_END && !busy) {
                             report_seen = get_message_total();
                             end_turn_pending = true; // sent after this frame is drawn (and the map captured)
                             capture_next = true;
@@ -1186,10 +1234,11 @@ int main(int argc, char* argv[])
             hidTouchRead(&touch);
             int px = (int)touch.px, py = (int)touch.py;
 
+            if (ui_mode == UI_CITY && !(py >= PANEL_FOOTER_Y && px < 160)) buy_armed = false;
             if (ui_mode == UI_CITY && py >= CITY_TAB_Y && py < CITY_TAB_Y + CITY_TAB_H) {
-                for (int t = 0; t < 3; t++)
+                for (int t = 0; t < CITY_TAB_COUNT; t++)
                     if (px >= CITY_TAB_X(t) && px < CITY_TAB_X(t) + CITY_TAB_W) {
-                        ui_city_tab = t; ui_scroll = 0; city_sell_armed = -1;
+                        ui_city_tab = t; ui_scroll = 0; city_sell_armed = -1; buy_armed = false;
                     }
             } else if (ui_mode == UI_CITY && ui_city_tab == CITY_TAB_TILES) {
                 int rx, ry;
@@ -1206,6 +1255,18 @@ int main(int argc, char* argv[])
                         freeciv_request_city_change_specialist(ui_city_id, city_spec[row].id,
                                                                city_spec[(row + 1) % city_spec_n].id);
                 }
+            } else if (ui_mode == UI_CITY && ui_city_tab == CITY_TAB_UNITS) {
+                int row = city_units_hit(py, ui_scroll, ui_city_info.garrison_count);
+                if (py >= PANEL_FOOTER_Y) {
+                    ui_mode = UI_MAP;
+                } else if (row >= 0) {
+                    int uid = ui_city_info.garrison_ids[row];
+                    int ux, uy;
+                    if (find_unit_tile_by_id(uid, &ux, &uy)) { sel_x = ux; sel_y = uy; }
+                    selected_unit_id = uid;
+                    get_unit_info(uid, &unit_info);
+                    ui_mode = UI_MAP;
+                }
             } else if (ui_mode == UI_CITY && ui_city_tab == CITY_TAB_BUILDINGS) {
                 if (py >= PANEL_FOOTER_Y) {
                     if (px >= 160) ui_mode = UI_MAP;
@@ -1214,12 +1275,12 @@ int main(int argc, char* argv[])
                     if (row >= 0 && city_bldg[row].can_sell) {
                         if (city_sell_armed == row) {
                             freeciv_request_city_sell(ui_city_id, city_bldg[row].id);
-                            city_sell_armed = -1;
+                            city_sell_armed = -1; buy_armed = false;
                         } else {
                             city_sell_armed = row;
                         }
                     } else {
-                        city_sell_armed = -1;
+                        city_sell_armed = -1; buy_armed = false;
                     }
                 }
             } else if (ui_mode == UI_CITY) {
@@ -1231,7 +1292,12 @@ int main(int argc, char* argv[])
                     ui_worklist_queue_mode = !ui_worklist_queue_mode;
                 } else if (py >= PANEL_FOOTER_Y) {
                     if (px < 160) {
-                        if (ui_city_info.can_buy) freeciv_request_city_buy(ui_city_id);
+                        if (ui_city_info.can_buy && buy_armed) {
+                            freeciv_request_city_buy(ui_city_id);
+                            buy_armed = false;
+                        } else {
+                            buy_armed = ui_city_info.can_buy;
+                        }
                     } else {
                         ui_mode = UI_MAP;
                     }
@@ -1247,6 +1313,7 @@ int main(int argc, char* argv[])
                         } else {
                             freeciv_request_city_production(ui_city_id, ui_build_opts[row].kind,
                                                             ui_build_opts[row].value);
+                            if (from_smart) ui_mode = UI_MAP;
                         }
                     }
                 } else {
@@ -1273,6 +1340,7 @@ int main(int argc, char* argv[])
                     int row = hit_test_scroll_list(py, ui_scroll, ui_tech_count);
                     if (row >= 0) {
                         freeciv_request_set_research(ui_tech_opts[row].tech);
+                        if (from_smart) ui_mode = UI_MAP;
                     } else if (py >= PANEL_FOOTER_Y) {
                         if (px < 160) { ui_tech_tree_view = true; ui_scroll = 0; } // "Tree view"
                         else ui_mode = UI_MAP;
@@ -1281,10 +1349,18 @@ int main(int argc, char* argv[])
             } else if (ui_mode == UI_GOVERNMENT) {
                 int row = hit_test_scroll_list(py, ui_scroll, ui_gov_count);
                 if (row >= 0) {
-                    if (ui_gov_opts[row].available) {
-                        freeciv_request_set_government(ui_gov_opts[row].gov_id);
+                    if (ui_gov_opts[row].available && ui_gov_opts[row].gov_id != ui_civ_info.government_id) {
+                        if (gov_armed == row) {
+                            freeciv_request_set_government(ui_gov_opts[row].gov_id);
+                            gov_armed = -1;
+                        } else {
+                            gov_armed = row;
+                        }
+                    } else {
+                        gov_armed = -1;
                     }
                 } else if (py >= PANEL_FOOTER_Y) {
+                    gov_armed = -1;
                     ui_mode = UI_MAP;
                 }
             } else if (ui_mode == UI_DIPLOMACY) {
@@ -1476,7 +1552,7 @@ int main(int argc, char* argv[])
                     report_seen = total;
                 }
                 last_turn = turn_now;
-                nskip = 0;
+                nskip = 0; nwait = 0;
                 turn_select_frames = 600;
                 popup_kind = POPUP_NONE;
                 pending_goto_x = pending_goto_y = -1;
@@ -1513,12 +1589,15 @@ int main(int argc, char* argv[])
                 popup_kind = POPUP_NONE;
                 if (kind == POPUP_UNIT && selected_unit_id >= 0) {
                     if (id == PID_SKIP) {
-                        if (nskip < 64) skip_ids[nskip++] = selected_unit_id;
+                        if (nwait < 64) wait_ids[nwait++] = selected_unit_id;
                         advance_from = selected_unit_id;
                         selected_unit_id = -1;
                         want_next_unit = true;
                     } else if (id == PID_DESELECT) {
+                        if (nskip < 64) skip_ids[nskip++] = selected_unit_id;
+                        advance_from = selected_unit_id;
                         selected_unit_id = -1;
+                        want_next_unit = true;
                     } else if (id == PID_DISBAND_ASK) {
                         memset(&popup, 0, sizeof(popup));
                         snprintf(popup.title, sizeof(popup.title), "Disband %s?", unit_info.name);
@@ -1561,31 +1640,46 @@ int main(int argc, char* argv[])
                             ui_city_id = t.city_id;
                             ui_scroll = 0;
                             ui_garrison_sel = 0;
-                            ui_worklist_queue_mode = false; ui_city_tab = CITY_TAB_BUILD; city_sell_armed = -1;
+                            ui_worklist_queue_mode = false; ui_city_tab = CITY_TAB_BUILD; city_sell_armed = -1; buy_armed = false;
                         }
                     } else {
                         selected_unit_id = id;
                         get_unit_info(selected_unit_id, &unit_info);
-                        if (unit_info.valid && unit_info.idle) want_unit_popup = true;
                     }
                 } else if (kind == POPUP_MENU) {
                     switch (id) {
                     case MENU_RESEARCH:   ui_mode = UI_RESEARCH; ui_scroll = 0; ui_tech_tree_view = false; break;
                     case MENU_RATES:      ui_mode = UI_RATES; ui_scroll = 0; break;
-                    case MENU_GOVERNMENT: ui_mode = UI_GOVERNMENT; ui_scroll = 0; break;
+                    case MENU_GOVERNMENT: ui_mode = UI_GOVERNMENT; ui_scroll = 0; gov_armed = -1; break;
                     case MENU_DIPLOMACY:  ui_mode = UI_DIPLOMACY; ui_scroll = 0; ui_dipl_stage = 1; break;
                     case MENU_MESSAGES:   ui_mode = UI_MESSAGES; ui_scroll = 0; break;
                     case MENU_SPACESHIP:  ui_mode = UI_SPACESHIP; break;
                     case MENU_TEXT:
                         font_set_bias(font_get_bias() ? 0 : 1);
                         save_settings();
+                        open_options_menu(&popup);
+                        popup_kind = POPUP_MENU;
+                        break;
+                    case MENU_OPTIONS:
+                        open_options_menu(&popup);
+                        popup_kind = POPUP_MENU;
+                        break;
+                    case MENU_BACK:
                         open_game_menu(&popup);
                         popup_kind = POPUP_MENU;
+                        break;
+                    case MENU_QUIT:
+                        quit_now = true;
+                        break;
+                    case MENU_SAVE_QUIT:
+                        freeciv_request_save_game();
+                        save_in_flight = true;
+                        s_quit_after_save = true;
+                        capture_next = true;
                         break;
                     case MENU_PEDIA:      ui_mode = UI_PEDIA; ui_scroll = 0; pedia_sel = -1; pedia_dirty = true; break;
                     case MENU_SAVE:
                         freeciv_request_save_game();
-                        save_toast_frames = SAVE_TOAST_FRAMES;
                         save_in_flight = true;
                         capture_next = true;
                         break;
@@ -1595,7 +1689,7 @@ int main(int argc, char* argv[])
                         else audio_set_volumes(audio_music_volume(), next_volume(audio_sfx_volume()));
                         save_settings();
                         if (id == MENU_EFFECTS) audio_play("e_tech_gain");
-                        open_game_menu(&popup);      // stay open to show the new level
+                        open_options_menu(&popup);   // stay open to show the new level
                         popup_kind = POPUP_MENU;
                         break;
                     default: break;
@@ -1621,7 +1715,7 @@ int main(int argc, char* argv[])
                         MoveDir dir;
                         select_here = false;
                         if (tx == unit_info.x && ty == unit_info.y) {
-                            if (mine_n > 1 || own_city) select_here = true; // pick from the stack
+                            if (mine_n > 1 && !own_city) select_here = true; // pick from the stack
                             else want_unit_popup = true;
                         } else if (adjacent_dir(unit_info.x, unit_info.y, tx, ty, &dir)) {
                             pending_goto_x = pending_goto_y = -1;
@@ -1632,13 +1726,15 @@ int main(int argc, char* argv[])
                                 // Show the choices (and the odds) before acting.
                                 memset(&popup, 0, sizeof(popup));
                                 if (fight)
-                                    snprintf(popup.title, sizeof(popup.title), "vs %s: %d%% to win",
-                                             attack_odds.defender, attack_odds.win_pct);
+                                    snprintf(popup.title, sizeof(popup.title), "vs %s", attack_odds.defender);
                                 else
                                     snprintf(popup.title, sizeof(popup.title), "%s", t.city_name[0] ? t.city_name : "City");
                                 for (int i = 0; i < nca; i++) popup_add(&popup, PID_CITY_ACTION + ca[i].action, ca[i].label, true);
-                                if (fight)
-                                    popup_add(&popup, PID_YES, attack_odds.can_attack ? "Attack" : "Can't attack", attack_odds.can_attack);
+                                if (fight) {
+                                    char al[24];
+                                    snprintf(al, sizeof(al), "Attack %d%%", attack_odds.win_pct);
+                                    popup_add(&popup, PID_YES, attack_odds.can_attack ? al : "Can't attack", attack_odds.can_attack);
+                                }
                                 popup_add(&popup, PID_NO, "Cancel", true);
                                 pending_target_x = tx; pending_target_y = ty;
                                 int sx, sy;
@@ -1667,14 +1763,13 @@ int main(int argc, char* argv[])
                         int sx, sy;
                         tile_to_screen(tx, ty, cam_x, cam_y, zoom, &sx, &sy);
                         int ax = sx + (int)(15 * zoom), ay = sy + (int)(15 * zoom);
-                        if (mine_n > 1 || (own_city && mine_n > 0)) {
+                        if (mine_n > 1 && !own_city) {
                             memset(&popup, 0, sizeof(popup));
-                            snprintf(popup.title, sizeof(popup.title), "%s", own_city ? t.city_name : "Units here");
-                            if (own_city) popup_add(&popup, PID_OPEN_CITY, "Open City", true);
+                            snprintf(popup.title, sizeof(popup.title), "Units here");
                             for (int i = 0; i < hn && popup.n < POPUP_MAX; i++) {
                                 if (!is_pov_unit_owner(here[i].owner)) continue;
                                 char lbl[24];
-                                snprintf(lbl, sizeof(lbl), "%s%s", here[i].name, here[i].can_move ? "" : " *");
+                                snprintf(lbl, sizeof(lbl), "%s%s", here[i].name, here[i].can_move ? "" : " (done)");
                                 popup_add(&popup, here[i].id, lbl, true);
                             }
                             popup_layout(&popup, ax, ay);
@@ -1685,12 +1780,13 @@ int main(int argc, char* argv[])
                             ui_city_id = t.city_id;
                             ui_scroll = 0;
                             ui_garrison_sel = 0;
-                            ui_worklist_queue_mode = false; ui_city_tab = CITY_TAB_BUILD; city_sell_armed = -1;
+                            ui_worklist_queue_mode = false; ui_city_tab = CITY_TAB_BUILD; city_sell_armed = -1; buy_armed = false;
                             selected_unit_id = -1;
                         } else if (mine_n == 1) {
-                            // Your unit: command it and show its orders.
+                            // Your unit: select it; its orders show in the quick bar
+                            // (tap it again for the full menu).
                             selected_unit_id = here[0].id;
-                            want_unit_popup = true;
+                            get_unit_info(selected_unit_id, &unit_info);
                         } else {
                             selected_unit_id = -1;       // just looking
                         }
@@ -1701,7 +1797,10 @@ int main(int argc, char* argv[])
 
             // The commanded unit has used up its moves (or is following a
             // route): after a short pause, move on to the next unit.
-            if (selected_unit_id >= 0 && unit_info.valid && popup_kind == POPUP_NONE
+            static int live_id = -1; // selected unit last seen with moves and no orders
+            if (selected_unit_id >= 0 && unit_info.valid && unit_info.moves_left > 0 && !unit_info.has_orders)
+                live_id = selected_unit_id;
+            if (selected_unit_id >= 0 && selected_unit_id == live_id && unit_info.valid && popup_kind == POPUP_NONE
                 && (unit_info.moves_left == 0 || unit_info.has_orders)) {
                 if (++done_frames >= 25) {
                     advance_from = selected_unit_id;
@@ -1714,13 +1813,20 @@ int main(int argc, char* argv[])
 
             // Next unit needing orders.
             if (want_next_unit && ui_mode == UI_MAP) {
-                int skip_tmp[65];
+                int skip_tmp[129];
                 int ns = 0;
                 for (int i = 0; i < nskip; i++) skip_tmp[ns++] = skip_ids[i];
+                for (int i = 0; i < nwait; i++) skip_tmp[ns++] = wait_ids[i];
                 if (advance_from >= 0) skip_tmp[ns++] = advance_from;
                 int nid, nx, ny;
                 int after = advance_from >= 0 ? advance_from : selected_unit_id;
-                if (find_next_idle_unit(after, skip_tmp, ns, &nid, &nx, &ny)) {
+                bool found = find_next_idle_unit(after, skip_tmp, ns, &nid, &nx, &ny);
+                if (!found && nwait > 0) {
+                    // Everyone else is done: back to the units told to wait.
+                    nwait = 0;
+                    found = find_next_idle_unit(-1, skip_ids, nskip, &nid, &nx, &ny);
+                }
+                if (found) {
                     selected_unit_id = nid;
                     get_unit_info(nid, &unit_info);
                     sel_x = nx; sel_y = ny;
@@ -1792,7 +1898,7 @@ int main(int argc, char* argv[])
             // Quick-order bar contents: the unit's most useful orders first.
             bar_n = 0;
             if (ui_mode == UI_MAP && popup_kind == POPUP_NONE && selected_unit_id >= 0 && unit_info.valid
-                && report_n == 0 && pending_goto_x < 0) {
+                && pending_goto_x < 0) {
                 static const struct { int kind; const char *label; } pri[] = {
                     { UNIT_ACTION_FOUND_CITY, "Build City" }, { UNIT_ACTION_AUTO_WORK, "Auto Work" },
                     { UNIT_ACTION_JOIN_CITY, "Join City" },   { UNIT_ACTION_FORTIFY, "Fortify" },
@@ -1821,6 +1927,9 @@ int main(int argc, char* argv[])
                 int a1, a2, a3;
                 moved_refresh = 0;
                 all_moved = !find_next_idle_unit(-1, skip_ids, nskip, &a1, &a2, &a3);
+                SpaceshipInfo ss;
+                get_spaceship_info(&ss);
+                s_has_spaceship = ss.state > 0;
                 char cname[32];
                 smart_city = get_pending_production(cname, sizeof(cname), &smart_x, &smart_y);
                 if (research_needs_choice()) {
@@ -1836,6 +1945,7 @@ int main(int argc, char* argv[])
             }
             // A decision the smart button offered was tapped.
             if (want_smart >= 0) {
+                from_smart = true;
                 if (want_smart == SMART_RESEARCH) {
                     ui_mode = UI_RESEARCH; ui_scroll = 0; ui_tech_tree_view = false;
                 } else if (want_smart == SMART_PROD && smart_city >= 0) {
@@ -1843,7 +1953,7 @@ int main(int argc, char* argv[])
                     ui_mode = UI_CITY;
                     ui_city_id = smart_city;
                     ui_scroll = 0; ui_garrison_sel = 0;
-                    ui_worklist_queue_mode = false; ui_city_tab = CITY_TAB_BUILD; city_sell_armed = -1;
+                    ui_worklist_queue_mode = false; ui_city_tab = CITY_TAB_BUILD; city_sell_armed = -1; buy_armed = false;
                     popup_kind = POPUP_NONE;
                 }
                 want_smart = -1;
@@ -1913,6 +2023,10 @@ int main(int argc, char* argv[])
                     if (ui_city_tab == CITY_TAB_TILES) {
                         city_tiles_n = get_city_tiles(ui_city_id, city_tiles, CITY_TILES_MAX, &city_radius);
                         city_spec_n = get_city_specialists(ui_city_id, city_spec, 8);
+                    } else if (ui_city_tab == CITY_TAB_UNITS) {
+                        int rows = (PANEL_FOOTER_Y - PANEL_LIST_Y) / CITY_UNIT_ROW_H;
+                        int ms = ui_city_info.garrison_count > rows ? ui_city_info.garrison_count - rows : 0;
+                        if (ui_scroll > ms) ui_scroll = ms;
                     } else if (ui_city_tab == CITY_TAB_BUILDINGS) {
                         city_bldg_n = get_city_buildings(ui_city_id, city_bldg, 96);
                         int ms = city_bldg_n > PANEL_ROWS_VISIBLE ? city_bldg_n - PANEL_ROWS_VISIBLE : 0;
@@ -2127,8 +2241,6 @@ int main(int argc, char* argv[])
                     ti.hint = "Tap an order, or tap outside the menu to close it.";
                 } else if (popup_kind == POPUP_STACK) {
                     ti.hint = "Tap a unit to command it.";
-                } else if (popup_kind != POPUP_NONE) {
-                    ti.hint = "Tap a choice, or tap outside the menu to close it.";
                 } else if (popup_kind == POPUP_ATTACK && !attack_odds.defender[0]) {
                     ti.hint = "Choose what your unit should do there.";
                 } else if (popup_kind == POPUP_ATTACK) {
@@ -2140,6 +2252,8 @@ int main(int argc, char* argv[])
                     ti.hint_color = attack_odds.win_pct >= 65 ? C2D_Color32(0x90, 0xE8, 0x90, 0xFF)
                                   : attack_odds.win_pct >= 40 ? C2D_Color32(0xFF, 0xD0, 0x60, 0xFF)
                                                               : C2D_Color32(0xFF, 0x80, 0x70, 0xFF);
+                } else if (popup_kind != POPUP_NONE) {
+                    ti.hint = "Tap a choice, or tap outside the menu to close it.";
                 } else if (pending_goto_x >= 0) {
                     ti.hint = route.reachable ? "Tap the marked tile again to send the unit there.  B: cancel"
                                               : "No way to get there from here.  B: cancel";
@@ -2198,7 +2312,10 @@ int main(int argc, char* argv[])
                     render_city_tiles_panel(&ui_city_info, city_tiles, city_tiles_n, city_radius, city_spec, city_spec_n);
                 else if (ui_city_tab == CITY_TAB_BUILDINGS)
                     render_city_buildings_panel(&ui_city_info, city_bldg, city_bldg_n, ui_scroll, city_sell_armed);
+                else if (ui_city_tab == CITY_TAB_UNITS)
+                    render_city_units_panel(&ui_city_info, ui_scroll);
                 else
+                    render_set_buy_armed(buy_armed);
                     render_city_panel(&ui_city_info, ui_build_opts, ui_build_count, ui_scroll,
                                       ui_worklist, ui_worklist_count, ui_worklist_queue_mode);
                 break;
@@ -2213,6 +2330,7 @@ int main(int argc, char* argv[])
                 render_rates_panel(&ui_civ_info);
                 break;
             case UI_GOVERNMENT:
+                render_set_gov_armed(gov_armed);
                 render_government_panel(ui_gov_opts, ui_gov_count, ui_scroll, ui_civ_info.government_id);
                 break;
             case UI_SPACESHIP:
