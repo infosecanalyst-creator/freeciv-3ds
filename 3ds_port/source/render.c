@@ -3207,6 +3207,88 @@ static void man_load(void)
     if (!s_ml) s_ml = malloc(sizeof(ManLine) * MAN_MAX_LINES);
 }
 
+static void man_add(int kind, int x, int h, const char *a, const char *b)
+{
+    if (!s_ml || s_ml_n >= MAN_MAX_LINES) return;
+    ManLine *l = &s_ml[s_ml_n++];
+    l->kind = (unsigned char)kind; l->x = (unsigned char)x; l->h = (short)h;
+    snprintf(l->a, sizeof(l->a), "%s", a ? a : "");
+    snprintf(l->b, sizeof(l->b), "%s", b ? b : "");
+    s_ml_h += h;
+}
+
+// Word-wraps text into lines of width w; calls back with each line.
+static void man_wrap(const char *text, float w, float scale, int kind, int x, const char *first_a, bool row)
+{
+    char line[96];
+    int n = 0;
+    bool first = true;
+    const char *p = text;
+    while (*p) {
+        while (*p == ' ') p++;
+        const char *we = p;
+        while (*we && *we != ' ') we++;
+        int wl = (int)(we - p);
+        char trial[96];
+        snprintf(trial, sizeof(trial), "%.*s%s%.*s", n, line, n ? " " : "", wl, p);
+        if (n && font_width(trial, scale) > w) {
+            line[n] = 0;
+            if (row) man_add(ML_ROW, x, MAN_LH, first ? first_a : "", line);
+            else man_add(kind, x, MAN_LH, first ? first_a : "", line);
+            first = false;
+            n = 0;
+            continue; // retry this word on a new line
+        }
+        snprintf(line, sizeof(line), "%s", trial);
+        n = (int)strlen(line);
+        p = we;
+    }
+    if (n || first) {
+        line[n] = 0;
+        man_add(row ? ML_ROW : kind, x, MAN_LH, first ? first_a : "", line);
+    }
+}
+
+static void man_layout(void)
+{
+    if (s_ml_sec == s_man_sec && s_ml_bias == font_get_bias()) return;
+    s_ml_sec = s_man_sec; s_ml_bias = font_get_bias();
+    s_ml_n = 0; s_ml_h = 0;
+    if (s_man_sec < 0 || s_man_sec >= s_man_n) return;
+    const char *p = s_man_body[s_man_sec];
+    const char *end = s_man_end[s_man_sec];
+    char ln[400];
+    while (p < end && *p) {
+        const char *eol = p;
+        while (eol < end && *eol && *eol != '\n') eol++;
+        int len = (int)(eol - p);
+        if (len > (int)sizeof(ln) - 1) len = sizeof(ln) - 1;
+        memcpy(ln, p, len); ln[len] = 0;
+        char *cr = strchr(ln, '\r'); if (cr) *cr = 0;
+        p = *eol ? eol + 1 : eol;
+        if (!ln[0]) { man_add(ML_GAP, 0, 6, NULL, NULL); continue; }
+        if (!strncmp(ln, "## ", 3)) {
+            if (s_ml_n > 0) man_add(ML_GAP, 0, 4, NULL, NULL);
+            man_add(ML_HEAD, 0, 20, ln + 3, NULL);
+        } else if (!strncmp(ln, "- ", 2)) {
+            man_wrap(ln + 2, MAN_TEXT_W - 14, MAN_SCALE, ML_TEXT, 14, "\x01", false); // \x01 = bullet
+        } else if (ln[0] >= '1' && ln[0] <= '9' && ln[1] == '.' && ln[2] == ' ') {
+            char num[4] = { ln[0], '.', 0, 0 };
+            man_wrap(ln + 3, MAN_TEXT_W - 18, MAN_SCALE, ML_TEXT, 18, num, false);
+        } else if (ln[0] == '|') {
+            char *a = ln + 1, *bar = strchr(a, '|');
+            char *b = bar ? bar + 1 : (char *)"";
+            if (bar) *bar = 0;
+            while (*a == ' ') a++;
+            for (char *e = a + strlen(a); e > a && e[-1] == ' '; ) *--e = 0;
+            while (*b == ' ') b++;
+            man_wrap(b, MAN_TEXT_W - 132, 0.45f, ML_ROW, 132, a, true);
+        } else {
+            man_wrap(ln, MAN_TEXT_W, MAN_SCALE, ML_TEXT, 0, "", false);
+        }
+    }
+}
+
 bool manual_available(void) { man_load(); return s_man_n > 0; }
 
 static int man_max_scroll(void)
