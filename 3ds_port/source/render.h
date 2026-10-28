@@ -91,6 +91,7 @@ typedef struct {
     int              report_n, report_more, report_turn;
 } TopInfo;
 void render_top_info(const TopInfo *ti);
+void render_set_idle_count(int n); // shown on the Next button
 
 // Stereo 3D for the top screen: call before drawing each eye (eye -1 left,
 // +1 right, 0 mono; amount = pixels of separation per unit of depth).

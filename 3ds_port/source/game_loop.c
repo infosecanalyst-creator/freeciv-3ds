@@ -39,6 +39,7 @@
 #include "events.h"
 #include "specialist.h"
 #include "spacerace.h"
+#include "calendar.h"
 #include "spaceship.h"
 #include "string_vector.h"
 #include <string.h>
@@ -247,6 +248,15 @@ bool find_pov_unit_tile(int *x, int *y)
         return false;
     }
     index_to_native_pos(x, y, tile_index(ptile));
+    return true;
+}
+
+bool get_city_tile(int city_id, int *x, int *y)
+{
+    if (map_is_empty() || city_id < 0) return false;
+    struct city *pc = game_city_by_number(city_id);
+    if (!pc) return false;
+    index_to_native_pos(x, y, tile_index(city_tile(pc)));
     return true;
 }
 
@@ -606,9 +616,10 @@ static bool message_wanted(enum event_type e)
 // to a player; runs on the server thread.
 #define PROD_PENDING_MAX 16
 static int s_prod_pending[PROD_PENDING_MAX];
+static int s_prod_kind[PROD_PENDING_MAX]; // PENDING_BUILD / _DISORDER / _FAMINE
 static int s_prod_n;
 
-int get_pending_production(char *name, int len, int *x, int *y)
+int get_pending_production(char *name, int len, int *x, int *y, int *kind)
 {
     struct player *pov = get_pov_player();
     while (s_prod_n > 0) {
@@ -616,9 +627,12 @@ int get_pending_production(char *name, int len, int *x, int *y)
         if (pov && pc && city_owner(pc) == pov) {
             fc_strlcpy(name, city_name_get(pc), len);
             index_to_native_pos(x, y, tile_index(city_tile(pc)));
+            if (kind) *kind = s_prod_kind[0];
             return pc->id;
         }
-        memmove(s_prod_pending, s_prod_pending + 1, (--s_prod_n) * sizeof(int)); // city gone
+        --s_prod_n; // city gone
+        memmove(s_prod_pending, s_prod_pending + 1, s_prod_n * sizeof(int));
+        memmove(s_prod_kind, s_prod_kind + 1, s_prod_n * sizeof(int));
     }
     return -1;
 }
@@ -628,6 +642,7 @@ void dismiss_pending_production(int city_id)
     for (int i = 0; i < s_prod_n; i++) {
         if (s_prod_pending[i] == city_id) {
             memmove(s_prod_pending + i, s_prod_pending + i + 1, (s_prod_n - i - 1) * sizeof(int));
+            memmove(s_prod_kind + i, s_prod_kind + i + 1, (s_prod_n - i - 1) * sizeof(int));
             s_prod_n--;
             return;
         }
@@ -682,14 +697,22 @@ void freeciv3ds_event_hook(const struct packet_chat_msg *packet, int pidx)
     // smart End Turn button's "Choose production" step.
     // (A plain unit just repeats, which is what players expect; settlers
     // and other units that cost population do prompt.)
-    if ((e == E_IMP_BUILD || e == E_UNIT_BUILT_POP_COST || e == E_WORKLIST
-         || e == E_IMP_AUTO || e == E_CITY_CANTBUILD) && packet->tile >= 0) {
+    // Cities in disorder or about to starve stop End Turn the same way.
+    int pkind = -1;
+    if (e == E_IMP_BUILD || e == E_UNIT_BUILT_POP_COST || e == E_WORKLIST
+        || e == E_IMP_AUTO || e == E_CITY_CANTBUILD) pkind = PENDING_BUILD;
+    else if (e == E_CITY_DISORDER) pkind = PENDING_DISORDER;
+    else if (e == E_CITY_FAMINE_FEARED) pkind = PENDING_FAMINE;
+    if (pkind >= 0 && packet->tile >= 0) {
         struct tile *t = index_to_tile(&(wld.map), packet->tile);
         struct city *pc = t ? tile_city(t) : NULL;
         if (pc && city_owner(pc) == pov) {
             bool have = false;
             for (int i = 0; i < s_prod_n; i++) if (s_prod_pending[i] == pc->id) have = true;
-            if (!have && s_prod_n < PROD_PENDING_MAX) s_prod_pending[s_prod_n++] = pc->id;
+            if (!have && s_prod_n < PROD_PENDING_MAX) {
+                s_prod_kind[s_prod_n] = pkind;
+                s_prod_pending[s_prod_n++] = pc->id;
+            }
         }
     }
 
@@ -1053,8 +1076,8 @@ static const struct { action_id act; const char *label; } k_city_actions[] = {
     { ACTION_DISBAND_UNIT_RECOVER,    "Disband (shields)" },
     { ACTION_UPGRADE_UNIT,            "Upgrade" },
     { ACTION_HOME_CITY,               "Make Home City" },
-    { ACTION_ESTABLISH_EMBASSY_STAY,  "Embassy" },
-    { ACTION_ESTABLISH_EMBASSY,       "Embassy (stay)" },
+    { ACTION_ESTABLISH_EMBASSY_STAY,  "Embassy (unit used)" },
+    { ACTION_ESTABLISH_EMBASSY,       "Embassy (keep unit)" },
     { ACTION_SPY_INVESTIGATE_CITY,    "Investigate" },
     { ACTION_INV_CITY_SPEND,          "Investigate" },
     { ACTION_SPY_STEAL_TECH_ESC,      "Steal Tech" },
@@ -1357,24 +1380,53 @@ bool find_next_idle_unit(int after_id, const int *skip, int nskip, int *id, int 
     if (map_is_empty()) return false;
     struct player *pov = get_pov_player();
     if (!pov) return false;
-    int n = unit_list_size(pov->units);
-    if (n == 0) return false;
-    int start = 0;
-    for (int i = 0; i < n; i++) {
-        if (unit_list_get(pov->units, i)->id == after_id) { start = i + 1; break; }
-    }
-    for (int k = 0; k < n; k++) {
-        struct unit *punit = unit_list_get(pov->units, (start + k) % n);
-        if (!punit || punit->moves_left <= 0 || punit->activity != ACTIVITY_IDLE
+    // Nearest idle unit to the one just handled, so the camera doesn't jump
+    // back and forth across the map; the unit itself only if it is the last.
+    struct unit *from = after_id >= 0 ? game_unit_by_number(after_id) : NULL;
+    struct tile *ref = (from && unit_owner(from) == pov) ? unit_tile(from) : NULL;
+    struct unit *best = NULL, *self = NULL;
+    int best_d = 0;
+    unit_list_iterate(pov->units, punit) {
+        if (punit->moves_left <= 0 || punit->activity != ACTIVITY_IDLE
             || unit_has_orders(punit) || punit->ssa_controller != SSA_NONE || !unit_tile(punit)) continue;
         bool skipped = false;
         for (int j = 0; j < nskip; j++) if (skip[j] == punit->id) { skipped = true; break; }
         if (skipped) continue;
-        *id = punit->id;
-        index_to_native_pos(x, y, tile_index(unit_tile(punit)));
-        return true;
-    }
-    return false;
+        if (punit->id == after_id) { self = punit; continue; }
+        int d = ref ? sq_map_distance(ref, unit_tile(punit)) : 0;
+        if (!best || d < best_d) { best = punit; best_d = d; }
+    } unit_list_iterate_end;
+    if (!best) best = self;
+    if (!best) return false;
+    *id = best->id;
+    index_to_native_pos(x, y, tile_index(unit_tile(best)));
+    return true;
+}
+
+int count_idle_units(const int *skip, int nskip)
+{
+    struct player *pov = get_pov_player();
+    if (!pov || map_is_empty()) return 0;
+    int n = 0;
+    unit_list_iterate(pov->units, punit) {
+        if (punit->moves_left <= 0 || punit->activity != ACTIVITY_IDLE
+            || unit_has_orders(punit) || punit->ssa_controller != SSA_NONE || !unit_tile(punit)) continue;
+        bool skipped = false;
+        for (int j = 0; j < nskip; j++) if (skip[j] == punit->id) { skipped = true; break; }
+        if (!skipped) n++;
+    } unit_list_iterate_end;
+    return n;
+}
+
+int get_city_ids(int *out, int max)
+{
+    struct player *pov = get_pov_player();
+    if (!pov) return 0;
+    int n = 0;
+    city_list_iterate(pov->cities, pcity) {
+        if (n < max) out[n++] = pcity->id;
+    } city_list_iterate_end;
+    return n;
 }
 
 void freeciv3ds_process_pending_actions(void)
@@ -1957,24 +2009,7 @@ int get_city_buildables(int city_id, BuildOption *out, int max)
     }
 
     int n = 0;
-    unit_type_iterate(putype) {
-        if (n >= max) break;
-        if (can_city_build_unit_now(&(wld.map), pcity, putype, RPT_CERTAIN)) {
-            out[n].kind = VUT_UTYPE;
-            out[n].value = utype_number(putype);
-            const char *uname = utype_name_translation(putype);
-            fc_strlcpy(out[n].name, uname ? uname : "?", sizeof(out[n].name));
-            out[n].cost = utype_build_shield_cost(pcity, pov, putype);
-            {
-                struct universal tgt = { .kind = VUT_UTYPE, .value.utype = putype };
-                out[n].turns = city_turns_to_build(pcity, &tgt, TRUE);
-            }
-            out[n].is_current = (pcity->production.kind == VUT_UTYPE
-                                  && pcity->production.value.utype == putype);
-            n++;
-        }
-    } unit_type_iterate_end;
-
+    // Buildings first (the usual decision), then units.
     improvement_iterate(pimprove) {
         if (n >= max) break;
         if (can_city_build_improvement_now(pcity, pimprove, RPT_CERTAIN)) {
@@ -1994,6 +2029,24 @@ int get_city_buildables(int city_id, BuildOption *out, int max)
             n++;
         }
     } improvement_iterate_end;
+
+    unit_type_iterate(putype) {
+        if (n >= max) break;
+        if (can_city_build_unit_now(&(wld.map), pcity, putype, RPT_CERTAIN)) {
+            out[n].kind = VUT_UTYPE;
+            out[n].value = utype_number(putype);
+            const char *uname = utype_name_translation(putype);
+            fc_strlcpy(out[n].name, uname ? uname : "?", sizeof(out[n].name));
+            out[n].cost = utype_build_shield_cost(pcity, pov, putype);
+            {
+                struct universal tgt = { .kind = VUT_UTYPE, .value.utype = putype };
+                out[n].turns = city_turns_to_build(pcity, &tgt, TRUE);
+            }
+            out[n].is_current = (pcity->production.kind == VUT_UTYPE
+                                  && pcity->production.value.utype == putype);
+            n++;
+        }
+    } unit_type_iterate_end;
 
     return n;
 }
@@ -2034,6 +2087,7 @@ void get_civ_info(CivInfo *out)
         return;
     }
 
+    fc_strlcpy(out->year, calendar_text(), sizeof(out->year));
     out->gold = pov->economic.gold;
     out->gold_per_turn = player_get_expected_income(pov);
     out->tax = pov->economic.tax;

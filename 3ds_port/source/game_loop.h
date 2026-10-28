@@ -193,6 +193,7 @@ typedef struct {
 
 // Snapshot of the pov player's civilization-level state (economy + research).
 typedef struct {
+    char year[32];           // "3000 BC"
     int  gold;
     int  gold_per_turn;      // expected net income next turn
     int  tax, lux, sci;
@@ -464,7 +465,8 @@ typedef struct {
 int get_message_total(void);
 // Smart End Turn button. A city that finished something this turn, oldest
 // first: returns its id (or -1) and fills its name and map position.
-int get_pending_production(char *name, int len, int *x, int *y);
+enum { PENDING_BUILD, PENDING_DISORDER, PENDING_FAMINE };
+int get_pending_production(char *name, int len, int *x, int *y, int *kind);
 void dismiss_pending_production(int city_id);
 // True when nothing is being researched (the player should pick).
 bool research_needs_choice(void);
@@ -523,10 +525,13 @@ int get_tile_units(int x, int y, UnitBrief *out, int max);
 // The next pov unit after after_id (in unit-list order, wrapping) that is
 // idle with moves left and not in skip[0..nskip); false if none.
 bool find_next_idle_unit(int after_id, const int *skip, int nskip, int *id, int *x, int *y);
+int count_idle_units(const int *skip, int nskip);
+int get_city_ids(int *out, int max);  // the pov player's cities, in list order
 
 // Find the current tile of the unit with the given server-side id. Returns
 // false (leaving *x/*y untouched) if the unit no longer exists.
 bool find_unit_tile_by_id(int unit_id, int *x, int *y);
+bool get_city_tile(int city_id, int *x, int *y);
 
 // Read the given unit's pending goto destination (handoff.md §2b), if any.
 // Returns false (leaving *x/*y untouched) if the unit doesn't exist or has

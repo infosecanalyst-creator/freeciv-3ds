@@ -587,6 +587,9 @@ static float text_width(const char *str, float scale)
     return font_width(str, scale);
 }
 
+static int s_idle_count = 0; // idle units, shown on the Next button
+void render_set_idle_count(int n) { s_idle_count = n; }
+
 static void draw_button(float x, float y, float w, float h, float z, const char *label,
                         float scale, bool enabled, bool highlight)
 {
@@ -805,7 +808,9 @@ hud:
     const float Z = 0.9f;
     float by = HUD_Y + 2, bh = 240 - HUD_Y - 3;
     draw_button(HUD_MENU_X, by, HUD_MENU_W, bh, Z, "Menu", 0.5f, true, false);
-    draw_button(HUD_NEXT_X, by, HUD_NEXT_W, bh, Z, "Next", 0.5f, !all_moved, false);
+    char next_lbl[16] = "Next";
+    if (s_idle_count > 0 && !all_moved) snprintf(next_lbl, sizeof(next_lbl), "Next %d", s_idle_count);
+    draw_button(HUD_NEXT_X, by, HUD_NEXT_W, bh, Z, next_lbl, 0.5f, !all_moved, false);
     draw_button(HUD_MAP_X,  by, HUD_MAP_W,  bh, Z, "Map", 0.5f, true, s_world_view);
     draw_button(HUD_ZOUT_X, by, HUD_ZOOM_W, bh, Z, "-", 0.7f, can_zoom_out, false);
     draw_button(HUD_ZIN_X,  by, HUD_ZOOM_W, bh, Z, "+", 0.7f, can_zoom_in, false);
@@ -921,14 +926,21 @@ void render_top_info(const TopInfo *ti)
     C2D_DrawRectSolid(0, 18, 0.0f, 400, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
     int turn = get_game_turn();
     if (turn > 0) {
-        snprintf(line, sizeof(line), "Turn %d", turn);
+        if (ti->civ && ti->civ->year[0]) snprintf(line, sizeof(line), "Turn %d, %s", turn, ti->civ->year);
+        else snprintf(line, sizeof(line), "Turn %d", turn);
         draw_text(5, 1, 0.52f, white, line);
+        float gx = 5 + text_width(line, 0.52f) + 12;
         if (ti->civ) {
             snprintf(line, sizeof(line), "Gold %d (%+d)", ti->civ->gold, ti->civ->gold_per_turn);
-            draw_text(78, 1, 0.52f, gold, line);
+            draw_text(gx, 1, 0.52f, gold, line);
+            gx += text_width(line, 0.52f) + 10;
             snprintf(line, sizeof(line), "%s  Tax %d Lux %d Sci %d", ti->civ->government_name,
                      ti->civ->tax, ti->civ->lux, ti->civ->sci);
-            draw_text(395 - text_width(line, 0.45f), 2, 0.45f, soft, line);
+            float rs = 0.45f;
+            while (rs > 0.38f && 395 - text_width(line, rs) < gx) rs -= 0.01f;
+            if (395 - text_width(line, rs) < gx) // still no room: drop the government name
+                snprintf(line, sizeof(line), "Tax %d Lux %d Sci %d", ti->civ->tax, ti->civ->lux, ti->civ->sci);
+            draw_text(395 - text_width(line, rs), 2, rs, soft, line);
         }
     } else {
         draw_text(5, 1, 0.52f, white, "Generating world...");
@@ -962,6 +974,10 @@ void render_top_info(const TopInfo *ti)
         else
             snprintf(line, sizeof(line), "%d/%d bulbs", ti->civ->bulbs, ti->civ->bulbs_needed);
         draw_text(MINIMAP_X, y + 39 + lb, 0.42f, soft, line);
+        if (ti->civ->goal_name[0]) {
+            snprintf(line, sizeof(line), "Goal: %s", ti->civ->goal_name);
+            draw_text(MINIMAP_X, y + 53 + lb, 0.42f, gold, line);
+        }
     }
 
     // Right: what's selected (in front; the portrait most of all).
@@ -1004,7 +1020,18 @@ void render_top_info(const TopInfo *ti)
         y += 18;
         snprintf(line, sizeof(line), "Moves left: %s", u->moves_left > 0 ? u->moves : "none");
         draw_text(CX + 2, y, 0.47f, u->moves_left > 0 ? white : label, line);
-        y += 20;
+        y += 18;
+        if (ti->tile && ti->tile_x == u->x && ti->tile_y == u->y && ti->tile->visibility > 0) {
+            const TileInfo *t = ti->tile;
+            snprintf(line, sizeof(line), "On: %s%s%s%s%s",
+                     t->terrain <= TERRAIN_ARCTIC ? k_terrain_names[t->terrain] : "?",
+                     t->has_river ? ", River" : "",
+                     t->has_rail ? ", Railroad" : t->has_road ? ", Road" : "",
+                     t->has_farmland ? ", Farmland" : t->has_irrigation ? ", Irrigation" : "",
+                     t->has_mine ? ", Mine" : "");
+            draw_text(CX + 2, y, 0.42f, soft, line);
+            y += 16;
+        }
         if (ti->stack_n > 1) {
             snprintf(line, sizeof(line), "Stack of %d units here", ti->stack_n);
             draw_text(CX + 2, y, 0.45f, label, line);
@@ -1737,7 +1764,7 @@ void render_city_top(const CityInfo *info, int garrison_sel)
         draw_text(x, y + 60, 0.42f, C2D_Color32(0x70, 0xE0, 0x70, 0xFF), line);
     }
 
-    // Right column: units in the city (L/R picks, Y leads it out).
+    // Right column: units in the city (Y leads the highlighted one out).
     layer(4.0f);
     float rx = 252;
     C2D_DrawRectSolid(rx - 6, 38, 0.0f, 152, 172, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
@@ -1767,8 +1794,8 @@ void render_city_top(const CityInfo *info, int garrison_sel)
     layer(0.0f);
     C2D_DrawRectSolid(0, 240 - 17, 0.0f, 400, 17, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
     draw_text(5, 240 - 16, 0.45f, soft, info->garrison_count > 0
-              ? "L/R: pick a unit   Y: lead it out   B: close"
-              : "Use the tabs below.   B: close");
+              ? "L/R: other cities   Y: lead the first unit out   B: close"
+              : "L/R: other cities   B: close");
 }
 
 void draw_scroll_list(int x, const ScrollRow *rows, int count)
@@ -2829,7 +2856,7 @@ void render_messages_panel(const GameMessage *msgs, int n, int scroll, int highl
     snprintf(right, sizeof(right), "%d", n);
     panel_bg("Messages", right);
     draw_text(8, PANEL_HEADER_H + 8, 0.45f, C2D_Color32(0xA8, 0xB4, 0xC4, 0xFF),
-              n ? "Newest first. Tap one to go there." : "No news yet.");
+              n ? "Newest first. Tap to read, tap again to go there." : "No news yet.");
     for (int i = 0; i < PANEL_ROWS_VISIBLE; i++) {
         int idx = scroll + i;
         if (idx >= n) break;
