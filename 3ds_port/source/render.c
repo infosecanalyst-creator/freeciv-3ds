@@ -1870,7 +1870,7 @@ static void render_iso_view(int cam_x, int cam_y, float scale, int view_w, int v
         bool is_goto = (x == goto_x || (wrap && ((x % s_iso_mw) + s_iso_mw) % s_iso_mw == goto_x)) && y == goto_y;
         if (is_sel) {
             if (sel_armed && iso_select[0] >= 0) {
-                int f = (int)((svcGetSystemTick() / (CPU_TICKS_PER_MSEC * 120)) % 4);
+                int f = (int)((svcGetSystemTick() / (u64)(CPU_TICKS_PER_MSEC * 120)) % 4);
                 iso_spr(iso_select[f] >= 0 ? iso_select[f] : iso_select[0], px, py, 0.70f);
             }
             iso_diamond(px, py, ISO_W * S, ISO_H * S, 0.701f,
