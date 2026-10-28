@@ -1872,7 +1872,7 @@ void get_tile_info(int x, int y, TileInfo *out)
     // Populate extras/overlays
     extra_type_iterate(pextra) {
         bool has = plr ? dbv_isset(&plr->extras, extra_index(pextra)) : tile_has_extra(ptile, pextra);
-        if (has && known != TILE_KNOWN_UNKNOWN) {
+        if (has && known != TILE_UNKNOWN) {
             const char *rname = extra_rule_name(pextra);
             if (strcasecmp(rname, "Road") == 0) out->has_road = true;
             else if (strcasecmp(rname, "Railroad") == 0) out->has_rail = true;
@@ -1888,7 +1888,7 @@ void get_tile_info(int x, int y, TileInfo *out)
     } extra_type_iterate_end;
 
     struct extra_type *res = plr ? plr->resource : ptile->resource;
-    if (res && known != TILE_KNOWN_UNKNOWN) {
+    if (res && known != TILE_UNKNOWN) {
         const char *gtag = res->graphic_str;
         if (gtag) {
             fc_strlcpy(out->resource_tag, gtag, sizeof(out->resource_tag));
