@@ -686,6 +686,9 @@ int hud_hit_test(int px, int py)
 }
 
 static void iso_tile_center(int tx, int ty, int cam_x, int cam_y, float scale, float *sx, float *sy);
+static bool iso_load(void);
+static int iso_unit_sprite(const char *gfx, const char *rule);
+static C2D_SpriteSheet s_iso_sheet[2];
 static void iso_fill_diamond(float x, float y, float w, float h, float z, u32 c);
 static void iso_diamond(float x, float y, float w, float h, float z, u32 c, float t);
 
@@ -797,6 +800,9 @@ void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,
         u32 fill = C2D_Color32(0xFF, 0xFF, 0xFF, 0x30), edge = C2D_Color32(0xFF, 0xFF, 0xFF, 0x80);
         for (int i = 0; map_is_iso() && i < s_range_n; i++) {
             int px, py;
+            int kn;
+            tile_terrain_known(s_range_x[i], s_range_y[i], &kn);
+            if (kn == 0) continue; // nothing to tint on black
             iso_tile_to_screen(s_range_x[i], s_range_y[i], cam_x, cam_y, scale, &px, &py);
             float w = ISO_W * scale, h = ISO_H * scale;
             if (px < -w || py < -h || px > 320 || py > 240) continue;
@@ -1020,6 +1026,11 @@ void render_top_info(const TopInfo *ti)
         // Unit portrait, double size.
         C2D_DrawRectSolid(CX + 2, 30, 0.01f, 64, 64, C2D_Color32(0x1C, 0x28, 0x3A, 0xFF));
         layer(5.0f); // the portrait sits just a little in front of its card
+        if (map_is_iso() && iso_load()) { // the same Amplio2 picture as on the map, doubled
+            int spr = iso_unit_sprite(u->gfx, u->rule_name);
+            C2D_DrawImageAt(C2D_SpriteSheetGetImage(s_iso_sheet[(spr >> 12) & 1], spr & 4095),
+                            CX + 2, 38, 0.02f, NULL, 2.0f, 2.0f);
+        } else
         C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, get_unit_sprite(u->rule_name)),
                         CX + 4, 32, 0.02f, NULL, 2.0f, 2.0f);
         layer(4.0f);
@@ -1428,13 +1439,13 @@ static void draw_goto_marker(float draw_x, float draw_y)
 }
 
 // ===================== Isometric map (Amplio2) =====================
+// (s_iso_sheet is declared further up, next to the forward declarations.)
 // Used when the map has the ISO topology. Follows the Freeciv client's
 // tilespec.c rules for Amplio2: whole and cardinally-matched terrain
 // sprites, corner cells for water, blend quadrants, corner darkness/fog,
 // roads in eight directions, rivers, then cities and units. Drawn layer by
 // layer, rows top to bottom, so tall sprites overlap the row behind.
 
-static C2D_SpriteSheet s_iso_sheet[2];
 static float s_isc = 1.0f;      // sprite scale (the map zoom)
 static int s_iso_cam_x, s_iso_cam_y;
 static int s_iso_mw = 1, s_iso_mh = 1;

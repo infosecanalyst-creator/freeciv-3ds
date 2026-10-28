@@ -1412,6 +1412,7 @@ void get_unit_info(int unit_id, UnitInfo *out)
     out->mine = pov && unit_owner(punit) == pov;
     fc_strlcpy(out->name, utype_name_translation(ut), sizeof(out->name));
     fc_strlcpy(out->rule_name, utype_rule_name(ut), sizeof(out->rule_name));
+    fc_strlcpy(out->gfx, ut->graphic_str, sizeof(out->gfx));
     out->hp = punit->hp;
     out->hp_max = ut->hp;
     out->attack = ut->attack_strength;
@@ -1466,8 +1467,13 @@ bool find_next_idle_unit(int after_id, const int *skip, int nskip, int *id, int 
     struct tile *ref = (from && unit_owner(from) == pov) ? unit_tile(from) : NULL;
     struct unit *best = NULL, *self = NULL;
     int best_d = 0;
-    unit_list_iterate(pov->units, punit) {
-        if (punit->moves_left <= 0 || punit->activity != ACTIVITY_IDLE
+    // Walk the list starting just after the current unit, so among equally
+    // near units (a stack) Next goes round them all in turn.
+    int n = unit_list_size(pov->units), start = 0;
+    for (int i = 0; i < n; i++) if (unit_list_get(pov->units, i)->id == after_id) { start = i + 1; break; }
+    for (int k = 0; k < n; k++) {
+        struct unit *punit = unit_list_get(pov->units, (start + k) % n);
+        if (!punit || punit->moves_left <= 0 || punit->activity != ACTIVITY_IDLE
             || unit_has_orders(punit) || punit->ssa_controller != SSA_NONE || !unit_tile(punit)) continue;
         bool skipped = false;
         for (int j = 0; j < nskip; j++) if (skip[j] == punit->id) { skipped = true; break; }
@@ -1475,7 +1481,7 @@ bool find_next_idle_unit(int after_id, const int *skip, int nskip, int *id, int 
         if (punit->id == after_id) { self = punit; continue; }
         int d = ref ? sq_map_distance(ref, unit_tile(punit)) : 0;
         if (!best || d < best_d) { best = punit; best_d = d; }
-    } unit_list_iterate_end;
+    }
     if (!best) best = self;
     if (!best) return false;
     *id = best->id;

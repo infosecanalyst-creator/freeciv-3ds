@@ -66,6 +66,7 @@ typedef struct {
     bool mine;               // owned by the pov player
     char name[48];           // translated unit type name
     char rule_name[48];      // ruleset name (sprite lookup)
+    char gfx[32];            // graphic tag ("u.warriors")
     int  hp, hp_max;
     int  attack, defense, firepower;
     int  veteran;            // 0 = green
