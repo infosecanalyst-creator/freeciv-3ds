@@ -40,6 +40,8 @@
 #include "specialist.h"
 #include "spacerace.h"
 #include "calendar.h"
+#include "maphand.h"
+#include "vision.h"
 #include "spaceship.h"
 #include "string_vector.h"
 #include <string.h>
@@ -250,6 +252,28 @@ bool find_pov_unit_tile(int *x, int *y)
     index_to_native_pos(x, y, tile_index(ptile));
     return true;
 }
+
+static int s_save_result; // written on the server thread, read by the UI
+
+// Size and time of the save file whose name starts with base (any extension).
+static bool save_file_stat(const char *base, long *size, time_t *mtime)
+{
+    DIR *d = opendir("sdmc:/3ds/freeciv/saves");
+    if (!d) return false;
+    bool found = false;
+    size_t nl = strlen(base);
+    struct dirent *de;
+    while ((de = readdir(d))) {
+        if (strncmp(de->d_name, base, nl) != 0 || (de->d_name[nl] && de->d_name[nl] != '.')) continue;
+        char path[160];
+        snprintf(path, sizeof(path), "sdmc:/3ds/freeciv/saves/%s", de->d_name);
+        struct stat st;
+        if (stat(path, &st) == 0) { *size = (long)st.st_size; *mtime = st.st_mtime; found = true; break; }
+    }
+    closedir(d);
+    return found;
+}
+int take_save_result(void) { return __atomic_exchange_n(&s_save_result, 0, __ATOMIC_ACQ_REL); }
 
 bool get_city_tile(int city_id, int *x, int *y)
 {
@@ -1358,6 +1382,7 @@ int get_tile_units(int x, int y, UnitBrief *out, int max)
     struct tile *ptile = port_native_tile(x, y);
     struct player *pov = get_pov_player();
     if (!ptile || !ptile->units) return 0;
+    if (pov && tile_get_known(ptile, pov) != TILE_KNOWN_SEEN) return 0; // no peeking into the fog
     int n = 0;
     for (int pass = 0; pass < 2; pass++) {
         unit_list_iterate(ptile->units, punit) {
@@ -1701,7 +1726,15 @@ void freeciv3ds_process_pending_actions(void)
             // game_loop.c), so this bare filename lands there.
             char name[64];
             fc_snprintf(name, sizeof(name), "3ds-T%04d-Y%d", game.info.turn, game.info.year); // read back by save_file_label()
+            // save_game() reports failure only in the log: check the file landed
+            // (new, or changed since before the save).
+            long sz0 = -1; time_t mt0 = 0;
+            save_file_stat(name, &sz0, &mt0);
             save_game(name, "User request", FALSE);
+            long sz1 = -1; time_t mt1 = 0;
+            int ok = (save_file_stat(name, &sz1, &mt1) && sz1 > 0
+                      && (sz0 < 0 || sz1 != sz0 || mt1 != mt0)) ? 1 : -1;
+            __atomic_store_n(&s_save_result, ok, __ATOMIC_RELEASE);
             break;
         }
         }
@@ -1777,7 +1810,21 @@ void get_tile_info(int x, int y, TileInfo *out)
         return;
     }
 
-    struct city *pcity = tile_city(ptile);
+    // Fogged squares show what you saw last time, not what is there now.
+    struct player *pov_v = get_pov_player();
+    int known = pov_v ? tile_get_known(ptile, pov_v) : TILE_KNOWN_SEEN;
+    struct player_tile *plr = (pov_v && known == TILE_KNOWN_UNSEEN) ? map_get_player_tile(ptile, pov_v) : NULL;
+
+    struct city *pcity = known == TILE_KNOWN_SEEN ? tile_city(ptile) : NULL;
+    if (plr && plr->site && plr->site->identity > 0) {
+        out->city_owner = plr->site->owner ? player_index(plr->site->owner) : -1;
+        out->city_id = plr->site->identity;
+        out->city_size = plr->site->size;
+        if (plr->site->name) fc_strlcpy(out->city_name, plr->site->name, sizeof(out->city_name));
+        // your own city is never really fogged; take its live details
+        struct city *own = game_city_by_number(plr->site->identity);
+        if (own && city_owner(own) == pov_v) pcity = own;
+    }
     if (pcity) {
         out->city_owner = player_index(city_owner(pcity));
         out->city_id = pcity->id;
@@ -1794,7 +1841,7 @@ void get_tile_info(int x, int y, TileInfo *out)
         }
     }
 
-    if (ptile->units) {
+    if (ptile->units && known == TILE_KNOWN_SEEN) {
         out->num_units = unit_list_size(ptile->units);
         if (out->num_units > 0) {
             struct unit *punit = unit_list_get(ptile->units, 0);
@@ -1824,7 +1871,8 @@ void get_tile_info(int x, int y, TileInfo *out)
 
     // Populate extras/overlays
     extra_type_iterate(pextra) {
-        if (tile_has_extra(ptile, pextra)) {
+        bool has = plr ? dbv_isset(&plr->extras, extra_index(pextra)) : tile_has_extra(ptile, pextra);
+        if (has && known != TILE_KNOWN_UNKNOWN) {
             const char *rname = extra_rule_name(pextra);
             if (strcasecmp(rname, "Road") == 0) out->has_road = true;
             else if (strcasecmp(rname, "Railroad") == 0) out->has_rail = true;
@@ -1839,8 +1887,9 @@ void get_tile_info(int x, int y, TileInfo *out)
         }
     } extra_type_iterate_end;
 
-    if (ptile->resource) {
-        const char *gtag = ptile->resource->graphic_str;
+    struct extra_type *res = plr ? plr->resource : ptile->resource;
+    if (res && known != TILE_KNOWN_UNKNOWN) {
+        const char *gtag = res->graphic_str;
         if (gtag) {
             fc_strlcpy(out->resource_tag, gtag, sizeof(out->resource_tag));
         }
@@ -1900,7 +1949,11 @@ void get_minimap_tile_info(int x, int y, MinimapTileInfo *out)
         out->visibility = tile_get_known(ptile, pov);
     }
 
-    if (out->visibility > 0) {
+    if (out->visibility == 1 && pov) {
+        struct player_tile *plr = map_get_player_tile(ptile, pov); // fog: the city you last saw
+        if (plr && plr->site && plr->site->identity > 0 && plr->site->owner)
+            out->city_owner = player_index(plr->site->owner);
+    } else if (out->visibility > 0) {
         struct city *pcity = tile_city(ptile);
         if (pcity) {
             out->city_owner = player_index(city_owner(pcity));
@@ -2183,6 +2236,7 @@ int get_other_players(PlayerOption *out, int max)
         const char *nm = player_name(pplayer);
         fc_strlcpy(out[n].name, nm ? nm : "?", sizeof(out[n].name));
         out[n].diplstate = (int)player_diplstate_get(pov, pplayer)->type;
+        out[n].can_meet = could_meet_with_player(pov, pplayer);
         n++;
     } players_iterate_end;
 

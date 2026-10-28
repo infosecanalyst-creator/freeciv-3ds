@@ -247,6 +247,7 @@ typedef struct {
     int  player_id;
     char name[48];
     int  diplstate; // enum diplstate_type: DS_ARMISTICE=0,WAR=1,CEASEFIRE=2,PEACE=3,ALLIANCE=4,NO_CONTACT=5
+    bool can_meet;  // embassy or recent contact: talks can open
 } PlayerOption;
 
 // One clause in an open treaty (handoff.md §7.2/7.4). desc is a
@@ -532,6 +533,7 @@ int get_city_ids(int *out, int max);  // the pov player's cities, in list order
 // false (leaving *x/*y untouched) if the unit no longer exists.
 bool find_unit_tile_by_id(int unit_id, int *x, int *y);
 bool get_city_tile(int city_id, int *x, int *y);
+int take_save_result(void); // 1 written, -1 failed, 0 none since the last call
 
 // Read the given unit's pending goto destination (handoff.md §2b), if any.
 // Returns false (leaving *x/*y untouched) if the unit doesn't exist or has

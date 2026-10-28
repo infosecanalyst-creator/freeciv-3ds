@@ -85,7 +85,7 @@ static bool s_started_from_save; // loading splash wording
 
 // Frames the "Saved" toast stays visible after a SAVE action-bar tap
 // (§A.2) - ~1.5s at the 3DS's fixed 60fps.
-#define SAVE_TOAST_FRAMES 90
+#define SAVE_TOAST_FRAMES 150
 
 #define MAX_BUILD_OPTIONS 200 // classic ruleset: <90 improvements + ~50 units
 #define MAX_TECH_OPTIONS  100 // classic ruleset: <90 techs total
@@ -578,6 +578,10 @@ int main(int argc, char* argv[])
     int end_armed = 0;    // frames left on "tap again" when units still wait for orders
     char end_armed_label[40] = "";
     int dpad_dir = -1;    // D-pad move to resolve while !busy (same path as a tap)
+    u32 frame_no = 0;     // counts main-loop iterations
+    char toast_msg[48] = "Saved";
+    int moved_refresh = 20; // frames until the End Turn button is re-evaluated
+    int dipl_wait = 0;      // parked frames waiting for talks to open
     int city_scrolled = -1; // city whose Build list was scrolled to its current item
     // Modal panels: taps act on release, a vertical drag scrolls the list.
     bool m_active = false, m_drag = false;
@@ -719,6 +723,7 @@ int main(int argc, char* argv[])
     // Main loop
     while (aptMainLoop())
     {
+        frame_no++;
         hidScanInput();
         u32 kDown = hidKeysDown();
         u32 kHeld = hidKeysHeld();
@@ -748,7 +753,7 @@ int main(int argc, char* argv[])
                 if (app_state == APP_MANUAL) app_state = APP_START_MENU;
                 else ui_mode = UI_MAP;
             }
-            kDown = 0; kRep = 0; // nothing else reacts to this frame's input
+            kDown = 0; kRep = 0; kHeld = 0; // nothing else reacts to this frame's input
         }
 
         // Quit: START on the start menu, SELECT+START in a game (START alone
@@ -757,7 +762,9 @@ int main(int argc, char* argv[])
             break; // fc3ds_server_shutdown() (below, after the loop) does the rest
         }
         if ((kDown & KEY_START) && (kHeld & KEY_SELECT) && app_state == APP_GAME) {
-            if (ui_mode != UI_MAP || get_game_turn() <= 0) break; // nothing to save yet
+            if (get_game_turn() <= 0) break; // nothing to save yet
+            if (ui_mode == UI_DIPLOMACY && ui_dipl_stage == 2) freeciv_request_diplomacy_cancel(ui_dipl_counterpart);
+            ui_mode = UI_MAP; // close any panel: the question is asked on the map
             kDown &= ~KEY_START;
             open_quit_menu(&popup);
             popup_kind = POPUP_MENU;
@@ -1099,6 +1106,12 @@ int main(int argc, char* argv[])
             #define DIAG_WINDOW_FRAMES 8
             static int vert_pending = 0, horiz_pending = 0;
             static bool vert_is_up = false, horiz_is_right = false;
+            static int pend_uid = -1;
+            static u32 pend_frame = 0;
+            // A half-made diagonal belongs to this unit, this moment: drop it if
+            // the unit changed or this branch was skipped (panel, popup...).
+            if (pend_uid != selected_unit_id || pend_frame + 1 != frame_no) vert_pending = horiz_pending = 0;
+            pend_uid = selected_unit_id; pend_frame = frame_no;
 
             bool up_p = kDown & KEY_DUP, down_p = kDown & KEY_DDOWN;
             bool left_p = kDown & KEY_DLEFT, right_p = kDown & KEY_DRIGHT;
@@ -1207,8 +1220,16 @@ int main(int argc, char* argv[])
             static int save_wait = 0;
             if (save_in_flight && busy) save_seen_busy = true;
             if (save_in_flight && !busy && (save_seen_busy || ++save_wait > 90)) {
-                if (save_seen_busy) save_toast_frames = SAVE_TOAST_FRAMES; // shown once it's written
-                if (s_quit_after_save) quit_now = true;
+                int r = take_save_result();
+                if (save_seen_busy && r == 1) {
+                    snprintf(toast_msg, sizeof(toast_msg), "Saved");
+                    if (s_quit_after_save) quit_now = true;
+                } else {
+                    // Not written (SD card full or locked?): never quit on top of that.
+                    snprintf(toast_msg, sizeof(toast_msg), "Save failed - check the SD card");
+                    s_quit_after_save = false;
+                }
+                save_toast_frames = SAVE_TOAST_FRAMES;
                 save_in_flight = false; save_seen_busy = false; save_wait = 0;
             }
         }
@@ -1420,7 +1441,10 @@ int main(int argc, char* argv[])
                     // instead - same row, different ring command.
                     int row = hit_test_scroll_list(py, ui_scroll, ui_build_count);
                     if (row >= 0) {
-                        if (ui_worklist_queue_mode) {
+                        if (ui_worklist_queue_mode && ui_worklist_count >= PANEL_ROWS_VISIBLE) {
+                            snprintf(toast_msg, sizeof(toast_msg), "The queue is full");
+                            save_toast_frames = SAVE_TOAST_FRAMES;
+                        } else if (ui_worklist_queue_mode) {
                             freeciv_request_city_worklist_append(ui_city_id, ui_build_opts[row].kind,
                                                                  ui_build_opts[row].value);
                         } else {
@@ -1482,7 +1506,11 @@ int main(int argc, char* argv[])
             } else if (ui_mode == UI_DIPLOMACY) {
                 if (ui_dipl_stage == 1) {
                     int row = hit_test_scroll_list(py, ui_scroll, ui_other_player_count);
-                    if (row >= 0) {
+                    if (row >= 0 && !ui_other_players[row].can_meet) {
+                        snprintf(toast_msg, sizeof(toast_msg), "No embassy or contact: they won't meet");
+                        save_toast_frames = SAVE_TOAST_FRAMES;
+                    } else if (row >= 0) {
+                        dipl_wait = 0;
                         ui_dipl_counterpart = ui_other_players[row].player_id;
                         snprintf(ui_dipl_counterpart_name, sizeof(ui_dipl_counterpart_name),
                                 "%s", ui_other_players[row].name);
@@ -1516,7 +1544,7 @@ int main(int argc, char* argv[])
                     }
                 } else if (py >= PANEL_FOOTER_Y) {
                     if (px < DIPLO_FOOTER_SPLIT1) {
-                        freeciv_request_diplomacy_accept(ui_dipl_counterpart);
+                        if (ui_diplo_info.clause_count > 0) freeciv_request_diplomacy_accept(ui_dipl_counterpart);
                     } else if (px < DIPLO_FOOTER_SPLIT2) {
                         // Cancel: back to the player picker, per handoff.md §7.4.
                         freeciv_request_diplomacy_cancel(ui_dipl_counterpart);
@@ -1677,6 +1705,7 @@ int main(int argc, char* argv[])
                     report_seen = total;
                 }
                 last_turn = turn_now;
+                moved_refresh = 20; // the End Turn button is re-checked this frame
                 nskip = 0; nwait = 0;
                 turn_select_frames = 600;
                 popup_kind = POPUP_NONE;
@@ -1813,6 +1842,7 @@ int main(int argc, char* argv[])
                         quit_now = true;
                         break;
                     case MENU_SAVE_QUIT:
+                        if (game_over) { quit_now = true; break; } // the game is finished: nothing to keep
                         freeciv_request_save_game();
                         save_in_flight = true;
                         s_quit_after_save = true;
@@ -1820,6 +1850,11 @@ int main(int argc, char* argv[])
                         break;
                     case MENU_PEDIA:      ui_mode = UI_PEDIA; ui_scroll = 0; pedia_sel = -1; pedia_dirty = true; break;
                     case MENU_SAVE:
+                        if (game_over) {
+                            snprintf(toast_msg, sizeof(toast_msg), "The game is over");
+                            save_toast_frames = SAVE_TOAST_FRAMES;
+                            break;
+                        }
                         freeciv_request_save_game();
                         save_in_flight = true;
                         capture_next = true;
@@ -2099,7 +2134,6 @@ int main(int argc, char* argv[])
             }
 
             // Are any units still waiting for orders? (End Turn lights up.)
-            static int moved_refresh = 0;
             if (ui_mode == UI_MAP && get_game_turn() > 0 && ++moved_refresh >= 20) {
                 int a1, a2, a3;
                 moved_refresh = 0;
@@ -2204,7 +2238,7 @@ int main(int argc, char* argv[])
                     }
                     int max_scroll = ui_build_count > PANEL_ROWS_VISIBLE ? ui_build_count - PANEL_ROWS_VISIBLE : 0;
                     if (ui_scroll < 0) ui_scroll = 0;
-                    if (ui_scroll > max_scroll) ui_scroll = max_scroll;
+                    if (ui_city_tab == CITY_TAB_BUILD && ui_scroll > max_scroll) ui_scroll = max_scroll; // other tabs clamp below
                     ui_worklist_count = get_city_worklist(ui_city_id, ui_worklist, MAX_WORKLIST_ENTRIES);
                     if (ui_city_tab == CITY_TAB_TILES) {
                         city_tiles_n = get_city_tiles(ui_city_id, city_tiles, CITY_TILES_MAX, &city_radius);
@@ -2291,7 +2325,12 @@ int main(int argc, char* argv[])
                     if (ui_scroll > max_scroll) ui_scroll = max_scroll;
                 } else {
                     get_diplo_info(ui_dipl_counterpart, &ui_diplo_info);
-                    if (ui_diplo_info.active) {
+                    if (!ui_diplo_info.active && !ui_dipl_seen_active && ++dipl_wait > 90) {
+                        // The meeting never opened: say so instead of waiting forever.
+                        snprintf(toast_msg, sizeof(toast_msg), "%.20s won't meet with you", ui_dipl_counterpart_name);
+                        save_toast_frames = SAVE_TOAST_FRAMES;
+                        ui_dipl_stage = 1; ui_scroll = 0;
+                    } else if (ui_diplo_info.active) {
                         ui_dipl_seen_active = true;
                     } else if (ui_dipl_seen_active) {
                         // The meeting was open and now isn't - resolved
@@ -2561,10 +2600,10 @@ int main(int argc, char* argv[])
                                       popup_kind != POPUP_NONE ? &popup : NULL,
                                       zoom_idx > 0, zoom_idx < ZOOM_COUNT - 1, all_moved,
                                       pending_goto_x >= 0 ? &route : NULL, end_armed > 0 ? end_armed_label : smart_label);
-                    if (save_toast_frames > 0) render_toast("Saved");
                 }
                 break;
             }
+            if (save_toast_frames > 0 && !busy) render_toast(toast_msg);
             if (show_busy_indicator) render_busy_indicator(SCREEN_WIDTH_BOT);
         }
 

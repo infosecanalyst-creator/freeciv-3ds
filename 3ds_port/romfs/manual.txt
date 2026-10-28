@@ -43,10 +43,11 @@ Tap - and + to change a setting, then Start (or press START). Your choices are r
 - Tap a unit or city to select or open it.
 - Drag to scroll the map.
 - Hold the stylus still on a square for a moment to see what is there, without moving anything.
+- In any list (cities, research, messages), drag up and down to scroll, or hold the D-pad. Left and right on the D-pad jump a page.
 
 The buttons along the bottom:
 | Menu | Research, taxes, government, diplomacy, messages, Civilopedia, saving and options.
-| Next | Jump to the next unit that needs orders.
+| Next | Jump to the nearest unit that needs orders. The number is how many are left.
 | Map | The whole world. Tap anywhere on it to jump there.
 | - and + | Zoom out and in.
 | End Turn | Ends the turn, or first shows what needs you (see Turns).
@@ -54,10 +55,10 @@ The buttons along the bottom:
 When a unit is selected, its most useful orders appear in a bar just above these buttons.
 
 ## Top screen: the dashboard
-- The top bar: the turn, your gold and how much it changes each turn, your government and tax rates.
+- The top bar: the turn and year, your gold and how much it changes each turn, your government and tax rates.
 - The minimap, with a box around what the bottom screen shows.
-- Your current research and how many turns it needs.
-- The selected unit, city or square.
+- Your current research, how many turns it needs, and your research goal.
+- The selected unit, city or square. For a unit it also shows the land it stands on.
 - A hint line along the bottom that says what a tap will do right now.
 
 The 3D slider lifts the dashboard cards and units off the screen.
@@ -70,7 +71,8 @@ At the start of each turn the first unit that needs orders is selected for you. 
 - Tap a square next to the unit: it moves there.
 - Tap a square farther away: a route appears with the number of turns. Tap the same square again to send the unit. It keeps going on later turns by itself.
 - Press B to cancel a route before you send it.
-- The D-pad moves the selected unit one square at a time.
+- The D-pad moves the selected unit one square at a time. Into an enemy, it shows the odds first, like a tap.
+- Zoomed all the way out, squares are small, so a tap next to the unit marks the square first. Tap it again to move.
 
 When a unit has used up its moves, the next unit is picked after a moment.
 
@@ -87,7 +89,7 @@ The bar above the buttons shows the orders that make sense for the unit: Build C
 | Disband | Asks first.
 
 ## Units in a city
-Tapping a city opens the city. Its Units tab lists the units inside, with what each is doing. Tap one to command it on the map.
+Tapping your city opens it. If a unit is selected and the city is farther away, a menu asks: Open city, or Go here (with the number of turns). The city's Units tab lists the units inside, with what each is doing. Tap one to command it on the map.
 
 ## Several units on one square
 Tap the square and pick a unit from the list. Units marked (done) have no moves left this turn.
@@ -97,13 +99,13 @@ Tap the square and pick a unit from the list. Units marked (done) have no moves 
 Select a Settlers unit and tap Build City. Good sites have grassland, plains, rivers and coast nearby. Hold the stylus on a square to see its terrain first.
 
 ## The city screen
-Tap your city on the map. The top screen shows its yields (food, shields, trade and what they become), growth, what it is building and its mood: how many citizens are happy, content and unhappy. A red DISORDER badge means the city has stopped working. Raise luxury, build a Temple, or turn a worker into an entertainer.
+Tap your city on the map. L and R go to your previous and next city, on the same tab. The top screen shows its yields (food, shields, trade and what they become), growth, what it is building and its mood: how many citizens are happy, content and unhappy. A red DISORDER badge means the city has stopped working. Raise luxury, build a Temple, or turn a worker into an entertainer.
 
 ## Build tab
-- The list shows what the city can build, with turns to finish.
+- The list shows what the city can build, buildings first and then units, with turns to finish. It opens at what the city is building now.
 - Build / Queue at the top right chooses what a tap does. Build changes production now. Queue adds to the list on the right.
-- Tap an item in the queue to remove it.
-- Buy finishes production now for gold. Tap it twice: the second tap shows the price and spends it.
+- Tap an item in the queue to remove it. The queue holds five items.
+- Buy finishes production now for gold. The price is on the top screen. Tap Buy twice: the second tap spends it.
 
 ## Tiles tab
 The squares around the city, with food, shields and trade on each. Tap a square to work it or free its citizen. Tap a specialist to change its kind.
@@ -133,19 +135,23 @@ Menu then Government. Tap a government twice to start a revolution. A few turns 
 The End Turn button turns green when every unit has its orders. Before it ends the turn, it shows anything that needs you first:
 | Choose Research | Your scientists have nothing to study.
 | City: Build | A city finished something and needs new orders.
+| City: Disorder | A city has stopped working. It opens on the Tiles tab.
+| City: Starving | A city is about to run out of food. It opens on the Tiles tab.
 | End Turn | Nothing is waiting. Tap to end the turn.
 
-After you pick, you go straight back to the map. START also ends the turn.
+After you pick, you go straight back to the map. START does the same as the button.
+
+If some units still have no orders, the first tap on End Turn shows how many. Tap again within two seconds to end the turn anyway.
 
 ## While the computer plays
 A banner across the bottom shows that the other civilizations are moving. Taps made then are ignored, so nothing happens by accident.
 
 ## The turn report
-At the start of each turn the top screen lists what happened: battles, diplomacy, discoveries, cities. It goes away by itself when you do anything. Menu then Messages keeps the full list: tap a message to read it, and tap it again to go to where it happened.
+At the start of each turn the top screen lists what happened: battles, diplomacy, discoveries, cities. It goes away by itself when you do anything. Menu then Messages keeps the full list: tap a message to read it, and tap it again to go to where it happened. If that is one of your cities, the city opens.
 
 # More panels
 ## Diplomacy
-Menu then Diplomacy lists the civilizations you have met. Pick one, add terms (Peace, Ceasefire, Embassy, gold), then Accept. The other side's answer shows beside yours.
+Menu then Diplomacy lists the civilizations you have met. Pick one, add terms (Peace, Ceasefire, Embassy, gold), then Accept. A civilization marked No contact will only talk once you have an embassy with it or your units meet again. The other side's answer shows beside yours.
 
 ## Civilopedia
 Menu then Civilopedia: units, buildings, wonders, technologies and governments, with pictures. L and R scroll the text.
@@ -155,7 +161,7 @@ Menu then Spaceship appears once you start building one.
 
 # Saving
 - The game saves itself at the start of every turn.
-- Menu then Save Game saves now. "Saved" appears once it is written.
+- Menu then Save Game saves now. "Saved" appears once it is written. If the SD card is full or locked, "Save failed" appears instead, and Save & Quit does not quit.
 - Menu then Save & Quit saves, then quits.
 - SELECT and START together asks before quitting.
 - Continue on the title screen opens your newest save.
@@ -165,15 +171,15 @@ Menu then Spaceship appears once you start building one.
 | Tap twice far away | Send the unit along a route
 | Hold the stylus | Details of a square
 | Drag | Scroll the map
-| D-pad | Move the unit; scroll lists
+| D-pad | Move the unit; scroll lists (left and right: a page)
 | Circle Pad | Scroll the map
 | A | All orders for the selected unit
 | B | Cancel; close a panel
 | X | Next unit
-| Y | In a city: lead a unit out. In research: list or tree
-| L / R | Research / tax rates
+| Y | In a city: lead the first unit out. In research: list or tree
+| L / R | Research / tax rates. In a city: previous / next city
 | ZL / ZR | Zoom out / in
-| START | End the turn
+| START | Same as the End Turn button
 | SELECT + START | Quit (asks first)
 
 # Tips

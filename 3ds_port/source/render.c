@@ -1628,6 +1628,7 @@ void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
                         b->x = draw_x + T / 2; b->y = draw_y + T - 3;
                         b->owner = info.city_owner; b->size = info.city_size;
                         snprintf(b->name, sizeof(b->name), "%s", info.city_name);
+                        b->prod[0] = 0; // fogged: no production shown (and none left over)
                     }
                 }
             }
@@ -2442,10 +2443,13 @@ void render_toast(const char *text)
     // everywhere else, since panels never draw anything else over
     // themselves) loses the PICA200 depth test and renders invisibly behind
     // the map. 0.9f clears that whole stack with margin.
-    const float TOAST_Z = 0.9f;
-    int w = 140;
-    C2D_DrawRectSolid(8, 8, TOAST_Z, w, 22, C2D_Color32(0x20, 0x60, 0x30, 0xE0));
-    draw_text_z(16, 13, TOAST_Z, 0.5f, C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF), text);
+    const float TOAST_Z = 0.95f;
+    float sc = 0.5f, tw = text_width(text, sc);
+    while (tw > 290 && sc > 0.4f) { sc -= 0.02f; tw = text_width(text, sc); }
+    float w = tw + 16, x = (320 - w) / 2;
+    C2D_DrawRectSolid(x, 8, TOAST_Z, w, 22, C2D_Color32(0x20, 0x40, 0x60, 0xF0));
+    C2D_DrawRectSolid(x, 8, TOAST_Z + 0.001f, w, 2, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
+    draw_text_z(x + 8, 13, TOAST_Z + 0.002f, sc, C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF), text);
 }
 
 // enum diplstate_type's 0..5 values (see PlayerOption's comment in
@@ -2544,8 +2548,8 @@ void render_diplomacy_panel(int stage, const char *counterpart_name,
             if (idx >= player_count) break;
             list_row(i, 4, 306, false, true);
             float y = PANEL_LIST_Y + i * PANEL_ROW_H;
-            draw_text_z(12, y + 3, 0.01f, 0.47f, white, players[idx].name);
-            const char *st = diplstate_name(players[idx].diplstate);
+            draw_text_z(12, y + 3, 0.01f, 0.47f, players[idx].can_meet ? white : soft, players[idx].name);
+            const char *st = players[idx].can_meet ? diplstate_name(players[idx].diplstate) : "No contact";
             draw_text_z(304 - text_width(st, 0.42f), y + 4, 0.01f, 0.42f, diplstate_color(players[idx].diplstate), st);
         }
         scroll_thumb(player_count, scroll, 313);
@@ -3158,22 +3162,22 @@ static int     s_man_sec, s_man_scroll;      // section, scroll in px
 static ManLine *s_ml;
 static int     s_ml_n, s_ml_sec = -1, s_ml_bias = -1, s_ml_h;
 
-static void man_load(void)
+static bool man_parse(FILE *f)
 {
-    if (s_man_text) return;
-    FILE *f = fopen("sdmc:/3ds/freeciv/manual.txt", "rb");
-    if (!f) f = fopen("romfs:/manual.txt", "rb");
-    if (!f) { s_man_text = calloc(1, 1); return; }
     fseek(f, 0, SEEK_END);
     long n = ftell(f);
     fseek(f, 0, SEEK_SET);
     s_man_text = malloc(n + 1);
-    if (!s_man_text) { fclose(f); return; }
+    if (!s_man_text) { fclose(f); return false; }
     n = (long)fread(s_man_text, 1, n, f);
     fclose(f);
     s_man_text[n] = 0;
+    char *start = s_man_text;
+    if ((unsigned char)start[0] == 0xEF && (unsigned char)start[1] == 0xBB && (unsigned char)start[2] == 0xBF)
+        start += 3; // UTF-8 byte order mark (Windows Notepad)
+    s_man_n = 0;
     // Sections start at lines beginning with "# ".
-    for (const char *p = s_man_text; *p; ) {
+    for (const char *p = start; *p; ) {
         const char *eol = strchr(p, '\n');
         const char *next = eol ? eol + 1 : p + strlen(p);
         if (p[0] == '#' && p[1] == ' ' && s_man_n < MAN_MAX_SECTIONS) {
@@ -3187,89 +3191,20 @@ static void man_load(void)
         p = next;
     }
     if (s_man_n > 0) s_man_end[s_man_n - 1] = s_man_text + n;
-    s_ml = malloc(sizeof(ManLine) * MAN_MAX_LINES);
+    if (s_man_n == 0) { free(s_man_text); s_man_text = NULL; return false; }
+    return true;
 }
 
-static void man_add(int kind, int x, int h, const char *a, const char *b)
+static void man_load(void)
 {
-    if (!s_ml || s_ml_n >= MAN_MAX_LINES) return;
-    ManLine *l = &s_ml[s_ml_n++];
-    l->kind = (unsigned char)kind; l->x = (unsigned char)x; l->h = (short)h;
-    snprintf(l->a, sizeof(l->a), "%s", a ? a : "");
-    snprintf(l->b, sizeof(l->b), "%s", b ? b : "");
-    s_ml_h += h;
-}
-
-// Word-wraps text into lines of width w; calls back with each line.
-static void man_wrap(const char *text, float w, float scale, int kind, int x, const char *first_a, bool row)
-{
-    char line[96];
-    int n = 0;
-    bool first = true;
-    const char *p = text;
-    while (*p) {
-        while (*p == ' ') p++;
-        const char *we = p;
-        while (*we && *we != ' ') we++;
-        int wl = (int)(we - p);
-        char trial[96];
-        snprintf(trial, sizeof(trial), "%.*s%s%.*s", n, line, n ? " " : "", wl, p);
-        if (n && font_width(trial, scale) > w) {
-            line[n] = 0;
-            if (row) man_add(ML_ROW, x, MAN_LH, first ? first_a : "", line);
-            else man_add(kind, x, MAN_LH, first ? first_a : "", line);
-            first = false;
-            n = 0;
-            continue; // retry this word on a new line
-        }
-        snprintf(line, sizeof(line), "%s", trial);
-        n = (int)strlen(line);
-        p = we;
+    if (s_man_text) return;
+    // An SD-card copy replaces the built-in one, unless it has no "# " sections.
+    FILE *f = fopen("sdmc:/3ds/freeciv/manual.txt", "rb");
+    if (!f || !man_parse(f)) {
+        f = fopen("romfs:/manual.txt", "rb");
+        if (!f || !man_parse(f)) { s_man_text = calloc(1, 1); s_man_n = 0; }
     }
-    if (n || first) {
-        line[n] = 0;
-        man_add(row ? ML_ROW : kind, x, MAN_LH, first ? first_a : "", line);
-    }
-}
-
-static void man_layout(void)
-{
-    if (s_ml_sec == s_man_sec && s_ml_bias == font_get_bias()) return;
-    s_ml_sec = s_man_sec; s_ml_bias = font_get_bias();
-    s_ml_n = 0; s_ml_h = 0;
-    if (s_man_sec < 0 || s_man_sec >= s_man_n) return;
-    const char *p = s_man_body[s_man_sec];
-    const char *end = s_man_end[s_man_sec];
-    char ln[400];
-    while (p < end && *p) {
-        const char *eol = p;
-        while (eol < end && *eol && *eol != '\n') eol++;
-        int len = (int)(eol - p);
-        if (len > (int)sizeof(ln) - 1) len = sizeof(ln) - 1;
-        memcpy(ln, p, len); ln[len] = 0;
-        char *cr = strchr(ln, '\r'); if (cr) *cr = 0;
-        p = *eol ? eol + 1 : eol;
-        if (!ln[0]) { man_add(ML_GAP, 0, 6, NULL, NULL); continue; }
-        if (!strncmp(ln, "## ", 3)) {
-            if (s_ml_n > 0) man_add(ML_GAP, 0, 4, NULL, NULL);
-            man_add(ML_HEAD, 0, 20, ln + 3, NULL);
-        } else if (!strncmp(ln, "- ", 2)) {
-            man_wrap(ln + 2, MAN_TEXT_W - 14, MAN_SCALE, ML_TEXT, 14, "\x01", false); // \x01 = bullet
-        } else if (ln[0] >= '1' && ln[0] <= '9' && ln[1] == '.' && ln[2] == ' ') {
-            char num[4] = { ln[0], '.', 0, 0 };
-            man_wrap(ln + 3, MAN_TEXT_W - 18, MAN_SCALE, ML_TEXT, 18, num, false);
-        } else if (ln[0] == '|') {
-            char *a = ln + 1, *bar = strchr(a, '|');
-            char *b = bar ? bar + 1 : (char *)"";
-            if (bar) *bar = 0;
-            while (*a == ' ') a++;
-            for (char *e = a + strlen(a); e > a && e[-1] == ' '; ) *--e = 0;
-            while (*b == ' ') b++;
-            man_wrap(b, MAN_TEXT_W - 132, 0.45f, ML_ROW, 132, a, true);
-        } else {
-            man_wrap(ln, MAN_TEXT_W, MAN_SCALE, ML_TEXT, 0, "", false);
-        }
-    }
+    if (!s_ml) s_ml = malloc(sizeof(ManLine) * MAN_MAX_LINES);
 }
 
 bool manual_available(void) { man_load(); return s_man_n > 0; }
@@ -3293,7 +3228,7 @@ void render_manual_top(void)
     char hdr[64];
     if (s_man_n == 0) {
         draw_text_z(10, 3, 0.51f, 0.6f, white, "Manual");
-        draw_text(12, 40, 0.5f, soft, "The manual is missing (romfs:/manual.txt).");
+        draw_text(12, 40, 0.5f, soft, "The manual is missing or has no \"# \" sections.");
         return;
     }
     draw_text_z(10, 2, 0.51f, 0.6f, white, s_man_title[s_man_sec]);
