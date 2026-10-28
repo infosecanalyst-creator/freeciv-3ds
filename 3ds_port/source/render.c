@@ -1472,9 +1472,17 @@ static void iso_build_tmap(void)
     s_iso_tmap_n = n;
 }
 
+// Depth: citro2d tests depth and transparent pixels still write it, so every
+// draw in the map gets a slightly higher z than the one before (draw order
+// is the paint order).
+static float s_iz;
+static inline float iz(void) { return s_iz += 0.00002f; }
+
 static void iso_spr(int ref, float x, float y, float z)
 {
+    (void)z;
     if (ref < 0) return;
+    z = iz();
     C2D_Image im = C2D_SpriteSheetGetImage(s_iso_sheet[(ref >> 12) & 1], ref & 4095);
     C2D_DrawImageAt(im, x, y, z, NULL, s_isc, s_isc);
 }
@@ -1667,6 +1675,7 @@ static void render_iso_view(int cam_x, int cam_y, float scale, int view_w, int v
     get_map_dimensions(&s_iso_mw, &s_iso_mh);
     s_isc = scale; s_ms = scale; s_nbanners = 0;
     s_iso_cam_x = cam_x; s_iso_cam_y = cam_y;
+    s_iz = 0.05f;
     const float S = scale;
     bool wrap = map_wraps_x();
 
@@ -1779,10 +1788,10 @@ static void render_iso_view(int cam_x, int cam_y, float scale, int view_w, int v
         if (tid < 0 || ti->tile_owner < 0) continue;
         u32 bc = (owner_color(ti->tile_owner) & 0x00FFFFFF) | 0xC0000000;
         float w = ISO_W * S, h = ISO_H * S, cx = px + w / 2, cy = py + h / 2, t = 1.5f;
-        if (ti->border_n) C2D_DrawLine(cx, py + 1, bc, px + w - 1, cy, bc, t, 0.23f);
-        if (ti->border_e) C2D_DrawLine(px + w - 1, cy, bc, cx, py + h - 1, bc, t, 0.23f);
-        if (ti->border_s) C2D_DrawLine(cx, py + h - 1, bc, px + 1, cy, bc, t, 0.23f);
-        if (ti->border_w) C2D_DrawLine(px + 1, cy, bc, cx, py + 1, bc, t, 0.23f);
+        if (ti->border_n) C2D_DrawLine(cx, py + 1, bc, px + w - 1, cy, bc, t, iz());
+        if (ti->border_e) C2D_DrawLine(px + w - 1, cy, bc, cx, py + h - 1, bc, t, iz());
+        if (ti->border_s) C2D_DrawLine(cx, py + h - 1, bc, px + 1, cy, bc, t, iz());
+        if (ti->border_w) C2D_DrawLine(px + 1, cy, bc, cx, py + 1, bc, t, iz());
     ISO_END
     // Cities.
     ISO_FOR_EACH
@@ -1823,7 +1832,8 @@ static void render_iso_view(int cam_x, int cam_y, float scale, int view_w, int v
             if (ok[i]) { iso_terr_at(ts[i][0], ts[i][1], &kn); v = kn == 2 ? 2 : kn == 1 ? 1 : 0; }
             tileno = tileno * 3 + v;
         }
-        if (tileno != 80) iso_spr(iso_fog[tileno], px, py + (ISO_H / 2) * S, 0.40f); // 80 = all seen
+        if (tileno != 80 && tileno != 0) // all seen: nothing; all unknown: the black background
+            iso_spr(iso_fog[tileno], px, py + (ISO_H / 2) * S, 0.40f);
     }
     // Units (the top one of each stack), then fortress fronts.
     ISO_FOR_EACH
@@ -1835,30 +1845,30 @@ static void render_iso_view(int cam_x, int cam_y, float scale, int view_w, int v
                 C2D_ImageTint dim;
                 C2D_PlainImageTint(&dim, C2D_Color32(0x40, 0x40, 0x40, 0xFF), 0.35f);
                 C2D_Image im = C2D_SpriteSheetGetImage(s_iso_sheet[(spr >> 12) & 1], spr & 4095);
-                C2D_DrawImageAt(im, ux, uy, 0.35f, &dim, S, S);
+                C2D_DrawImageAt(im, ux, uy, iz(), &dim, S, S);
             } else {
                 iso_spr(spr, ux, uy, 0.35f);
             }
-            draw_shield(px + 9 * S, py - 2 * S, 0.36f, owner_color(ti->unit_owner));
+            draw_shield(px + 9 * S, py - 2 * S, iz(), owner_color(ti->unit_owner));
             if (ti->unit_hp_max > 0 && ti->unit_hp < ti->unit_hp_max) {
                 float f = (float)ti->unit_hp / ti->unit_hp_max, bw = 20 * S;
                 float hx = px + 14 * S, hy = py + 20 * S;
-                C2D_DrawRectSolid(hx, hy, 0.36f, bw, 2.5f, C2D_Color32(0x20, 0x08, 0x08, 0xE0));
-                C2D_DrawRectSolid(hx, hy, 0.361f, bw * f, 2.5f,
+                C2D_DrawRectSolid(hx, hy, iz(), bw, 2.5f, C2D_Color32(0x20, 0x08, 0x08, 0xE0));
+                C2D_DrawRectSolid(hx, hy, iz(), bw * f, 2.5f,
                                   f > 0.5f ? C2D_Color32(0x50, 0xD0, 0x50, 0xFF) : f > 0.25f ? C2D_Color32(0xE0, 0xC0, 0x40, 0xFF)
                                                                          : C2D_Color32(0xE0, 0x40, 0x40, 0xFF));
             }
             if (ti->unit_badge && S >= 0.75f) {
                 char t[2] = { ti->unit_badge, 0 };
                 float bx = px + 33 * S, by = py + 4 * S;
-                C2D_DrawRectSolid(bx, by, 0.37f, 9, 10, C2D_Color32(0x10, 0x18, 0x26, 0xD8));
-                font_draw(t, bx + 1.5f, by - 3, 0.371f, 0.36f, C2D_Color32(0xFF, 0xF0, 0xA0, 0xFF));
+                C2D_DrawRectSolid(bx, by, iz(), 9, 10, C2D_Color32(0x10, 0x18, 0x26, 0xD8));
+                font_draw(t, bx + 1.5f, by - 3, iz(), 0.36f, C2D_Color32(0xFF, 0xF0, 0xA0, 0xFF));
             }
             if (ti->num_units > 1) {
                 float sx = px + 33 * S, sy = py - 4 * S;
-                C2D_DrawRectSolid(sx, sy, 0.37f, 8, 8, C2D_Color32(0, 0, 0, 0xC0));
-                C2D_DrawRectSolid(sx + 1, sy + 3, 0.371f, 6, 2, 0xFFFFFFFF);
-                C2D_DrawRectSolid(sx + 3, sy + 1, 0.371f, 2, 6, 0xFFFFFFFF);
+                C2D_DrawRectSolid(sx, sy, iz(), 8, 8, C2D_Color32(0, 0, 0, 0xC0));
+                C2D_DrawRectSolid(sx + 1, sy + 3, iz(), 6, 2, 0xFFFFFFFF);
+                C2D_DrawRectSolid(sx + 3, sy + 1, iz(), 2, 6, 0xFFFFFFFF);
             }
         }
         if (ti->has_fortress) iso_spr(ISO_BASE_FORTRESS_FG, px, py - (ISO_H / 2) * S, 0.38f);
@@ -1876,7 +1886,7 @@ static void render_iso_view(int cam_x, int cam_y, float scale, int view_w, int v
             iso_diamond(px, py, ISO_W * S, ISO_H * S, 0.701f,
                         sel_armed ? C2D_Color32(0xFF, 0xF0, 0x30, 0xFF) : 0xFFFFFFFF, 1.5f);
         }
-        if (is_goto) iso_diamond(px + 2, py + 1, ISO_W * S - 4, ISO_H * S - 2, 0.75f, C2D_Color32(0xFF, 0xA0, 0x20, 0xFF), 2.0f);
+        if (is_goto) iso_diamond(px + 2, py + 1, ISO_W * S - 4, ISO_H * S - 2, iz(), C2D_Color32(0xFF, 0xA0, 0x20, 0xFF), 2.0f);
     ISO_END
 #undef ISO_FOR_EACH
 #undef ISO_END
