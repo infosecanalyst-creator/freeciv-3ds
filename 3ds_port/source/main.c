@@ -12,6 +12,7 @@
 #include "render.h"
 #include "font.h"
 #include "audio.h"
+#include "iso_geom.h"
 
 // Screen dimensions
 #define SCREEN_WIDTH_TOP  400
@@ -136,11 +137,24 @@ static const float k_zoom_levels[] = { 0.5f, 0.75f, 1.0f, 1.5f, 2.0f };
 static int view_w_world(float s) { return (int)(SCREEN_WIDTH_BOT / s); }
 static int view_h_world(float s) { return (int)(HUD_Y / s); }
 
-// Centre the top-screen view on tile (tx, ty).
+// Square geometry in world pixels: overhead squares are 30x30 on a 30px
+// grid; isometric (Amplio2) squares are 48x24 diamonds on staggered rows
+// 12px apart (iso_geom.h). g_iso follows the map's topology.
+static bool g_iso = false;
+static int tile_wx(int tx, int ty) { return g_iso ? iso_wx(tx, ty) : tx * TILE_WORLD; }
+static int tile_wy(int ty) { return g_iso ? iso_wy(ty) : ty * TILE_WORLD; }
+static int tile_w(void) { return g_iso ? ISO_W : TILE_WORLD; }
+static int tile_h(void) { return g_iso ? ISO_H : TILE_WORLD; }
+static int world_w(int mw) { return mw * (g_iso ? ISO_W : TILE_WORLD); }
+static int world_h(int mh) { return g_iso ? mh * ISO_ROW + ISO_ROW : mh * TILE_WORLD; }
+#define HALF_W(z) ((int)(tile_w() * (z) / 2))   // a square's centre, from its corner
+#define HALF_H(z) ((int)(tile_h() * (z) / 2))
+
+// Centre the view on tile (tx, ty).
 static void center_on_tile(int tx, int ty, float s, int *cam_x, int *cam_y)
 {
-    *cam_x = tx * TILE_WORLD + TILE_WORLD / 2 - view_w_world(s) / 2;
-    *cam_y = ty * TILE_WORLD + TILE_WORLD / 2 - view_h_world(s) / 2;
+    *cam_x = tile_wx(tx, ty) + tile_w() / 2 - view_w_world(s) / 2;
+    *cam_y = tile_wy(ty) + tile_h() / 2 - view_h_world(s) / 2;
 }
 
 // Keep the camera inside the map vertically (and horizontally unless the map
@@ -150,11 +164,11 @@ static void clamp_camera(float s, int *cam_x, int *cam_y)
     int mw = 40, mh = 40;
     get_map_dimensions(&mw, &mh);
     int vw = view_w_world(s), vh = view_h_world(s);
-    int lo_y = -vh / 2, hi_y = mh * TILE_WORLD - vh / 2;
+    int lo_y = -vh / 2, hi_y = world_h(mh) - vh / 2;
     if (*cam_y < lo_y) *cam_y = lo_y;
     if (*cam_y > hi_y) *cam_y = hi_y;
     if (!map_wraps_x()) {
-        int lo_x = -vw / 2, hi_x = mw * TILE_WORLD - vw / 2;
+        int lo_x = -vw / 2, hi_x = world_w(mw) - vw / 2;
         if (*cam_x < lo_x) *cam_x = lo_x;
         if (*cam_x > hi_x) *cam_x = hi_x;
     }
@@ -167,20 +181,21 @@ static void ensure_tile_visible(int tx, int ty, float s, int *cam_x, int *cam_y)
     int mw = 40, mh = 40;
     get_map_dimensions(&mw, &mh);
     int vw = view_w_world(s), vh = view_h_world(s);
-    int mx = TILE_WORLD, my_top = TILE_WORLD, my_bot = TILE_WORLD;
-    if (mx * 2 + TILE_WORLD > vw) mx = (vw - TILE_WORLD) / 2;
-    if (my_top + my_bot + TILE_WORLD > vh) my_top = my_bot = (vh - TILE_WORLD) / 2;
-    int wx = tx * TILE_WORLD, wy = ty * TILE_WORLD;
+    int TW = tile_w(), TH = tile_h();
+    int mx = TW, my_top = TH, my_bot = TH;
+    if (mx * 2 + TW > vw) mx = (vw - TW) / 2;
+    if (my_top + my_bot + TH > vh) my_top = my_bot = (vh - TH) / 2;
+    int wx = tile_wx(tx, ty), wy = tile_wy(ty);
     if (map_wraps_x()) {
         // the copy of the column nearest the view's centre
-        int world_w = mw * TILE_WORLD, c = *cam_x + vw / 2;
-        int d = ((wx - c) % world_w + world_w + world_w / 2) % world_w - world_w / 2;
+        int ww = world_w(mw), c = *cam_x + vw / 2;
+        int d = ((wx - c) % ww + ww + ww / 2) % ww - ww / 2;
         wx = c + d;
     }
     if (wx < *cam_x + mx) *cam_x = wx - mx;
-    if (wx + TILE_WORLD > *cam_x + vw - mx) *cam_x = wx + TILE_WORLD - vw + mx;
+    if (wx + TW > *cam_x + vw - mx) *cam_x = wx + TW - vw + mx;
     if (wy < *cam_y + my_top) *cam_y = wy - my_top;
-    if (wy + TILE_WORLD > *cam_y + vh - my_bot) *cam_y = wy + TILE_WORLD - vh + my_bot;
+    if (wy + TH > *cam_y + vh - my_bot) *cam_y = wy + TH - vh + my_bot;
     clamp_camera(s, cam_x, cam_y);
 }
 
@@ -199,6 +214,7 @@ static void set_zoom(int nz, int *zoom_idx, float *zoom, int *cam_x, int *cam_y)
 // Bottom-screen pixel -> native tile (folding across a wrapping seam).
 static bool screen_to_tile(int px, int py, int cam_x, int cam_y, float zoom, int *tx, int *ty)
 {
+    if (g_iso) return iso_screen_to_tile(px, py, cam_x, cam_y, zoom, tx, ty);
     int mw = 40, mh = 40;
     get_map_dimensions(&mw, &mh);
     int x = (int)floorf((cam_x + px / zoom) / TILE_WORLD);
@@ -213,12 +229,13 @@ static bool screen_to_tile(int px, int py, int cam_x, int cam_y, float zoom, int
 // Native tile -> bottom-screen pixel of its top-left corner (nearest copy).
 static void tile_to_screen(int tx, int ty, int cam_x, int cam_y, float zoom, int *px, int *py)
 {
+    if (g_iso) { iso_tile_to_screen(tx, ty, cam_x, cam_y, zoom, px, py); return; }
     int mw = 40, mh = 40;
     get_map_dimensions(&mw, &mh);
     int wx = tx * TILE_WORLD;
     if (map_wraps_x()) {
-        int world_w = mw * TILE_WORLD, c = cam_x + view_w_world(zoom) / 2;
-        int d = ((wx - c) % world_w + world_w + world_w / 2) % world_w - world_w / 2;
+        int ww = mw * TILE_WORLD, c = cam_x + view_w_world(zoom) / 2;
+        int d = ((wx - c) % ww + ww + ww / 2) % ww - ww / 2;
         wx = c + d;
     }
     *px = (int)((wx - cam_x) * zoom);
@@ -226,36 +243,31 @@ static void tile_to_screen(int tx, int ty, int cam_x, int cam_y, float zoom, int
 }
 
 // Step from (ax, ay) to (bx, by) as a compass move, or false if not adjacent.
+// MoveDir (N, NE, E, ... clockwise) <-> Freeciv's direction8 (NW, N, NE, W, E, SW, S, SE).
+static const int k_move_to_dir8[8] = { 1, 2, 4, 7, 6, 5, 3, 0 };
+static const int k_dir8_to_move[8] = { 7, 0, 1, 6, 2, 5, 4, 3 };
+
 static bool adjacent_dir(int ax, int ay, int bx, int by, MoveDir *dir)
 {
-    int mw = 40, mh = 40;
-    get_map_dimensions(&mw, &mh);
-    int dx = bx - ax, dy = by - ay;
-    if (map_wraps_x()) { if (dx > mw / 2) dx -= mw; if (dx < -mw / 2) dx += mw; }
-    if (map_wraps_y()) { if (dy > mh / 2) dy -= mh; if (dy < -mh / 2) dy += mh; }
-    if ((dx == 0 && dy == 0) || abs(dx) > 1 || abs(dy) > 1) return false;
-    static const MoveDir table[3][3] = {
-        { MOVE_DIR_NORTHWEST, MOVE_DIR_NORTH, MOVE_DIR_NORTHEAST },
-        { MOVE_DIR_WEST,      MOVE_DIR_NORTH, MOVE_DIR_EAST },
-        { MOVE_DIR_SOUTHWEST, MOVE_DIR_SOUTH, MOVE_DIR_SOUTHEAST },
-    };
-    *dir = table[dy + 1][dx + 1];
+    int d;
+    if (!native_dir(ax, ay, bx, by, &d) || d < 0 || d > 7) return false;
+    *dir = (MoveDir)k_dir8_to_move[d];
     return true;
 }
 
 // The square one compass step from (x, y), or false off the map edge.
+// D-pad directions are screen directions; on an isometric map "up" is the
+// map's north-west, "up-right" its north, and so on.
+static int screen_dir(int d)
+{
+    static const int iso[8] = { 7, 0, 1, 2, 3, 4, 5, 6 }; // MoveDir order: rotate 45 degrees
+    return (g_iso && d >= 0 && d < 8) ? iso[d] : d;
+}
+
 static bool tile_step(int x, int y, MoveDir dir, int *tx, int *ty)
 {
-    static const int ddx[8] = { -1, 0, 1, -1, 1, -1, 0, 1 }; // freeciv direction8 order
-    static const int ddy[8] = { -1, -1, -1, 0, 0, 1, 1, 1 };
     if ((int)dir < 0 || (int)dir > 7) return false;
-    int mw = 40, mh = 40;
-    get_map_dimensions(&mw, &mh);
-    int nx = x + ddx[dir], ny = y + ddy[dir];
-    if (map_wraps_x()) nx = (nx + mw) % mw; else if (nx < 0 || nx >= mw) return false;
-    if (map_wraps_y()) ny = (ny + mh) % mh; else if (ny < 0 || ny >= mh) return false;
-    *tx = nx; *ty = ny;
-    return true;
+    return native_step(x, y, k_move_to_dir8[dir], tx, ty);
 }
 
 // ---- Popup menus ----
@@ -444,7 +456,11 @@ static bool write_new_game_script(const char *path, const NewGameOpts *o)
     FILE *f = fopen(path, "w");
     if (!f) return false;
     fprintf(f, "rulesetdir %s\n", k_rules_dirs[o->rules]);
+#ifdef FC3DS_AMPLIO
+    fprintf(f, "set topology \"ISO\"\n");    // isometric map, drawn with Amplio2
+#else
     fprintf(f, "set topology \"\"\n");       // overhead square grid (see start.serv)
+#endif
     fprintf(f, "set compress 1\n");          // fast autosaves (see start.serv)
     fprintf(f, "set mapsize FULLSIZE\n");
     fprintf(f, "set size %d\n", k_size_tiles[o->size]);
@@ -1119,8 +1135,8 @@ int main(int argc, char* argv[])
             if (up_p || down_p) {
                 if (horiz_pending > 0) {
                     bool is_up = up_p;
-                    dpad_dir = (int)(is_up ? (horiz_is_right ? MOVE_DIR_NORTHEAST : MOVE_DIR_NORTHWEST)
-                              : (horiz_is_right ? MOVE_DIR_SOUTHEAST : MOVE_DIR_SOUTHWEST));
+                    dpad_dir = screen_dir((int)(is_up ? (horiz_is_right ? MOVE_DIR_NORTHEAST : MOVE_DIR_NORTHWEST)
+                              : (horiz_is_right ? MOVE_DIR_SOUTHEAST : MOVE_DIR_SOUTHWEST)));
                     horiz_pending = 0;
                 } else {
                     vert_pending = DIAG_WINDOW_FRAMES;
@@ -1130,8 +1146,8 @@ int main(int argc, char* argv[])
             if (left_p || right_p) {
                 if (vert_pending > 0) {
                     bool is_right = right_p;
-                    dpad_dir = (int)(is_right ? (vert_is_up ? MOVE_DIR_NORTHEAST : MOVE_DIR_SOUTHEAST)
-                                 : (vert_is_up ? MOVE_DIR_NORTHWEST : MOVE_DIR_SOUTHWEST));
+                    dpad_dir = screen_dir((int)(is_right ? (vert_is_up ? MOVE_DIR_NORTHEAST : MOVE_DIR_SOUTHEAST)
+                                 : (vert_is_up ? MOVE_DIR_NORTHWEST : MOVE_DIR_SOUTHWEST)));
                     vert_pending = 0;
                 } else {
                     horiz_pending = DIAG_WINDOW_FRAMES;
@@ -1139,10 +1155,10 @@ int main(int argc, char* argv[])
                 }
             }
             if (vert_pending > 0 && --vert_pending == 0) {
-                dpad_dir = (int)(vert_is_up ? MOVE_DIR_NORTH : MOVE_DIR_SOUTH);
+                dpad_dir = screen_dir((int)(vert_is_up ? MOVE_DIR_NORTH : MOVE_DIR_SOUTH));
             }
             if (horiz_pending > 0 && --horiz_pending == 0) {
-                dpad_dir = (int)(horiz_is_right ? MOVE_DIR_EAST : MOVE_DIR_WEST);
+                dpad_dir = screen_dir((int)(horiz_is_right ? MOVE_DIR_EAST : MOVE_DIR_WEST));
             }
 
             // A: this unit's orders menu. X: next unit. B: let go of it
@@ -1183,6 +1199,7 @@ int main(int argc, char* argv[])
             if (!was && fc3ds_server_is_busy() && !capture_next) fc3ds_server_wait_parked(12);
         }
         bool busy = fc3ds_server_is_busy();
+        if (!busy) g_iso = map_is_iso(); // isometric map: Amplio2 drawing and diamond squares
         // ---- Performance log (read back from sdmc:/freeciv_out.log) ----
         // Engine steps longer than 250 ms (AI turns, saves, world gen), and
         // once per turn the UI frame times and heap use since the last turn.
@@ -1728,7 +1745,7 @@ int main(int argc, char* argv[])
                     build_unit_popup(&popup, &unit_info);
                     int ux, uy;
                     tile_to_screen(unit_info.x, unit_info.y, cam_x, cam_y, zoom, &ux, &uy);
-                    popup_layout(&popup, ux + (int)(15 * zoom), uy + (int)(15 * zoom));
+                    popup_layout(&popup, ux + HALF_W(zoom), uy + HALF_H(zoom));
                     popup_kind = POPUP_UNIT;
                     if (id != PID_MORE) {
                         for (int i = 0; i < popup.n; i++) if (popup.id[i] == id) popup_choice = i;
@@ -1759,7 +1776,7 @@ int main(int argc, char* argv[])
                         popup_add(&popup, PID_NO, "Keep", true);
                         int ux, uy;
                         tile_to_screen(unit_info.x, unit_info.y, cam_x, cam_y, zoom, &ux, &uy);
-                        popup_layout(&popup, ux + (int)(15 * zoom), uy + (int)(15 * zoom));
+                        popup_layout(&popup, ux + HALF_W(zoom), uy + HALF_H(zoom));
                         popup_kind = POPUP_CONFIRM_DISBAND;
                     } else if (id >= PID_CITY_ACTION) {
                         freeciv_request_city_action(selected_unit_id, id - PID_CITY_ACTION, unit_info.x, unit_info.y);
@@ -1931,7 +1948,7 @@ int main(int argc, char* argv[])
                                 pending_target_x = tx; pending_target_y = ty;
                                 int sx, sy;
                                 tile_to_screen(tx, ty, cam_x, cam_y, zoom, &sx, &sy);
-                                popup_layout(&popup, sx + (int)(15 * zoom), sy + (int)(15 * zoom));
+                                popup_layout(&popup, sx + HALF_W(zoom), sy + HALF_H(zoom));
                                 popup_kind = POPUP_ATTACK;
                                 pending_attack_dir = dir;
                             } else {
@@ -1954,7 +1971,7 @@ int main(int argc, char* argv[])
                             pending_goto_x = pending_goto_y = -1;
                             int sx, sy;
                             tile_to_screen(tx, ty, cam_x, cam_y, zoom, &sx, &sy);
-                            popup_layout(&popup, sx + (int)(15 * zoom), sy + (int)(15 * zoom));
+                            popup_layout(&popup, sx + HALF_W(zoom), sy + HALF_H(zoom));
                             popup_kind = POPUP_CITYGO;
                         } else if (mine_n > 0 && !own_city) {
                             select_here = true;          // switch to that unit
@@ -1973,7 +1990,7 @@ int main(int argc, char* argv[])
                         pending_goto_x = pending_goto_y = -1;
                         int sx, sy;
                         tile_to_screen(tx, ty, cam_x, cam_y, zoom, &sx, &sy);
-                        int ax = sx + (int)(15 * zoom), ay = sy + (int)(15 * zoom);
+                        int ax = sx + HALF_W(zoom), ay = sy + HALF_H(zoom);
                         if (mine_n > 1 && !own_city) {
                             memset(&popup, 0, sizeof(popup));
                             snprintf(popup.title, sizeof(popup.title), "Units here");
@@ -2067,7 +2084,7 @@ int main(int argc, char* argv[])
                     build_unit_popup(&popup, &unit_info);
                     int ux, uy;
                     tile_to_screen(unit_info.x, unit_info.y, cam_x, cam_y, zoom, &ux, &uy);
-                    popup_layout(&popup, ux + (int)(15 * zoom), uy + (int)(15 * zoom));
+                    popup_layout(&popup, ux + HALF_W(zoom), uy + HALF_H(zoom));
                     popup_kind = POPUP_UNIT;
                 }
             }

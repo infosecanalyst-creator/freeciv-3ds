@@ -122,6 +122,14 @@ typedef struct {
 
     char resource_tag[48]; // ruleset graphic tag for resource, empty if none
 
+    // For the isometric (Amplio2) map.
+    short terrain_idx;     // Freeciv terrain index as you know it, -1 unknown
+    bool has_oil_mine, has_fortress, has_airbase;
+    char unit_gfx[32];     // top unit's graphic tag ("u.warriors"), "" if none
+    char city_gfx[24];     // city style graphic ("city.european"), "" if no city
+    signed char city_img;  // City_Image effect: which size picture
+    bool city_walls, city_occupied;
+
     // Vision / Fog of War
     int visibility;    // 0 = unknown, 1 = fogged (known unseen), 2 = seen (fully visible)
     int darkness_idx;  // 4-bit cardinal mask (0 to 15) for transition to unknown
@@ -534,6 +542,18 @@ int get_city_ids(int *out, int max);  // the pov player's cities, in list order
 bool find_unit_tile_by_id(int unit_id, int *x, int *y);
 bool get_city_tile(int city_id, int *x, int *y);
 int take_save_result(void); // 1 written, -1 failed, 0 none since the last call
+
+// ---- Isometric map support (native coordinates throughout) ----
+bool map_is_iso(void);                      // the map uses the ISO topology
+int  port_terrain_total(void);           // number of terrain types
+void terrain_graphics(int tidx, const char **g, const char **alt, const char **alt2);
+// Terrain index as the player knows it (-1 unknown) and how well it is known
+// (0 unknown, 1 fogged, 2 seen). Cheap: for neighbour lookups.
+int  tile_terrain_known(int nx, int ny, int *known);
+// Native square one map step away (Freeciv direction8), false off the map.
+bool native_step(int nx, int ny, int dir8, int *ox, int *oy);
+// Map direction from a to b if adjacent.
+bool native_dir(int ax, int ay, int bx, int by, int *dir8);
 
 // Read the given unit's pending goto destination (handoff.md §2b), if any.
 // Returns false (leaving *x/*y untouched) if the unit doesn't exist or has

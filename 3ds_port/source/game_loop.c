@@ -40,6 +40,7 @@
 #include "specialist.h"
 #include "spacerace.h"
 #include "calendar.h"
+#include "style.h"
 #include "maphand.h"
 #include "vision.h"
 #include "spaceship.h"
@@ -274,6 +275,60 @@ static bool save_file_stat(const char *base, long *size, time_t *mtime)
     return found;
 }
 int take_save_result(void) { return __atomic_exchange_n(&s_save_result, 0, __ATOMIC_ACQ_REL); }
+
+int port_terrain_total(void) { return terrain_count(); }
+
+bool map_is_iso(void)
+{
+    return !map_is_empty() && current_topo_has_flag(TF_ISO);
+}
+
+
+
+void terrain_graphics(int tidx, const char **g, const char **alt, const char **alt2)
+{
+    const struct terrain *pt = terrain_by_number(tidx);
+    *g = pt ? pt->graphic_str : "";
+    *alt = pt ? pt->graphic_alt : "";
+    *alt2 = pt ? pt->graphic_alt2 : "";
+}
+
+int tile_terrain_known(int nx, int ny, int *known)
+{
+    *known = 0;
+    struct tile *ptile = port_native_tile(nx, ny);
+    if (!ptile) return -1;
+    struct player *pov = get_pov_player();
+    int k = pov ? tile_get_known(ptile, pov) : TILE_KNOWN_SEEN;
+    *known = k;
+    if (k == TILE_UNKNOWN) return -1;
+    const struct terrain *pt = ptile->terrain;
+    if (k == TILE_KNOWN_UNSEEN && pov) {
+        struct player_tile *plr = map_get_player_tile(ptile, pov);
+        if (plr && plr->terrain) pt = plr->terrain;
+    }
+    return pt ? terrain_number(pt) : -1;
+}
+
+bool native_step(int nx, int ny, int dir8, int *ox, int *oy)
+{
+    struct tile *ptile = port_native_tile(nx, ny);
+    if (!ptile || dir8 < 0 || dir8 > 7) return false;
+    struct tile *t2 = mapstep(&(wld.map), ptile, (enum direction8)dir8);
+    if (!t2) return false;
+    index_to_native_pos(ox, oy, tile_index(t2));
+    return true;
+}
+
+bool native_dir(int ax, int ay, int bx, int by, int *dir8)
+{
+    struct tile *a = port_native_tile(ax, ay), *b = port_native_tile(bx, by);
+    if (!a || !b || a == b) return false;
+    enum direction8 d;
+    if (!base_get_direction_for_step(&(wld.map), a, b, &d)) return false;
+    *dir8 = (int)d;
+    return true;
+}
 
 bool get_city_tile(int city_id, int *x, int *y)
 {
@@ -1800,6 +1855,7 @@ void get_tile_info(int x, int y, TileInfo *out)
 {
     memset(out, 0, sizeof(*out));
     out->terrain = get_tile_type(x, y);
+    out->terrain_idx = -1;
     out->unit_owner = -1;
     out->unit_id = -1;
     out->city_owner = -1;
@@ -1824,6 +1880,24 @@ void get_tile_info(int x, int y, TileInfo *out)
         // your own city is never really fogged; take its live details
         struct city *own = game_city_by_number(plr->site->identity);
         if (own && city_owner(own) == pov_v) pcity = own;
+        int st = plr->site->style;
+        if (!pcity && st >= 0 && st < game.control.num_city_styles)
+            fc_strlcpy(out->city_gfx, city_styles[st].graphic, sizeof(out->city_gfx));
+        out->city_img = plr->site->city_image;
+        out->city_walls = plr->site->walls > 0;
+        out->city_occupied = plr->site->occupied;
+    }
+    {
+        int kn;
+        out->terrain_idx = tile_terrain_known(x, y, &kn);
+    }
+    if (pcity) {
+        int st = style_of_city(pcity);
+        if (st >= 0 && st < game.control.num_city_styles)
+            fc_strlcpy(out->city_gfx, city_styles[st].graphic, sizeof(out->city_gfx));
+        out->city_img = get_city_bonus(pcity, EFT_CITY_IMAGE);
+        out->city_walls = get_city_bonus(pcity, EFT_VISIBLE_WALLS) > 0;
+        out->city_occupied = unit_list_size(ptile->units) > 0;
     }
     if (pcity) {
         out->city_owner = player_index(city_owner(pcity));
@@ -1865,6 +1939,7 @@ void get_tile_info(int x, int y, TileInfo *out)
                 if (uname) {
                     fc_strlcpy(out->unit_name, uname, sizeof(out->unit_name));
                 }
+                fc_strlcpy(out->unit_gfx, unit_type_get(punit)->graphic_str, sizeof(out->unit_gfx));
             }
         }
     }
@@ -1884,6 +1959,9 @@ void get_tile_info(int x, int y, TileInfo *out)
             else if (strcasecmp(rname, "Hut") == 0) out->has_village = true;
             else if (strcasecmp(rname, "Pollution") == 0) out->has_pollution = true;
             else if (strcasecmp(rname, "Fallout") == 0) out->has_fallout = true;
+            else if (strcasecmp(rname, "Oil Well") == 0 || strcasecmp(rname, "Oil Platform") == 0) out->has_oil_mine = true;
+            else if (strcasecmp(rname, "Fortress") == 0 || strcasecmp(rname, "Fort") == 0) out->has_fortress = true;
+            else if (strcasecmp(rname, "Airbase") == 0 || strcasecmp(rname, "Airstrip") == 0) out->has_airbase = true;
         }
     } extra_type_iterate_end;
 

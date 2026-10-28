@@ -37,11 +37,16 @@ jobs:
           export PATH=$PATH:$DEVKITPRO/tools/bin:$DEVKITARM/bin
           cd 3ds_port && make -j"$(nproc)"
           cp 3ds_port.3dsx freeciv3ds.3dsx
+          # test build: new games on the isometric map with Amplio2 graphics
+          touch source/main.c && rm -f 3ds_port.smdh && make -j"$(nproc)" AMPLIO=1
+          cp 3ds_port.3dsx freeciv3ds-amplio.3dsx
+          touch source/main.c && rm -f 3ds_port.smdh && make -j"$(nproc)"   # leave the normal build for the CIA
       - uses: actions/upload-artifact@v4
         with:
           name: freeciv3ds
           path: |
             3ds_port/freeciv3ds.3dsx
+            3ds_port/freeciv3ds-amplio.3dsx
             3ds_port/3ds_port.elf
       - uses: actions/upload-artifact@v4
         with:

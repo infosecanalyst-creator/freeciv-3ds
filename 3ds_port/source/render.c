@@ -4,6 +4,8 @@
 #include "sprites.h"
 #include "pedia_icons.h"
 #include "font.h"
+#include "iso_data.h"
+#include "iso_geom.h"
 #include <citro2d.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -683,9 +685,26 @@ int hud_hit_test(int px, int py)
     return HUD_BAR;
 }
 
+static void iso_tile_center(int tx, int ty, int cam_x, int cam_y, float scale, float *sx, float *sy);
+static void iso_fill_diamond(float x, float y, float w, float h, float z, u32 c);
+static void iso_diamond(float x, float y, float w, float h, float z, u32 c, float t);
+
+// Minimap camera box: the iso camera in square units.
+static void minimap_cam(int cam_x, int cam_y, float zoom, int *cx, int *cy, float *vw, float *vh)
+{
+    if (map_is_iso()) {
+        *cx = cam_x * TILE_PX / ISO_W; *cy = cam_y * TILE_PX / ISO_ROW;
+        *vw = 320.0f / (ISO_W * zoom); *vh = (float)HUD_Y / (ISO_ROW * zoom);
+    } else {
+        *cx = cam_x; *cy = cam_y;
+        *vw = 320.0f / (TILE_PX * zoom); *vh = (float)HUD_Y / (TILE_PX * zoom);
+    }
+}
+
 // Screen position of a tile's centre on the bottom map (nearest wrap copy).
 static void tile_center(int tx, int ty, int cam_x, int cam_y, float scale, float *sx, float *sy)
 {
+    if (map_is_iso()) { iso_tile_center(tx, ty, cam_x, cam_y, scale, sx, sy); return; }
     int mw = 40, mh = 40;
     get_map_dimensions(&mw, &mh);
     int wx = tx * TILE_PX;
@@ -760,8 +779,9 @@ void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,
 {
     if (s_world_view) {
         C2D_DrawRectSolid(0, 0, 0.0f, 320, 240, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
-        draw_minimap_in(WORLD_BOX_X, WORLD_BOX_Y, WORLD_BOX_W, WORLD_BOX_H, cam_x, cam_y,
-                        320.0f / (TILE_PX * scale), (float)HUD_Y / (TILE_PX * scale), sel_x, sel_y);
+        int mcx, mcy; float mvw, mvh;
+        minimap_cam(cam_x, cam_y, scale, &mcx, &mcy, &mvw, &mvh);
+        draw_minimap_in(WORLD_BOX_X, WORLD_BOX_Y, WORLD_BOX_W, WORLD_BOX_H, mcx, mcy, mvw, mvh, sel_x, sel_y);
         popup = NULL;
         goto hud;
     }
@@ -775,7 +795,15 @@ void render_bottom_map(int cam_x, int cam_y, float scale, int sel_x, int sel_y,
         get_map_dimensions(&mw, &mh);
         float T = TILE_PX * scale;
         u32 fill = C2D_Color32(0xFF, 0xFF, 0xFF, 0x30), edge = C2D_Color32(0xFF, 0xFF, 0xFF, 0x80);
-        for (int i = 0; i < s_range_n; i++) {
+        for (int i = 0; map_is_iso() && i < s_range_n; i++) {
+            int px, py;
+            iso_tile_to_screen(s_range_x[i], s_range_y[i], cam_x, cam_y, scale, &px, &py);
+            float w = ISO_W * scale, h = ISO_H * scale;
+            if (px < -w || py < -h || px > 320 || py > 240) continue;
+            iso_fill_diamond(px, py, w, h, 0.68f, fill);
+            iso_diamond(px + 1, py + 0.5f, w - 2, h - 1, 0.681f, edge, 1.0f);
+        }
+        for (int i = 0; !map_is_iso() && i < s_range_n; i++) {
             int tx = s_range_x[i], ty = s_range_y[i];
             int wx = tx * TILE_PX;
             if (map_wraps_x()) {
@@ -956,7 +984,9 @@ void render_top_info(const TopInfo *ti)
 
     // Left: minimap and research (slightly in front).
     layer(2.5f);
-    draw_minimap(ti->cam_x, ti->cam_y, 320.0f / (TILE_PX * ti->zoom), (240.0f - (240 - HUD_Y)) / (TILE_PX * ti->zoom),
+    int mcx, mcy; float mvw, mvh;
+    minimap_cam(ti->cam_x, ti->cam_y, ti->zoom, &mcx, &mcy, &mvw, &mvh);
+    draw_minimap(mcx, mcy, mvw, mvh,
                  ti->tile_x, ti->tile_y);
     if (ti->civ && ti->civ->research_name[0]) {
         float y = MINIMAP_Y + MINIMAP_H + 6;
@@ -1397,6 +1427,479 @@ static void draw_goto_marker(float draw_x, float draw_y)
     C2D_DrawRectSolid(cx - 2, cy - 5, z, 4, 10, c);
 }
 
+// ===================== Isometric map (Amplio2) =====================
+// Used when the map has the ISO topology. Follows the Freeciv client's
+// tilespec.c rules for Amplio2: whole and cardinally-matched terrain
+// sprites, corner cells for water, blend quadrants, corner darkness/fog,
+// roads in eight directions, rivers, then cities and units. Drawn layer by
+// layer, rows top to bottom, so tall sprites overlap the row behind.
+
+static C2D_SpriteSheet s_iso_sheet[2];
+static float s_isc = 1.0f;      // sprite scale (the map zoom)
+static int s_iso_cam_x, s_iso_cam_y;
+static int s_iso_mw = 1, s_iso_mh = 1;
+static signed char s_iso_tmap[128]; // Freeciv terrain index -> iso_terrains[], -1 none
+static int s_iso_tmap_n = -1;
+
+static bool iso_load(void)
+{
+    if (!s_iso_sheet[0]) {
+        s_iso_sheet[0] = C2D_SpriteSheetLoad("romfs:/gfx/iso_terrain.t3x");
+        s_iso_sheet[1] = C2D_SpriteSheetLoad("romfs:/gfx/iso_units.t3x");
+        for (int s = 0; s < 2; s++) {
+            if (!s_iso_sheet[s]) continue;
+            C2D_Image im = C2D_SpriteSheetGetImage(s_iso_sheet[s], 0);
+            C3D_TexSetFilter(im.tex, GPU_LINEAR, GPU_LINEAR); // smooth when zoomed
+        }
+    }
+    return s_iso_sheet[0] && s_iso_sheet[1];
+}
+
+static void iso_build_tmap(void)
+{
+    int n = port_terrain_total();
+    if (n == s_iso_tmap_n) return;
+    if (n > 128) n = 128;
+    for (int t = 0; t < n; t++) {
+        const char *g, *a, *a2;
+        terrain_graphics(t, &g, &a, &a2);
+        s_iso_tmap[t] = -1;
+        const char *try[3] = { g, a, a2 };
+        for (int k = 0; k < 3 && s_iso_tmap[t] < 0; k++)
+            for (int i = 0; i < ISO_NTERRAINS; i++)
+                if (try[k] && try[k][0] && !strcmp(try[k], iso_terrains[i].tag)) { s_iso_tmap[t] = i; break; }
+    }
+    s_iso_tmap_n = n;
+}
+
+static void iso_spr(int ref, float x, float y, float z)
+{
+    if (ref < 0) return;
+    C2D_Image im = C2D_SpriteSheetGetImage(s_iso_sheet[(ref >> 12) & 1], ref & 4095);
+    C2D_DrawImageAt(im, x, y, z, NULL, s_isc, s_isc);
+}
+
+// Freeciv direction8 order: NW N NE W E SW S SE. Step in half-tile units of
+// the staggered native grid (x in half widths, y in rows).
+static const signed char k_iso_dx[8] = { 0, 1, 2, -1, 1, -2, -1, 0 };
+static const signed char k_iso_dy[8] = { -2, -1, 0, -1, 1, 0, 1, 2 };
+static const signed char k_dir_cw[8]  = { 1, 2, 4, 0, 7, 3, 5, 6 };
+static const signed char k_dir_ccw[8] = { 3, 0, 1, 5, 2, 6, 7, 4 };
+static const signed char k_dir4_to_8[4] = { 1, 6, 4, 3 }; // N S E W
+static const signed char k_card[4] = { 1, 4, 6, 3 };      // N E S W (match bits)
+
+// Neighbour in an (unwrapped) native column space: x may run past the map
+// edge on a wrapping map; y may not.
+static bool iso_nb(int x, int y, int dir, int *ox, int *oy)
+{
+    int X = 2 * x + (y & 1) + k_iso_dx[dir];
+    int ny = y + k_iso_dy[dir];
+    if (ny < 0 || ny >= s_iso_mh) return false;
+    *ox = (X - (ny & 1)) >> 1; // floor for negatives too (arithmetic shift)
+    *oy = ny;
+    return true;
+}
+
+// Per-frame cache of the squares in view (plus a margin for tall sprites).
+#define ISO_CR 52
+#define ISO_CC 22
+static TileInfo s_ic[ISO_CR][ISO_CC];
+static signed char s_ic_t[ISO_CR][ISO_CC];   // iso terrain id, -1 none/unknown
+static int s_ic_r0, s_ic_c0, s_ic_nr, s_ic_nc;
+
+// Terrain id and known state of any square (cache first).
+static int iso_terr_at(int x, int y, int *known)
+{
+    int r = y - s_ic_r0, c = x - s_ic_c0;
+    if (r >= 0 && r < s_ic_nr && c >= 0 && c < s_ic_nc) {
+        *known = s_ic[r][c].visibility;
+        return s_ic_t[r][c];
+    }
+    int t = tile_terrain_known(x, y, known);
+    return (t >= 0 && t < s_iso_tmap_n) ? s_iso_tmap[t] : -1;
+}
+
+static int iso_match(int tid, int l)
+{
+    if (tid < 0) return -1;
+    const IsoTerrain *T = &iso_terrains[tid];
+    return T->nlayers > l ? T->layer[l].idx[0] : -1;
+}
+
+static void iso_terrain_layer(int x, int y, int tid, int l, float px, float py, float z)
+{
+    const IsoTerrain *T = &iso_terrains[tid];
+    if (l >= T->nlayers) return;
+    const IsoLayer *L = &T->layer[l];
+    const float S = s_isc;
+    if (!L->corner) {
+        if (L->style == 0) {
+            if (L->nbase > 0) {
+                unsigned h = (unsigned)(x * 7919 + y * 104729);
+                iso_spr(L->base[h % L->nbase], px, py + L->oy * S, z);
+            }
+        } else {
+            int n = 0;
+            for (int i = 0; i < 4; i++) {
+                int nx, ny, kn, m = -1;
+                if (iso_nb(x, y, k_card[i], &nx, &ny)) m = iso_match(iso_terr_at(nx, ny, &kn), l);
+                if (m == L->idx[0]) n |= 1 << i;
+            }
+            iso_spr(L->match[n], px, py + L->oy * S, z);
+        }
+    } else {
+        static const float ox[4] = { ISO_W / 4, ISO_W / 4, ISO_W / 2, 0 };
+        static const float oy[4] = { 0, ISO_H / 2, ISO_H / 4, ISO_H / 4 };
+        int cnt = L->nidx;
+        for (int i = 0; i < 4; i++) {
+            int dir = k_dir_ccw[(int)k_dir4_to_8[i]];
+            int ds[3] = { k_dir_ccw[dir], dir, k_dir_cw[dir] };
+            int m[3];
+            for (int j = 0; j < 3; j++) {
+                int nx, ny, kn;
+                m[j] = iso_nb(x, y, ds[j], &nx, &ny) ? iso_match(iso_terr_at(nx, ny, &kn), l) : -1;
+                if (m[j] < 0) m[j] = L->idx[0]; // off the map: like this square
+            }
+            int ai = 0;
+            if (L->style == 1) {
+                for (int j = 2; j >= 0; j--) ai = ai * 2 + (m[j] != L->idx[0]);
+            } else if (L->style == 2) {
+                for (int j = 2; j >= 0; j--) ai = ai * 2 + (m[j] == L->idx[1]);
+            } else if (L->style == 3) {
+                int nn[3];
+                for (int j = 0; j < 3; j++) {
+                    nn[j] = cnt - 1;
+                    for (int k = 0; k < cnt; k++) if (m[j] == L->idx[k]) { nn[j] = k; break; }
+                }
+                ai = (nn[2] * cnt + nn[1]) * cnt + nn[0];
+            }
+            int ci = ai * 4 + i;
+            if (ci < 108) iso_spr(L->cells[ci], px + ox[i] * S, py + oy[i] * S, z);
+        }
+    }
+    // Blend the neighbours' edges over this square after its blend layer.
+    if (l + 1 == T->blending) {
+        static const float bx[4] = { ISO_W / 2, 0, ISO_W / 2, 0 };
+        static const float by[4] = { 0, ISO_H / 2, ISO_H / 2, 0 };
+        for (int i = 0; i < 4; i++) {
+            int nx, ny, kn;
+            if (!iso_nb(x, y, k_dir4_to_8[i], &nx, &ny)) continue;
+            int o = iso_terr_at(nx, ny, &kn);
+            if (o < 0 || kn == 0 || o == tid || iso_terrains[o].blending == 0) continue;
+            iso_spr(iso_terrains[o].blend[i], px + bx[i] * S, py + by[i] * S, z + 0.0005f);
+        }
+    }
+}
+
+static int iso_unit_sprite(const char *gfx, const char *rule)
+{
+    const char *g = gfx;
+    if (!strncmp(g, "u.", 2)) g += 2;
+    for (int i = 0; i < ISO_NUNITS; i++) if (!strcmp(iso_units[i].name, g)) return iso_units[i].spr;
+    // fall back on the rule name: "Mech. Inf." -> "mech_inf"
+    char nm[32]; int j = 0;
+    for (const char *p = rule; *p && j < 31; p++) {
+        if (isalnum((unsigned char)*p)) nm[j++] = tolower((unsigned char)*p);
+        else if ((*p == ' ' || *p == '_') && j && nm[j - 1] != '_') nm[j++] = '_';
+    }
+    nm[j] = 0;
+    for (int i = 0; i < ISO_NUNITS; i++) if (!strcmp(iso_units[i].name, nm)) return iso_units[i].spr;
+    return iso_units[0].spr;
+}
+
+static void iso_diamond(float x, float y, float w, float h, float z, u32 c, float t)
+{
+    // outline of the square's diamond, t px thick
+    float cx = x + w / 2, cy = y + h / 2;
+    C2D_DrawLine(cx, y, c, x + w, cy, c, t, z);
+    C2D_DrawLine(x + w, cy, c, cx, y + h, c, t, z);
+    C2D_DrawLine(cx, y + h, c, x, cy, c, t, z);
+    C2D_DrawLine(x, cy, c, cx, y, c, t, z);
+}
+
+void iso_tile_world(int tx, int ty, int *wx, int *wy)
+{
+    *wx = iso_wx(tx, ty);
+    *wy = iso_wy(ty);
+}
+
+// Nearest copy of square (tx, ty) to the view (wrapping maps), top-left of
+// its 48x24 box on screen.
+void iso_tile_to_screen(int tx, int ty, int cam_x, int cam_y, float scale, int *px, int *py)
+{
+    int mw = 40, mh = 40;
+    get_map_dimensions(&mw, &mh);
+    int wx = iso_wx(tx, ty);
+    if (map_wraps_x()) {
+        int world_w = mw * ISO_W, c = cam_x + (int)(160 / scale);
+        int d = ((wx - c) % world_w + world_w + world_w / 2) % world_w - world_w / 2;
+        wx = c + d;
+    }
+    *px = (int)floorf((wx - cam_x) * scale);
+    *py = (int)floorf((iso_wy(ty) - cam_y) * scale);
+}
+
+bool iso_screen_to_tile(int px, int py, int cam_x, int cam_y, float scale, int *tx, int *ty)
+{
+    int mw = 40, mh = 40;
+    get_map_dimensions(&mw, &mh);
+    float X = cam_x + px / scale, Y = cam_y + py / scale;
+    int r = (int)floorf(Y / ISO_ROW);
+    for (int ry = r - 1; ry <= r; ry++) {
+        float off = (ry & 1) * (ISO_W / 2);
+        int nx = (int)floorf((X - off) / ISO_W);
+        float cx = nx * ISO_W + off + ISO_W / 2, cy = ry * ISO_ROW + ISO_H / 2;
+        if (fabsf(X - cx) / (ISO_W / 2) + fabsf(Y - cy) / (ISO_H / 2) <= 1.0f) {
+            if (map_wraps_x()) nx = ((nx % mw) + mw) % mw;
+            if (nx < 0 || nx >= mw || ry < 0 || ry >= mh) return false;
+            *tx = nx; *ty = ry;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void render_iso_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
+                            int sel_x, int sel_y, bool sel_armed, int goto_x, int goto_y)
+{
+    if (!iso_load()) return;
+    iso_build_tmap();
+    get_map_dimensions(&s_iso_mw, &s_iso_mh);
+    s_isc = scale; s_ms = scale; s_nbanners = 0;
+    s_iso_cam_x = cam_x; s_iso_cam_y = cam_y;
+    const float S = scale;
+    bool wrap = map_wraps_x();
+
+    // Rows/columns that can reach the view: tall sprites (mountains, cities,
+    // units) rise up to a tile above their square, so take extra rows below.
+    int r0 = (int)floorf(cam_y / (float)ISO_ROW) - 2;
+    int r1 = (int)floorf((cam_y + view_h / S) / ISO_ROW) + 4;
+    int c0 = (int)floorf(cam_x / (float)ISO_W) - 1;
+    int c1 = (int)floorf((cam_x + view_w / S) / ISO_W) + 1;
+    if (r0 < 0) r0 = 0;
+    if (r1 > s_iso_mh - 1) r1 = s_iso_mh - 1;
+    if (!wrap) { if (c0 < 0) c0 = 0; if (c1 > s_iso_mw - 1) c1 = s_iso_mw - 1; }
+    if (r1 - r0 + 1 > ISO_CR) r1 = r0 + ISO_CR - 1;
+    if (c1 - c0 + 1 > ISO_CC) c1 = c0 + ISO_CC - 1;
+    s_ic_r0 = r0; s_ic_c0 = c0; s_ic_nr = r1 - r0 + 1; s_ic_nc = c1 - c0 + 1;
+    if (s_ic_nr <= 0 || s_ic_nc <= 0) return;
+    for (int r = 0; r < s_ic_nr; r++)
+        for (int c = 0; c < s_ic_nc; c++) {
+            TileInfo *ti = &s_ic[r][c];
+            get_tile_info(c0 + c, r0 + r, ti);   // port_native_tile() folds the column
+            int t = ti->terrain_idx;
+            s_ic_t[r][c] = (ti->visibility > 0 && t >= 0 && t < s_iso_tmap_n) ? s_iso_tmap[t] : -1;
+        }
+
+#define ISO_FOR_EACH \
+    for (int r = 0; r < s_ic_nr; r++) for (int c = 0; c < s_ic_nc; c++) { \
+        int x = c0 + c, y = r0 + r; const TileInfo *ti = &s_ic[r][c]; int tid = s_ic_t[r][c]; \
+        float px = (iso_wx(x, y) - cam_x) * S, py = (iso_wy(y) - cam_y) * S; \
+        if (S == 1.0f) { px = floorf(px); py = floorf(py); } \
+        (void)tid; (void)ti;
+#define ISO_END }
+
+    // Terrain, three layers.
+    for (int l = 0; l < 3; l++) {
+        ISO_FOR_EACH
+            if (tid >= 0) iso_terrain_layer(x, y, tid, l, px, py, 0.10f + 0.01f * l);
+        ISO_END
+    }
+    // Rivers, then roads / rails.
+    ISO_FOR_EACH
+        if (tid < 0) continue;
+        bool water = iso_terrains[tid].layer[0].corner; // lake, coast, floor
+        if (ti->has_river && !water) {
+            int n = 0;
+            for (int i = 0; i < 4; i++) {
+                int nx, ny; TileInfo nt;
+                if (!iso_nb(x, y, k_card[i], &nx, &ny)) continue;
+                int rr = ny - r0, cc = nx - c0;
+                bool riv, nwater;
+                if (rr >= 0 && rr < s_ic_nr && cc >= 0 && cc < s_ic_nc) {
+                    riv = s_ic[rr][cc].has_river; nwater = s_ic_t[rr][cc] >= 0 && iso_terrains[(int)s_ic_t[rr][cc]].layer[0].corner;
+                } else {
+                    get_tile_info(nx, ny, &nt); riv = nt.has_river;
+                    int kn, tt = iso_terr_at(nx, ny, &kn); nwater = tt >= 0 && iso_terrains[tt].layer[0].corner;
+                }
+                if (riv || nwater) n |= 1 << i;
+            }
+            iso_spr(iso_river[n], px, py, 0.20f);
+        } else if (water) {
+            // river mouths: a land neighbour with a river flows in here
+            for (int i = 0; i < 4; i++) {
+                int nx, ny;
+                if (!iso_nb(x, y, k_card[i], &nx, &ny)) continue;
+                int rr = ny - r0, cc = nx - c0;
+                if (rr >= 0 && rr < s_ic_nr && cc >= 0 && cc < s_ic_nc && s_ic[rr][cc].has_river
+                    && s_ic_t[rr][cc] >= 0 && !iso_terrains[(int)s_ic_t[rr][cc]].layer[0].corner)
+                    iso_spr(iso_outlet[i], px, py, 0.20f);
+            }
+        }
+        const short *rd = ti->has_maglev ? iso_maglev : ti->has_rail ? iso_rail : ti->has_road ? iso_road : NULL;
+        if (rd) {
+            bool any = false;
+            for (int d = 0; d < 8; d++) {
+                int nx, ny;
+                if (!iso_nb(x, y, d, &nx, &ny)) continue;
+                int rr = ny - r0, cc = nx - c0;
+                bool has;
+                if (rr >= 0 && rr < s_ic_nr && cc >= 0 && cc < s_ic_nc) {
+                    const TileInfo *o = &s_ic[rr][cc];
+                    has = rd == iso_maglev ? o->has_maglev : rd == iso_rail ? (o->has_rail || o->has_maglev)
+                                                                            : (o->has_road || o->has_rail || o->has_maglev || o->city_owner >= 0);
+                } else {
+                    TileInfo nt; get_tile_info(nx, ny, &nt);
+                    has = nt.has_road || nt.has_rail || nt.city_owner >= 0;
+                }
+                if (has) { iso_spr(rd[d], px, py, 0.21f); any = true; }
+            }
+            if (!any && ti->city_owner < 0) iso_spr(rd[8], px, py, 0.21f);
+        }
+    ISO_END
+    // Specials: irrigation, mines, resources, huts, pollution.
+    ISO_FOR_EACH
+        if (tid < 0) continue;
+        if (ti->has_farmland) iso_spr(ISO_TX_FARMLAND, px, py, 0.22f);
+        else if (ti->has_irrigation && ti->city_owner < 0) iso_spr(ISO_TX_IRRIGATION, px, py, 0.22f);
+        if (ti->has_mine) iso_spr(ISO_TX_MINE, px, py, 0.221f);
+        if (ti->has_oil_mine) iso_spr(ISO_TX_OIL_MINE, px, py, 0.221f);
+        if (ti->resource_tag[0]) {
+            for (int i = 0; i < ISO_NRES; i++)
+                if (!strcmp(iso_res[i].tag, ti->resource_tag)) { iso_spr(iso_res[i].spr, px, py, 0.222f); break; }
+        }
+        if (ti->has_village) iso_spr(ISO_TX_VILLAGE, px, py, 0.223f);
+        if (ti->has_pollution) iso_spr(ISO_TX_POLLUTION, px, py, 0.224f);
+        if (ti->has_fallout) iso_spr(ISO_TX_FALLOUT, px, py, 0.224f);
+        if (ti->has_fortress) iso_spr(ISO_BASE_FORTRESS_BG, px, py - (ISO_H / 2) * S, 0.225f);
+        else if (ti->has_airbase) iso_spr(ISO_BASE_AIRBASE_BG, px, py - (ISO_H / 2) * S, 0.225f);
+    ISO_END
+    // National borders along the diamond edges.
+    ISO_FOR_EACH
+        if (tid < 0 || ti->tile_owner < 0) continue;
+        u32 bc = (owner_color(ti->tile_owner) & 0x00FFFFFF) | 0xC0000000;
+        float w = ISO_W * S, h = ISO_H * S, cx = px + w / 2, cy = py + h / 2, t = 1.5f;
+        if (ti->border_n) C2D_DrawLine(cx, py + 1, bc, px + w - 1, cy, bc, t, 0.23f);
+        if (ti->border_e) C2D_DrawLine(px + w - 1, cy, bc, cx, py + h - 1, bc, t, 0.23f);
+        if (ti->border_s) C2D_DrawLine(cx, py + h - 1, bc, px + 1, cy, bc, t, 0.23f);
+        if (ti->border_w) C2D_DrawLine(px + 1, cy, bc, cx, py + 1, bc, t, 0.23f);
+    ISO_END
+    // Cities.
+    ISO_FOR_EACH
+        if (tid < 0 || ti->city_owner < 0) continue;
+        int st = 0;
+        const char *g = ti->city_gfx;
+        if (!strncmp(g, "city.", 5)) g += 5;
+        for (int i = 0; i < ISO_NSTYLES; i++) if (!strcmp(iso_cities[i].style, g)) { st = i; break; }
+        int img = ti->city_img; if (img < 0) img = 0; if (img > 4) img = 4;
+        while (img > 0 && iso_cities[st].city[img] < 0) img--;
+        float cy = py - (ISO_H / 2) * S; // city pictures are 1.5 squares tall
+        iso_spr(iso_cities[st].city[img], px, cy, 0.30f);
+        if (ti->city_walls) iso_spr(iso_cities[st].wall[img], px, cy, 0.301f);
+        if (ti->city_occupied) iso_spr(iso_cities[st].occupied, px, cy, 0.302f);
+        if (s_nbanners < (int)(sizeof(s_banners) / sizeof(s_banners[0]))) {
+            CityBanner *b = &s_banners[s_nbanners++];
+            b->x = px + ISO_W * S / 2; b->y = py + ISO_H * S - 4;
+            b->owner = ti->city_owner; b->size = ti->city_size;
+            snprintf(b->name, sizeof(b->name), "%s", ti->city_name);
+            if (ti->city_prod[0] && ti->city_prod_turns > 0 && ti->city_prod_turns < 999)
+                snprintf(b->prod, sizeof(b->prod), "%.20s %d", ti->city_prod, ti->city_prod_turns);
+            else
+                snprintf(b->prod, sizeof(b->prod), "%.20s", ti->city_prod);
+        }
+    ISO_END
+    // Darkness and fog: one picture per corner, from the four squares that meet there.
+    for (int r = -1; r < s_ic_nr; r++) for (int c = 0; c < s_ic_nc; c++) {
+        int x = c0 + c, y = r0 + r;
+        if (y < 0) continue;
+        float px = (iso_wx(x, y) - cam_x) * S, py = (iso_wy(y) - cam_y) * S;
+        if (S == 1.0f) { px = floorf(px); py = floorf(py); }
+        int ts[4][2] = { { x, y }, { 0, 0 }, { 0, 0 }, { 0, 0 } };
+        bool ok[4] = { true, iso_nb(x, y, 4, &ts[1][0], &ts[1][1]), iso_nb(x, y, 7, &ts[2][0], &ts[2][1]),
+                       iso_nb(x, y, 6, &ts[3][0], &ts[3][1]) };
+        int tileno = 0;
+        for (int i = 3; i >= 0; i--) {
+            int v = 1, kn; // off the map counts as fogged
+            if (ok[i]) { iso_terr_at(ts[i][0], ts[i][1], &kn); v = kn == 2 ? 2 : kn == 1 ? 1 : 0; }
+            tileno = tileno * 3 + v;
+        }
+        if (tileno != 80) iso_spr(iso_fog[tileno], px, py + (ISO_H / 2) * S, 0.40f); // 80 = all seen
+    }
+    // Units (the top one of each stack), then fortress fronts.
+    ISO_FOR_EACH
+        if (tid < 0 || ti->visibility != 2) continue;
+        if (ti->unit_owner >= 0 && ti->city_owner < 0) {
+            int spr = iso_unit_sprite(ti->unit_gfx, ti->unit_name);
+            float ux = px + 10 * S, uy = py - 3 * S;
+            if (ti->unit_done) {
+                C2D_ImageTint dim;
+                C2D_PlainImageTint(&dim, C2D_Color32(0x40, 0x40, 0x40, 0xFF), 0.35f);
+                C2D_Image im = C2D_SpriteSheetGetImage(s_iso_sheet[(spr >> 12) & 1], spr & 4095);
+                C2D_DrawImageAt(im, ux, uy, 0.35f, &dim, S, S);
+            } else {
+                iso_spr(spr, ux, uy, 0.35f);
+            }
+            draw_shield(px + 9 * S, py - 2 * S, 0.36f, owner_color(ti->unit_owner));
+            if (ti->unit_hp_max > 0 && ti->unit_hp < ti->unit_hp_max) {
+                float f = (float)ti->unit_hp / ti->unit_hp_max, bw = 20 * S;
+                float hx = px + 14 * S, hy = py + 20 * S;
+                C2D_DrawRectSolid(hx, hy, 0.36f, bw, 2.5f, C2D_Color32(0x20, 0x08, 0x08, 0xE0));
+                C2D_DrawRectSolid(hx, hy, 0.361f, bw * f, 2.5f,
+                                  f > 0.5f ? C2D_Color32(0x50, 0xD0, 0x50, 0xFF) : f > 0.25f ? C2D_Color32(0xE0, 0xC0, 0x40, 0xFF)
+                                                                         : C2D_Color32(0xE0, 0x40, 0x40, 0xFF));
+            }
+            if (ti->unit_badge && S >= 0.75f) {
+                char t[2] = { ti->unit_badge, 0 };
+                float bx = px + 33 * S, by = py + 4 * S;
+                C2D_DrawRectSolid(bx, by, 0.37f, 9, 10, C2D_Color32(0x10, 0x18, 0x26, 0xD8));
+                font_draw(t, bx + 1.5f, by - 3, 0.371f, 0.36f, C2D_Color32(0xFF, 0xF0, 0xA0, 0xFF));
+            }
+            if (ti->num_units > 1) {
+                float sx = px + 33 * S, sy = py - 4 * S;
+                C2D_DrawRectSolid(sx, sy, 0.37f, 8, 8, C2D_Color32(0, 0, 0, 0xC0));
+                C2D_DrawRectSolid(sx + 1, sy + 3, 0.371f, 6, 2, 0xFFFFFFFF);
+                C2D_DrawRectSolid(sx + 3, sy + 1, 0.371f, 2, 6, 0xFFFFFFFF);
+            }
+        }
+        if (ti->has_fortress) iso_spr(ISO_BASE_FORTRESS_FG, px, py - (ISO_H / 2) * S, 0.38f);
+    ISO_END
+    // Selection and route target.
+    ISO_FOR_EACH
+        bool is_sel = x == sel_x || (wrap && ((x % s_iso_mw) + s_iso_mw) % s_iso_mw == sel_x);
+        is_sel = is_sel && y == sel_y;
+        bool is_goto = (x == goto_x || (wrap && ((x % s_iso_mw) + s_iso_mw) % s_iso_mw == goto_x)) && y == goto_y;
+        if (is_sel) {
+            if (sel_armed && iso_select[0] >= 0) {
+                int f = (int)((svcGetSystemTick() / (CPU_TICKS_PER_MSEC * 120)) % 4);
+                iso_spr(iso_select[f] >= 0 ? iso_select[f] : iso_select[0], px, py, 0.70f);
+            }
+            iso_diamond(px, py, ISO_W * S, ISO_H * S, 0.701f,
+                        sel_armed ? C2D_Color32(0xFF, 0xF0, 0x30, 0xFF) : 0xFFFFFFFF, 1.5f);
+        }
+        if (is_goto) iso_diamond(px + 2, py + 1, ISO_W * S - 4, ISO_H * S - 2, 0.75f, C2D_Color32(0xFF, 0xA0, 0x20, 0xFF), 2.0f);
+    ISO_END
+#undef ISO_FOR_EACH
+#undef ISO_END
+    draw_city_banners();
+}
+
+// Movement-range tint and route dots use square centres.
+static void iso_tile_center(int tx, int ty, int cam_x, int cam_y, float scale, float *sx, float *sy)
+{
+    int px, py;
+    iso_tile_to_screen(tx, ty, cam_x, cam_y, scale, &px, &py);
+    *sx = px + ISO_W * scale / 2;
+    *sy = py + ISO_H * scale / 2;
+}
+
+static void iso_fill_diamond(float x, float y, float w, float h, float z, u32 c)
+{
+    float cx = x + w / 2, cy = y + h / 2;
+    C2D_DrawTriangle(cx, y, c, x + w, cy, c, x, cy, c, z);
+    C2D_DrawTriangle(x, cy, c, x + w, cy, c, cx, y + h, c, z);
+}
+// ===================== end isometric map =====================
+
 void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
                      int sel_x, int sel_y, bool sel_armed, int goto_x, int goto_y)
 {
@@ -1407,6 +1910,10 @@ void render_map_view(int cam_x, int cam_y, float scale, int view_w, int view_h,
     if (get_game_turn() <= 0) {
         draw_text(view_w / 2 - 90, view_h / 2 - 15, 0.7f, C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF),
                   "Generating world...");
+        return;
+    }
+    if (map_is_iso()) {
+        render_iso_view(cam_x, cam_y, scale, view_w, view_h, sel_x, sel_y, sel_armed, goto_x, goto_y);
         return;
     }
     s_ms = scale;

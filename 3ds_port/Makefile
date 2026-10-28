@@ -35,7 +35,11 @@ GRAPHICS	:=	gfx
 ROMFS		:=	romfs
 GFXBUILD	:=	$(ROMFS)/gfx
 
+ifeq ($(AMPLIO),1)
+APP_TITLE	:=	Freeciv 3DS (Amplio2)
+else
 APP_TITLE	:=	Freeciv 3DS
+endif
 APP_DESCRIPTION	:=	Civilization-style strategy (Freeciv)
 APP_AUTHOR	:=	Freeciv 3DS contributors
 ICON		:=	cia/icon.png
@@ -49,6 +53,10 @@ CFLAGS	:=	-g -Wall -O2 -mword-relocations \
 			$(ARCH)
 
 CFLAGS	+=	$(INCLUDE) -D__3DS__
+# make AMPLIO=1: new games use the isometric map (Amplio2 graphics).
+ifeq ($(AMPLIO),1)
+CFLAGS	+=	-DFC3DS_AMPLIO
+endif
 
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11
 

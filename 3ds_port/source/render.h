@@ -92,6 +92,9 @@ typedef struct {
 } TopInfo;
 void render_top_info(const TopInfo *ti);
 void render_set_idle_count(int n); // shown on the Next button
+// Isometric map geometry (see iso_geom.h): screen <-> native square.
+void iso_tile_to_screen(int tx, int ty, int cam_x, int cam_y, float scale, int *px, int *py);
+bool iso_screen_to_tile(int px, int py, int cam_x, int cam_y, float scale, int *tx, int *ty);
 
 // Stereo 3D for the top screen: call before drawing each eye (eye -1 left,
 // +1 right, 0 mono; amount = pixels of separation per unit of depth).
