@@ -89,6 +89,7 @@ typedef struct {
     // Turn report (shown instead of the minimap/card while report_n > 0).
     const GameMessage *report;
     int              report_n, report_more, report_turn;
+    const char      *help;        // Civilopedia text for the selection, may be NULL
 } TopInfo;
 void render_top_info(const TopInfo *ti);
 void render_set_idle_count(int n); // shown on the Next button

@@ -594,6 +594,7 @@ int main(int argc, char* argv[])
     int end_armed = 0;    // frames left on "tap again" when units still wait for orders
     char end_armed_label[40] = "";
     int dpad_dir = -1;    // D-pad move to resolve while !busy (same path as a tap)
+    static char help_buf[2048]; // Civilopedia text for the selection (top-screen card)
     u32 frame_no = 0;     // counts main-loop iterations
     char toast_msg[48] = "Saved";
     int moved_refresh = 20; // frames until the End Turn button is re-evaluated
@@ -2202,6 +2203,22 @@ int main(int argc, char* argv[])
             // The units on the selected tile, for the top screen.
             stack_n = (sel_x >= 0) ? get_tile_units(sel_x, sel_y, stack, 16) : 0;
 
+            // Civilopedia text for whatever the stylus picked (unit, square, peek).
+            {
+                static int hk_u = -2, hk_x = -2, hk_y = -2, hk_t = -1;
+                int hu = -1, hx = -1, hy = -1;
+                if (peek_timer > 0) { hx = peek_x; hy = peek_y; }
+                else if (selected_unit_id >= 0 && unit_info.valid) hu = selected_unit_id;
+                else if (sel_x >= 0) { hx = sel_x; hy = sel_y; }
+                int tn = get_game_turn();
+                if (hu != hk_u || hx != hk_x || hy != hk_y || tn != hk_t) {
+                    if (hu >= 0) get_unit_help(hu, help_buf, sizeof(help_buf));
+                    else if (hx >= 0) get_tile_help(hx, hy, help_buf, sizeof(help_buf));
+                    else help_buf[0] = 0;
+                    hk_u = hu; hk_x = hx; hk_y = hy; hk_t = tn;
+                }
+            }
+
             // One-shot POV diagnostic: log who the client thinks "you" are
             // and whether the camera found your units, the first frame the
             // game is actually running. Lands in sdmc:/freeciv_out.log so a
@@ -2497,6 +2514,7 @@ int main(int argc, char* argv[])
                 }
                 ti.cam_x = cam_x; ti.cam_y = cam_y; ti.zoom = zoom;
                 ti.report = report; ti.report_n = report_n; ti.report_more = report_more;
+                ti.help = help_buf[0] ? help_buf : NULL;
                 if (popup_kind == POPUP_UNIT) {
                     ti.hint = "Tap an order, or tap outside the menu to close it.";
                 } else if (popup_kind == POPUP_STACK) {

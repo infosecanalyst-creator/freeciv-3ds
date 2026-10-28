@@ -462,6 +462,9 @@ int get_pedia_list(int kind, PediaEntry *out, int max);
 // Stats then the ruleset's help text, '\n' between paragraphs.
 void get_pedia_text(int kind, int id, char *out, int len);
 bool get_pedia_graphic(int kind, int id, char *tag, int tlen, char *alt, int alen);
+// Civilopedia text for what is selected on the map (top-screen card).
+void get_unit_help(int unit_id, char *out, int len);
+void get_tile_help(int nx, int ny, char *out, int len);
 
 // ---- News: Freeciv's event messages for the pov player ----
 typedef enum { MSG_OTHER, MSG_COMBAT, MSG_CITY, MSG_SCIENCE, MSG_DIPLOMACY, MSG_GOOD } MsgCategory;

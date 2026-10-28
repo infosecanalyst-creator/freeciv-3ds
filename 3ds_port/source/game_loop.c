@@ -915,6 +915,65 @@ bool get_pedia_graphic(int kind, int id, char *tag, int tlen, char *alt, int ale
     return false;
 }
 
+// Short Civilopedia text for the top-screen card: one paragraph per line.
+static void cat_help_short(char *out, int len, const struct strvec *help)
+{
+    if (!help) return;
+    strvec_iterate(help, str) {
+        // the ruleset's paragraphs can hold hard line breaks; join them up
+        int used = strlen(out);
+        for (const char *p = str; *p && used < len - 2; p++) {
+            char c = *p == '\n' ? ' ' : *p;
+            if (c == ' ' && used > 0 && out[used - 1] == ' ') continue;
+            out[used++] = c;
+        }
+        if (used < len - 1) out[used++] = '\n';
+        out[used] = 0;
+    } strvec_iterate_end;
+}
+
+void get_unit_help(int unit_id, char *out, int len)
+{
+    out[0] = 0;
+    struct unit *punit = map_is_empty() ? NULL : game_unit_by_number(unit_id);
+    if (!punit) return;
+    const struct unit_type *ut = unit_type_get(punit);
+    cat(out, len, "Cost %d shields", utype_build_shield_cost_base(ut));
+    if (ut->obsoleted_by) cat(out, len, ", replaced by %s", utype_name_translation(ut->obsoleted_by));
+    cat(out, len, ".\n");
+    cat_help_short(out, len, ut->helptext);
+}
+
+void get_tile_help(int nx, int ny, char *out, int len)
+{
+    out[0] = 0;
+    struct tile *ptile = port_native_tile(nx, ny);
+    struct player *pov = get_pov_player();
+    if (!ptile || (pov && tile_get_known(ptile, pov) == TILE_UNKNOWN)) return;
+    const struct terrain *pt = ptile->terrain;
+    if (pov && tile_get_known(ptile, pov) == TILE_KNOWN_UNSEEN) {
+        struct player_tile *plr = map_get_player_tile(ptile, pov);
+        if (plr && plr->terrain) pt = plr->terrain;
+    }
+    if (!pt) return;
+    cat(out, len, "Food %d  Shields %d  Trade %d.  Move cost %d", pt->output[O_FOOD], pt->output[O_SHIELD],
+        pt->output[O_TRADE], pt->movement_cost);
+    if (pt->defense_bonus) cat(out, len, ", defense +%d%%", pt->defense_bonus);
+    cat(out, len, ".\n");
+    if (ptile->resource && (!pov || tile_get_known(ptile, pov) != TILE_UNKNOWN)) {
+        const struct extra_type *re = ptile->resource;
+        if (re->data.resource) {
+            const int *o = re->data.resource->output;
+            cat(out, len, "%s:", extra_name_translation(re));
+            if (o[O_FOOD]) cat(out, len, " %+d food", o[O_FOOD]);
+            if (o[O_SHIELD]) cat(out, len, " %+d shields", o[O_SHIELD]);
+            if (o[O_TRADE]) cat(out, len, " %+d trade", o[O_TRADE]);
+            cat(out, len, ".\n");
+        }
+    }
+    cat_help_short(out, len, pt->helptext);
+}
+
 void get_pedia_text(int kind, int id, char *out, int len)
 {
     out[0] = 0;

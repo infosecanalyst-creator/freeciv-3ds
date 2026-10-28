@@ -59,6 +59,7 @@ When a unit is selected, its most useful orders appear in a bar just above these
 - The minimap, with a box around what the bottom screen shows.
 - Your current research, how many turns it needs, and your research goal.
 - The selected unit, city or square. For a unit it also shows the land it stands on.
+- Below that, the Civilopedia entry for what you picked: what the unit is for, or what the land and its resource yield. Long entries turn their own pages every few seconds.
 - A hint line along the bottom that says what a tap will do right now.
 
 The 3D slider lifts the dashboard cards and units off the screen.

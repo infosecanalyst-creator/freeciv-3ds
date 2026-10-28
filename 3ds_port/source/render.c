@@ -1004,6 +1004,72 @@ static void draw_turn_report(const TopInfo *ti)
 
 // ---- Top screen: information only (never touched) ----
 
+// Civilopedia text on the top-screen card: small type, wrapped, one
+// paragraph per line of the source. Too long for the space left? It pages
+// on its own every few seconds (with "1/3" in the corner).
+#define HELP_SCALE 0.38f
+#define HELP_LINE  12.0f
+static void draw_help_block(const char *text, float x, float y, float w, float bottom)
+{
+    if (!text || !text[0] || bottom - y < HELP_LINE) return;
+    static char lines[48][96];
+    static char last[2048];
+    static int nlines = 0;
+    static u64 t0 = 0;
+    if (strncmp(last, text, sizeof(last) - 1) != 0) { // new text: wrap it once
+        snprintf(last, sizeof(last), "%s", text);
+        t0 = svcGetSystemTick();
+        nlines = 0;
+        const char *p = text;
+        while (*p && nlines < 48) {
+            const char *eol = strchr(p, '\n');
+            int plen = eol ? (int)(eol - p) : (int)strlen(p);
+            char para[600];
+            if (plen > (int)sizeof(para) - 1) plen = sizeof(para) - 1;
+            memcpy(para, p, plen); para[plen] = 0;
+            const char *q = para;
+            while (*q && nlines < 48) {
+                int best = 0, i = 0;
+                char tmp[96];
+                while (q[i]) {
+                    int j = i;
+                    while (q[j] && q[j] != ' ') j++;
+                    if (j >= (int)sizeof(tmp)) break;
+                    memcpy(tmp, q, j); tmp[j] = 0;
+                    if (font_width(tmp, HELP_SCALE) > w && best > 0) break;
+                    best = j;
+                    if (!q[j]) break;
+                    i = j + 1;
+                }
+                if (best == 0) best = strlen(q) < sizeof(tmp) - 1 ? (int)strlen(q) : (int)sizeof(tmp) - 1;
+                memcpy(lines[nlines], q, best); lines[nlines][best] = 0;
+                nlines++;
+                q += best;
+                while (*q == ' ') q++;
+            }
+            p = eol ? eol + 1 : p + plen;
+        }
+    }
+    int per = (int)((bottom - y) / HELP_LINE);
+    if (per < 1) return;
+    int pages = (nlines + per - 1) / per;
+    int page = 0;
+    if (pages > 1) {
+        u64 ms = (svcGetSystemTick() - t0) / (u64)CPU_TICKS_PER_MSEC;
+        page = (int)((ms / 6000) % pages); // a new page every 6 seconds
+    }
+    u32 c = C2D_Color32(0xC8, 0xD4, 0xE2, 0xFF);
+    C2D_DrawRectSolid(x - 2, y - 2, 0.005f, w + 4, 1, C2D_Color32(0x34, 0x48, 0x64, 0xFF));
+    for (int i = 0; i < per && page * per + i < nlines; i++)
+        draw_text(x, y + i * HELP_LINE - 2, HELP_SCALE, i == 0 && page == 0 ? C2D_Color32(0xFF, 0xE0, 0x90, 0xFF) : c,
+                  lines[page * per + i]);
+    if (pages > 1) {
+        char pg[8];
+        snprintf(pg, sizeof(pg), "%d/%d", page + 1, pages);
+        draw_text(x + w - font_width(pg, 0.36f), y - 14, 0.36f, C2D_Color32(0x8C, 0xA0, 0xB4, 0xFF), pg);
+    }
+}
+
 void render_top_info(const TopInfo *ti)
 {
     C2D_TextBufClear(g_textBuf);
@@ -1105,38 +1171,38 @@ void render_top_info(const TopInfo *ti)
             snprintf(line, sizeof(line), "Home: %s", u->home);
             draw_text(CX + 72, 80, 0.42f, label, line);
         }
-        float y = 102;
-        snprintf(line, sizeof(line), "Attack %d   Defense %d   FP %d", u->attack, u->defense, u->firepower);
-        draw_text(CX + 2, y, 0.47f, white, line);
-        y += 18;
-        // HP bar
-        draw_text(CX + 2, y, 0.47f, white, "HP");
+        // Compact stats, so the Civilopedia text fits below.
+        snprintf(line, sizeof(line), "A %d  D %d  FP %d  Moves %s", u->attack, u->defense, u->firepower,
+                 u->moves_left > 0 ? u->moves : "0");
+        draw_text(CX + 72, u->home[0] ? 92 : 80, 0.42f, u->moves_left > 0 ? white : label, line);
+        float y = 104;
         float hpf = u->hp_max > 0 ? (float)u->hp / u->hp_max : 0;
-        C2D_DrawRectSolid(CX + 30, y + 5, 0.01f, 110, 7, C2D_Color32(0x40, 0x18, 0x18, 0xFF));
-        C2D_DrawRectSolid(CX + 30, y + 5, 0.02f, 110 * hpf, 7,
+        draw_text(CX + 2, y - 2, 0.40f, label, "HP");
+        C2D_DrawRectSolid(CX + 24, y + 3, 0.01f, 120, 6, C2D_Color32(0x40, 0x18, 0x18, 0xFF));
+        C2D_DrawRectSolid(CX + 24, y + 3, 0.02f, 120 * hpf, 6,
                           hpf > 0.5f ? C2D_Color32(0x50, 0xD0, 0x50, 0xFF) : hpf > 0.25f ? C2D_Color32(0xE0, 0xC0, 0x40, 0xFF)
                                                                        : C2D_Color32(0xE0, 0x40, 0x40, 0xFF));
         snprintf(line, sizeof(line), "%d/%d", u->hp, u->hp_max);
-        draw_text(CX + 146, y, 0.45f, soft, line);
-        y += 18;
-        snprintf(line, sizeof(line), "Moves left: %s", u->moves_left > 0 ? u->moves : "none");
-        draw_text(CX + 2, y, 0.47f, u->moves_left > 0 ? white : label, line);
-        y += 18;
+        draw_text(CX + 150, y - 2, 0.40f, soft, line);
+        y += 14;
         if (ti->tile && ti->tile_x == u->x && ti->tile_y == u->y && ti->tile->visibility > 0) {
             const TileInfo *t = ti->tile;
-            snprintf(line, sizeof(line), "On: %s%s%s%s%s",
+            snprintf(line, sizeof(line), "On %s%s%s%s%s%s",
                      t->terrain <= TERRAIN_ARCTIC ? k_terrain_names[t->terrain] : "?",
                      t->has_river ? ", River" : "",
-                     t->has_rail ? ", Railroad" : t->has_road ? ", Road" : "",
-                     t->has_farmland ? ", Farmland" : t->has_irrigation ? ", Irrigation" : "",
-                     t->has_mine ? ", Mine" : "");
-            draw_text(CX + 2, y, 0.42f, soft, line);
-            y += 16;
+                     t->has_rail ? ", Rail" : t->has_road ? ", Road" : "",
+                     t->has_farmland ? ", Farmland" : t->has_irrigation ? ", Irrigated" : "",
+                     t->has_mine ? ", Mine" : "",
+                     ti->stack_n > 1 ? "" : "");
+            draw_text(CX + 2, y, 0.40f, soft, line);
+            y += 13;
         }
         if (ti->stack_n > 1) {
-            snprintf(line, sizeof(line), "Stack of %d units here", ti->stack_n);
-            draw_text(CX + 2, y, 0.45f, label, line);
+            snprintf(line, sizeof(line), "%d units on this square", ti->stack_n);
+            draw_text(CX + 2, y, 0.40f, label, line);
+            y += 13;
         }
+        draw_help_block(ti->help, CX + 2, y + 2, CW - 4, 218);
     } else if (ti->tile && ti->tile_x >= 0) {
         const TileInfo *t = ti->tile;
         draw_text(CX + 2, 28, 0.45f, label, "This square");
@@ -1178,7 +1244,9 @@ void render_top_info(const TopInfo *ti)
             if (ti->stack_n > 5) {
                 snprintf(line, sizeof(line), "+%d more", ti->stack_n - 5);
                 draw_text(CX + 2, y, 0.45f, label, line);
+                y += 16;
             }
+            draw_help_block(ti->help, CX + 2, y + 2, CW - 4, 218);
         }
     } else {
         draw_text(CX + 2, 30, 0.5f, soft, "Tap the map below.");
