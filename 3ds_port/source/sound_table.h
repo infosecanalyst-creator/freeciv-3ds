@@ -1,6 +1,7 @@
 // Generated from Freeciv's data/stdsounds.soundspec (GPL) - tag -> romfs:/audio/sfx/<file>.wav
 #pragma once
 static const struct { const char *tag, *file; } k_sound_table[] = {
+    { "ui_click", "click" },          // made for this port (tools: a short synthesized tick)
     { "f_generic", "woodbrk" },
     { "f_aegis_cruiser", "LrgCan" },
     { "f_alpine_troops", "MgBar2" },

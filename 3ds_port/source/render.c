@@ -592,21 +592,80 @@ static float text_width(const char *str, float scale)
 static int s_idle_count = 0; // idle units, shown on the Next button
 void render_set_idle_count(int n) { s_idle_count = n; }
 
+// ---- Press feedback ----
+// Everything tappable on the touch screen (buttons, list rows, menu items)
+// registers its rectangle while the bottom screen is drawn. A touch inside
+// one draws it pressed (darker, sunk by a pixel), and a touch that lands on
+// something tappable from the frame the player was looking at clicks.
+#define PRESS_MAX 160
+typedef struct { short x, y, w, h; } PressRect;
+static PressRect s_press_cur[PRESS_MAX], s_press_prev[PRESS_MAX];
+static int s_press_ncur, s_press_nprev;
+static bool s_press_on;           // registering (bottom screen pass)
+static bool s_touch_held;
+static int s_touch_x, s_touch_y, s_press_linger; // frames a quick tap stays pressed-looking
+static int s_last_x = -1, s_last_y = -1;
+
+bool render_press_frame(bool held, bool began, int x, int y)
+{
+    memcpy(s_press_prev, s_press_cur, sizeof(PressRect) * s_press_ncur);
+    s_press_nprev = s_press_ncur;
+    s_press_ncur = 0;
+    s_press_on = true;
+    s_touch_held = held;
+    if (held) { s_touch_x = x; s_touch_y = y; }
+    if (began) { s_last_x = x; s_last_y = y; s_press_linger = 6; }
+    else if (s_press_linger > 0 && !held) s_press_linger--;
+    if (!began) return false;
+    for (int i = 0; i < s_press_nprev; i++) {
+        const PressRect *r = &s_press_prev[i];
+        if (x >= r->x && x < r->x + r->w && y >= r->y && y < r->y + r->h) return true;
+    }
+    return false;
+}
+
+void render_press_end(void) { s_press_on = false; }
+
+// Registers a tappable rectangle; true if it should look pressed now.
+static bool pressed_at(float x, float y, float w, float h)
+{
+    if (!s_press_on) return false;
+    if (s_press_ncur < PRESS_MAX) s_press_cur[s_press_ncur++] = (PressRect){ (short)x, (short)y, (short)w, (short)h };
+    int px = s_touch_held ? s_touch_x : s_last_x, py = s_touch_held ? s_touch_y : s_last_y;
+    if (!s_touch_held && s_press_linger <= 0) return false;
+    return px >= x && px < x + w && py >= y && py < y + h;
+}
+
+static u32 darken(u32 c, int pct)
+{
+    int r = (c & 0xFF) * pct / 100, g = ((c >> 8) & 0xFF) * pct / 100, b = ((c >> 16) & 0xFF) * pct / 100;
+    return (c & 0xFF000000) | (b << 16) | (g << 8) | r;
+}
+
 static void draw_button(float x, float y, float w, float h, float z, const char *label,
                         float scale, bool enabled, bool highlight)
 {
+    bool down = enabled && pressed_at(x, y, w, h);
     u32 bg = highlight ? C2D_Color32(0x3C, 0x78, 0x40, 0xF0)
            : enabled   ? C2D_Color32(0x2C, 0x50, 0x80, 0xF0) : C2D_Color32(0x24, 0x2C, 0x38, 0xF0);
     u32 border = highlight ? C2D_Color32(0x8C, 0xE0, 0x90, 0xFF) : C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF);
-    C2D_DrawRectSolid(x, y, z, w, h, bg);
-    C2D_DrawRectSolid(x, y, z + 0.001f, w, 2, border);
+    if (down) {
+        // pressed in: darker face, a shadow along the top, the light edge moves to the bottom
+        C2D_DrawRectSolid(x, y, z, w, h, darken(bg, 62));
+        C2D_DrawRectSolid(x, y, z + 0.001f, w, 2, C2D_Color32(0x06, 0x0A, 0x12, 0xFF));
+        C2D_DrawRectSolid(x, y + h - 1, z + 0.001f, w, 1, darken(border, 80));
+    } else {
+        C2D_DrawRectSolid(x, y, z, w, h, bg);
+        C2D_DrawRectSolid(x, y, z + 0.001f, w, 2, border);
+    }
     float tw = text_width(label, scale);
     while (tw > w - 6 && scale > 0.3f) { // long labels (or Large text) shrink to fit
         scale -= 0.02f;
         tw = text_width(label, scale);
     }
-    draw_text_z(x + (w - tw) / 2, y + (h - 30 * scale) / 2 + 1, z + 0.002f, scale,
-                enabled ? 0xFFFFFFFF : C2D_Color32(0x80, 0x88, 0x94, 0xFF), label);
+    float dy = down ? 1.5f : 0;
+    draw_text_z(x + (w - tw) / 2, y + (h - 30 * scale) / 2 + 1 + dy, z + 0.002f, scale,
+                enabled ? (down ? C2D_Color32(0xD8, 0xE4, 0xF0, 0xFF) : 0xFFFFFFFF) : C2D_Color32(0x80, 0x88, 0x94, 0xFF), label);
 }
 
 static void pretty_tag(const char *tag, char *out, int n)
@@ -852,8 +911,9 @@ hud:
     bool decision = end_label && strcmp(end_label, "End Turn") != 0;
     if (decision) {
         // amber, so a pending decision reads differently from a plain End Turn
-        C2D_DrawRectSolid(HUD_END_X, by, Z, HUD_END_W, bh, C2D_Color32(0x8A, 0x5A, 0x10, 0xF0));
-        C2D_DrawRectSolid(HUD_END_X, by, Z + 0.001f, HUD_END_W, 2, C2D_Color32(0xFF, 0xC8, 0x50, 0xFF));
+        bool dn = pressed_at(HUD_END_X, by, HUD_END_W, bh);
+        C2D_DrawRectSolid(HUD_END_X, by, Z, HUD_END_W, bh, dn ? C2D_Color32(0x5A, 0x3A, 0x08, 0xF0) : C2D_Color32(0x8A, 0x5A, 0x10, 0xF0));
+        C2D_DrawRectSolid(HUD_END_X, by, Z + 0.001f, HUD_END_W, 2, dn ? C2D_Color32(0x06, 0x0A, 0x12, 0xFF) : C2D_Color32(0xFF, 0xC8, 0x50, 0xFF));
         float s2 = 0.5f, tw = text_width(end_label, s2);
         while (tw > HUD_END_W - 6 && s2 > 0.32f) { s2 -= 0.02f; tw = text_width(end_label, s2); }
         draw_text_z(HUD_END_X + (HUD_END_W - tw) / 2, by + (bh - 30 * s2) / 2 + 1, Z + 0.002f, s2, 0xFFFFFFFF, end_label);
@@ -2592,6 +2652,11 @@ static void list_row(int i, float x, float w, bool highlight, bool enabled)
     u32 c = highlight ? C2D_Color32(0x3A, 0x4A, 0x20, 0xFF)
           : !enabled  ? C2D_Color32(0x16, 0x1A, 0x22, 0xFF)
           : (i & 1)   ? C2D_Color32(0x1A, 0x24, 0x34, 0xFF) : C2D_Color32(0x20, 0x2C, 0x3E, 0xFF);
+    if (enabled && pressed_at(x, y, w, PANEL_ROW_H)) {
+        C2D_DrawRectSolid(x, y + 1, 0.0f, w, PANEL_ROW_H - 2, C2D_Color32(0x3C, 0x5C, 0x88, 0xFF));
+        C2D_DrawRectSolid(x, y + 1, 0.0005f, 3, PANEL_ROW_H - 2, C2D_Color32(0x8C, 0xC8, 0xFF, 0xFF));
+        return;
+    }
     C2D_DrawRectSolid(x, y + 1, 0.0f, w, PANEL_ROW_H - 2, c);
 }
 
@@ -3238,6 +3303,7 @@ static void title_row(float y, const char *label, const char *sub, bool sel)
     u32 bg = sel ? C2D_Color32(0x5A, 0x44, 0x12, 0xF0) : C2D_Color32(0x16, 0x22, 0x34, 0xE8);
     u32 edge = sel ? C2D_Color32(0xFF, 0xD8, 0x60, 0xFF) : C2D_Color32(0x4C, 0x6C, 0x90, 0xFF);
     float h = TITLE_ROW_H - 5;
+    if (pressed_at(TITLE_ROW_X, y, TITLE_ROW_W, h)) { bg = darken(bg, 60); y += 1; }
     C2D_DrawRectSolid(TITLE_ROW_X, y, 0.10f, TITLE_ROW_W, h, bg);
     C2D_DrawRectSolid(TITLE_ROW_X, y, 0.11f, TITLE_ROW_W, 2, edge);
     C2D_DrawRectSolid(TITLE_ROW_X, y + h - 1, 0.11f, TITLE_ROW_W, 1, edge);

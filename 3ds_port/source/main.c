@@ -949,6 +949,12 @@ int main(int argc, char* argv[])
             C2D_TargetClear(bottom, C2D_Color32(0x10, 0x10, 0x10, 0xFF));
             C2D_SceneBegin(bottom);
             C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_BOTTOM, true);
+            {   // pressed-button look, and a click when a tap lands on one
+                touchPosition tp; hidTouchRead(&tp);
+                u32 hd = hidKeysHeld(), dn = hidKeysDown();
+                if (render_press_frame((hd & KEY_TOUCH) != 0, (dn & KEY_TOUCH) != 0, tp.px, tp.py))
+                    audio_play("ui_click");
+            }
             if (app_state == APP_START_MENU || app_state == APP_CONTROLS) {
                 render_title_bottom(app_state == APP_START_MENU ? title_sel : -1, continue_file[0] != 0,
                                     continue_label, title_frame);
@@ -970,6 +976,7 @@ int main(int argc, char* argv[])
                 render_load_picker(save_files, save_file_count, load_scroll);
             }
 
+            render_press_end();
             C3D_FrameEnd(0);
             continue;
         }
@@ -2413,6 +2420,12 @@ int main(int argc, char* argv[])
             C2D_TargetClear(bottom, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
             C2D_SceneBegin(bottom);
             C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_BOTTOM, true);
+            {   // pressed-button look, and a click when a tap lands on one
+                touchPosition tp; hidTouchRead(&tp);
+                u32 hd = hidKeysHeld(), dn = hidKeysDown();
+                if (render_press_frame((hd & KEY_TOUCH) != 0, (dn & KEY_TOUCH) != 0, tp.px, tp.py))
+                    audio_play("ui_click");
+            }
             if (engine_failed)
                 render_title_loading_bottom(s_started_from_save && !fc3ds_server_is_ready()
                                             ? "That save couldn't be loaded." : "The game stopped unexpectedly.", -1);
@@ -2550,6 +2563,12 @@ int main(int argc, char* argv[])
             C2D_TargetClear(bottom, C2D_Color32(0x10, 0x10, 0x10, 0xFF)); // Dark gray
             C2D_SceneBegin(bottom);
             C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_BOTTOM, true);
+            {   // pressed-button look, and a click when a tap lands on one
+                touchPosition tp; hidTouchRead(&tp);
+                u32 hd = hidKeysHeld(), dn = hidKeysDown();
+                if (render_press_frame((hd & KEY_TOUCH) != 0, (dn & KEY_TOUCH) != 0, tp.px, tp.py))
+                    audio_play("ui_click");
+            }
             switch (game_over && !game_over_shown ? -1 : (int)ui_mode) {
             case -1:
                 render_game_over_bottom();
@@ -2624,7 +2643,8 @@ int main(int argc, char* argv[])
             if (show_busy_indicator) render_busy_indicator(SCREEN_WIDTH_BOT);
         }
 
-        C3D_FrameEnd(0);
+        render_press_end();
+            C3D_FrameEnd(0);
         if (end_turn_pending) {
             end_turn_pending = false;
             fc3ds_server_request_end_turn();

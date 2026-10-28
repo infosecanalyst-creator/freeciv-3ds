@@ -92,6 +92,11 @@ typedef struct {
 } TopInfo;
 void render_top_info(const TopInfo *ti);
 void render_set_idle_count(int n); // shown on the Next button
+// Press feedback: call right after starting the bottom screen each frame
+// (true = the touch began on something tappable: play the click), and
+// render_press_end() once it is drawn.
+bool render_press_frame(bool held, bool began, int x, int y);
+void render_press_end(void);
 // Isometric map geometry (see iso_geom.h): screen <-> native square.
 void iso_tile_to_screen(int tx, int ty, int cam_x, int cam_y, float scale, int *px, int *py);
 bool iso_screen_to_tile(int px, int py, int cam_x, int cam_y, float scale, int *tx, int *ty);
