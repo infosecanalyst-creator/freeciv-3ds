@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (C) 2026 xPsycho999 (original Freeciv 3DS port)
+// Copyright (C) 2026 the freeciv-3ds authors
 #include <3ds.h>
 #include <citro2d.h>
 #include <malloc.h>
@@ -334,7 +337,7 @@ static void open_game_menu(PopupMenu *m)
     popup_add(m, MENU_GOVERNMENT, "Government", true);
     popup_add(m, MENU_DIPLOMACY,  "Diplomacy", true);
     popup_add(m, MENU_MESSAGES,   "Messages", true);
-    popup_add(m, MENU_PEDIA,      "Civilopedia", true);
+    popup_add(m, MENU_PEDIA,      "Encyclopedia", true);
     if (s_has_spaceship) popup_add(m, MENU_SPACESHIP, "Spaceship", true);
     popup_add(m, MENU_SAVE,       "Save Game", true);
     popup_add(m, MENU_OPTIONS,    "Options", true);
@@ -594,7 +597,7 @@ int main(int argc, char* argv[])
     int end_armed = 0;    // frames left on "tap again" when units still wait for orders
     char end_armed_label[40] = "";
     int dpad_dir = -1;    // D-pad move to resolve while !busy (same path as a tap)
-    static char help_buf[2048]; // Civilopedia text for the selection (top-screen card)
+    static char help_buf[2048]; // Encyclopedia text for the selection (top-screen card)
     u32 frame_no = 0;     // counts main-loop iterations
     char toast_msg[48] = "Saved";
     int moved_refresh = 20; // frames until the End Turn button is re-evaluated
@@ -624,7 +627,7 @@ int main(int argc, char* argv[])
     memset(&attack_odds, 0, sizeof(attack_odds));
     RoutePreview route;
     memset(&route, 0, sizeof(route));
-    // Civilopedia.
+    // Encyclopedia.
     int pedia_kind = PEDIA_UNITS, pedia_sel = -1, pedia_text_scroll = 0;
     bool pedia_dirty = true;
     static PediaEntry pedia_list[160];
@@ -2203,7 +2206,7 @@ int main(int argc, char* argv[])
             // The units on the selected tile, for the top screen.
             stack_n = (sel_x >= 0) ? get_tile_units(sel_x, sel_y, stack, 16) : 0;
 
-            // Civilopedia text for whatever the stylus picked (unit, square, peek).
+            // Encyclopedia text for whatever the stylus picked (unit, square, peek).
             {
                 static int hk_u = -2, hk_x = -2, hk_y = -2, hk_t = -1;
                 int hu = -1, hx = -1, hy = -1;
@@ -2489,7 +2492,7 @@ int main(int argc, char* argv[])
                 render_manual_top();
                 break;
             case UI_PEDIA:
-                render_pedia_top(pedia_sel >= 0 ? pedia_list[pedia_sel].name : "Civilopedia", pedia_text, pedia_text_scroll,
+                render_pedia_top(pedia_sel >= 0 ? pedia_list[pedia_sel].name : "Encyclopedia", pedia_text, pedia_text_scroll,
                                  pedia_sel >= 0 ? pedia_icon_tag : NULL, pedia_icon_alt, pedia_icon_unit);
                 break;
             case UI_MESSAGES:

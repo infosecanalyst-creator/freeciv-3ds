@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (C) 2026 xPsycho999 (original Freeciv 3DS port)
+// Copyright (C) 2026 the freeciv-3ds authors
 #include "game_loop.h"
 #include "fc3ds_server.h"
 #include <stdio.h>
@@ -802,7 +805,7 @@ void freeciv3ds_event_hook(const struct packet_chat_msg *packet, int pidx)
 
 int get_message_total(void) { return s_msg_total; }
 
-// ---------------------------------------------------------------- civilopedia
+// ---------------------------------------------------------------- encyclopedia
 static void cat(char *out, int len, const char *fmt, ...)
 {
     int used = strlen(out);
@@ -915,7 +918,7 @@ bool get_pedia_graphic(int kind, int id, char *tag, int tlen, char *alt, int ale
     return false;
 }
 
-// Short Civilopedia text for the top-screen card: one paragraph per line.
+// Short Encyclopedia text for the top-screen card: one paragraph per line.
 static void cat_help_short(char *out, int len, const struct strvec *help)
 {
     if (!help) return;

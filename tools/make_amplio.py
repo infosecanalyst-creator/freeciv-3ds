@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 the freeciv-3ds authors
 """Compile Freeciv's Amplio2 tileset into 3DS atlases + a C table.
 
 Reads the tileset straight from a Freeciv source tree (data/amplio2*), does

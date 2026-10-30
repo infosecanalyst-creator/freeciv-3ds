@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (C) 2026 the freeciv-3ds authors
 #include "audio.h"
 #include "sound_table.h"
 #include <3ds.h>

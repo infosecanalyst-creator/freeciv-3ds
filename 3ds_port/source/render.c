@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (C) 2026 xPsycho999 (original Freeciv 3DS port)
+// Copyright (C) 2026 the freeciv-3ds authors
 #include "render.h"
 #include "game_loop.h"
 #include "fc3ds_server.h"
@@ -1004,7 +1007,7 @@ static void draw_turn_report(const TopInfo *ti)
 
 // ---- Top screen: information only (never touched) ----
 
-// Civilopedia text on the top-screen card: small type, wrapped, one
+// Encyclopedia text on the top-screen card: small type, wrapped, one
 // paragraph per line of the source. Too long for the space left? It pages
 // on its own every few seconds (with "1/3" in the corner).
 #define HELP_SCALE 0.38f
@@ -1171,7 +1174,7 @@ void render_top_info(const TopInfo *ti)
             snprintf(line, sizeof(line), "Home: %s", u->home);
             draw_text(CX + 72, 80, 0.42f, label, line);
         }
-        // Compact stats, so the Civilopedia text fits below.
+        // Compact stats, so the Encyclopedia text fits below.
         snprintf(line, sizeof(line), "A %d  D %d  FP %d  Moves %s", u->attack, u->defense, u->firepower,
                  u->moves_left > 0 ? u->moves : "0");
         draw_text(CX + 72, u->home[0] ? 92 : 80, 0.42f, u->moves_left > 0 ? white : label, line);
@@ -1516,7 +1519,7 @@ static void draw_tile_entities(const TileInfo *info, float draw_x, float draw_y)
     }
 }
 
-// Civ Rev style name plate under each city: [size] Name, owner-coloured edge.
+// Name plate under each city: [size] Name, owner-coloured edge.
 static void draw_city_banners(void)
 {
     for (int i = 0; i < s_nbanners; i++) {
@@ -1533,7 +1536,7 @@ static void draw_city_banners(void)
         font_draw(sz, x + 3, y - 1.5f, 0.803f, 0.42f, contrast_text(oc));
         font_draw(b->name, x + sw + 10, y - 1.5f, 0.803f, 0.42f, 0xFFFFFFFF);
         // Your cities: what's being built and in how many turns, at the
-        // closer zoom levels (Civ Rev / Civ VI style).
+        // closer zoom levels.
         if (b->prod[0] && TILE_PX * s_ms >= 22) {
             float pw = font_width(b->prod, 0.38f) + 6, ph = 12;
             float px = floorf(b->x - pw / 2), py = y + h + 1;
@@ -3568,7 +3571,7 @@ void render_messages_top(const GameMessage *m)
 void render_pedia_panel(int kind, const PediaEntry *list, int n, int scroll, int selected)
 {
     C2D_TextBufClear(g_textBuf);
-    panel_bg("Civilopedia", NULL);
+    panel_bg("Encyclopedia", NULL);
     static const char *tabs[PEDIA_KINDS] = { "Units", "Builds", "Wonders", "Techs", "Govts" };
     for (int i = 0; i < PEDIA_KINDS; i++)
         draw_button(PEDIA_TAB_X(i), PEDIA_TAB_Y, PEDIA_TAB_W, PEDIA_TAB_H, 0.03f, tabs[i], 0.42f, true, i == kind);
@@ -3604,7 +3607,7 @@ void render_pedia_top(const char *title, const char *text, int scroll_lines,
     C2D_DrawRectSolid(0, 0, 0.0f, 400, 32, C2D_Color32(0x14, 0x1E, 0x2E, 0xFF));
     C2D_DrawRectSolid(0, 0, 0.01f, 6, 32, C2D_Color32(0x70, 0xB8, 0xFF, 0xFF));
     C2D_DrawRectSolid(0, 32, 0.0f, 400, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
-    draw_text(14, 3, 0.85f, 0xFFFFFFFF, title && title[0] ? title : "Civilopedia");
+    draw_text(14, 3, 0.85f, 0xFFFFFFFF, title && title[0] ? title : "Encyclopedia");
     layer(3.0f);
     C2D_DrawRectSolid(8, 40, 0.0f, 384, 176, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
 

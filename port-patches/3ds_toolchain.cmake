@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 xPsycho999 (original Freeciv 3DS port)
+# Copyright (C) 2026 the freeciv-3ds authors
 set(CMAKE_SYSTEM_NAME Generic)
 
 # Set devkitARM paths

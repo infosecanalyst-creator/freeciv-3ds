@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (C) 2026 xPsycho999 (original Freeciv 3DS port)
+// Copyright (C) 2026 the freeciv-3ds authors
 #ifndef RENDER_H
 #define RENDER_H
 
@@ -89,7 +92,7 @@ typedef struct {
     // Turn report (shown instead of the minimap/card while report_n > 0).
     const GameMessage *report;
     int              report_n, report_more, report_turn;
-    const char      *help;        // Civilopedia text for the selection, may be NULL
+    const char      *help;        // Encyclopedia text for the selection, may be NULL
 } TopInfo;
 void render_top_info(const TopInfo *ti);
 void render_set_idle_count(int n); // shown on the Next button
@@ -405,7 +408,7 @@ void render_load_picker(const SaveFile *files, int n, int scroll);
 void render_messages_panel(const GameMessage *msgs, int n, int scroll, int highlight);
 void render_messages_top(const GameMessage *m);
 
-// Civilopedia: category tabs + entry list (bottom), entry text (top).
+// Encyclopedia: category tabs + entry list (bottom), entry text (top).
 #define PEDIA_TAB_Y   34
 #define PEDIA_TAB_H   24
 #define PEDIA_TAB_W   61

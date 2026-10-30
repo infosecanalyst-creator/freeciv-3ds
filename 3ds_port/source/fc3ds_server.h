@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (C) 2026 xPsycho999 (original Freeciv 3DS port)
+// Copyright (C) 2026 the freeciv-3ds authors
 #ifndef FC3DS_SERVER_H
 #define FC3DS_SERVER_H
 

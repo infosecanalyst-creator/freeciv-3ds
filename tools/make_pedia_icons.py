@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Cut Freeciv's Civilopedia icons into a sprite sheet for the 3DS client.
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 the freeciv-3ds authors
+"""Cut Freeciv's Encyclopedia icons into a sprite sheet for the 3DS client.
 
     python3 tools/make_pedia_icons.py <freeciv-source-dir>
 

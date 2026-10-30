@@ -1,5 +1,5 @@
 # Welcome
-Freeciv 3DS is the open-source Civilization game, made for the New 3DS. You lead a people from one settler in 4000 BC to the space age, against rival civilizations run by the computer.
+Freeciv 3DS is the open-source empire-building strategy game, made for the New 3DS. You lead a people from one settler in 4000 BC to the space age, against rival civilizations run by the computer.
 
 You play on the touch screen with the stylus, the way the PC game is played with a mouse. The top screen is your dashboard: it shows what you have selected, your research and the state of your empire.
 
@@ -46,7 +46,7 @@ Tap - and + to change a setting, then Start (or press START). Your choices are r
 - In any list (cities, research, messages), drag up and down to scroll, or hold the D-pad. Left and right on the D-pad jump a page.
 
 The buttons along the bottom:
-| Menu | Research, taxes, government, diplomacy, messages, Civilopedia, saving and options.
+| Menu | Research, taxes, government, diplomacy, messages, Encyclopedia, saving and options.
 | Next | Jump to the nearest unit that needs orders. The number is how many are left.
 | Map | The whole world. Tap anywhere on it to jump there.
 | - and + | Zoom out and in.
@@ -59,7 +59,7 @@ When a unit is selected, its most useful orders appear in a bar just above these
 - The minimap, with a box around what the bottom screen shows.
 - Your current research, how many turns it needs, and your research goal.
 - The selected unit, city or square. For a unit it also shows the land it stands on.
-- Below that, the Civilopedia entry for what you picked: what the unit is for, or what the land and its resource yield. Long entries turn their own pages every few seconds.
+- Below that, the Encyclopedia entry for what you picked: what the unit is for, or what the land and its resource yield. Long entries turn their own pages every few seconds.
 - A hint line along the bottom that says what a tap will do right now.
 
 The 3D slider lifts the dashboard cards and units off the screen.
@@ -154,8 +154,8 @@ At the start of each turn the top screen lists what happened: battles, diplomacy
 ## Diplomacy
 Menu then Diplomacy lists the civilizations you have met. Pick one, add terms (Peace, Ceasefire, Embassy, gold), then Accept. A civilization marked No contact will only talk once you have an embassy with it or your units meet again. The other side's answer shows beside yours.
 
-## Civilopedia
-Menu then Civilopedia: units, buildings, wonders, technologies and governments, with pictures. L and R scroll the text.
+## Encyclopedia
+Menu then Encyclopedia: units, buildings, wonders, technologies and governments, with pictures. L and R scroll the text.
 
 ## Spaceship
 Menu then Spaceship appears once you start building one.

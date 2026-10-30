@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 the freeciv-3ds authors
 """Bakes the UI font into a glyph atlas for the 3DS client.
 
 Renders Inter (SIL OFL 1.1) with FreeType hinting at exact pixel sizes, so

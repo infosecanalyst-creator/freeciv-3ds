@@ -1,3 +1,7 @@
+Modified for freeciv-3ds (Nintendo 3DS port), 2026-10.
+Changes to Freeciv (GPL-2.0-or-later) applied by scripts/build_freeciv_core.sh, which also adds
+this notice to the top of every file the patch changes. Text above the first "diff" is ignored by git apply.
+
 diff --git a/common/game.h b/common/game.h
 index 43c1206..a69c78a 100644
 --- a/common/game.h

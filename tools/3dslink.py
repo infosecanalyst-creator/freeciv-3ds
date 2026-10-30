@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 the freeciv-3ds authors
 """Minimal 3dslink sender: pushes a .3dsx to a 3DS over Wi-Fi and runs it.
 
 On the 3DS, open the Homebrew Launcher and press Y ("NetLoader"), then:

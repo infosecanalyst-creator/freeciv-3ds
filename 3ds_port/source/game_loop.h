@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (C) 2026 xPsycho999 (original Freeciv 3DS port)
+// Copyright (C) 2026 the freeciv-3ds authors
 #ifndef GAME_LOOP_H
 #define GAME_LOOP_H
 
@@ -455,14 +458,14 @@ typedef struct {
 void get_spaceship_info(SpaceshipInfo *out);
 void freeciv_request_spaceship_launch(void);
 
-// ---- Civilopedia (ruleset help) ----
+// ---- Encyclopedia (ruleset help) ----
 typedef enum { PEDIA_UNITS, PEDIA_BUILDINGS, PEDIA_WONDERS, PEDIA_TECHS, PEDIA_GOVS, PEDIA_KINDS } PediaKind;
 typedef struct { int id; char name[48]; } PediaEntry;
 int get_pedia_list(int kind, PediaEntry *out, int max);
 // Stats then the ruleset's help text, '\n' between paragraphs.
 void get_pedia_text(int kind, int id, char *out, int len);
 bool get_pedia_graphic(int kind, int id, char *tag, int tlen, char *alt, int alen);
-// Civilopedia text for what is selected on the map (top-screen card).
+// Encyclopedia text for what is selected on the map (top-screen card).
 void get_unit_help(int unit_id, char *out, int len);
 void get_tile_help(int nx, int ny, char *out, int len);
 

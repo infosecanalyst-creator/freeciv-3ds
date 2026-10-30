@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (C) 2026 the freeciv-3ds authors
 // World geometry of the isometric (Amplio2) map, in native coordinates.
 // Freeciv's ISO topology staggers native rows: row y is shifted half a tile
 // right when y is odd, and rows are half a tile apart. One world pixel is one

@@ -1,7 +1,9 @@
 # Freeciv 3DS
 
-[Freeciv](https://www.freeciv.org/), the open-source Civilization-style strategy game, as a Nintendo 3DS
+[Freeciv](https://www.freeciv.org/), the open-source empire-building strategy game, as a Nintendo 3DS
 homebrew app with a handheld interface built for the two screens and the stylus.
+
+> Not affiliated with or endorsed by the Freeciv project, Firaxis, Take-Two or Nintendo. Civilization is a trademark of Take-Two Interactive.
 
 The real Freeciv engine (server, rulesets, map generator and AI) is cross-compiled for the 3DS and runs
 in-process. A native `citro2d` client draws the game and talks to the engine directly, so there is no
@@ -13,7 +15,7 @@ supports the Old 3DS.
 
 ## Features
 
-- **DS-style two-screen layout**, modelled on *Civilization Revolution* and *Anno* for the DS:
+- **Two-screen layout**:
   - **Bottom screen (touch): the map.** Drag to scroll and zoom in five steps. Tap your unit to
     command it and open its orders. Tap a neighbouring square to move, or tap a farther square twice
     to send the unit along a route. Tapping a stack or a city with units gives a picker.
@@ -34,7 +36,7 @@ supports the Old 3DS.
 - **Caravans, diplomats and more**: next to a foreign city a unit is offered everything it can do there
   (embassy, investigate, steal tech, sabotage, incite revolt, trade route, sell goods) besides Attack. In
   a city: Help Wonder, Disband for shields, Upgrade and Make Home City. Also Pillage.
-- **Civilopedia** (Menu): every unit, building, wonder, technology and government, with its picture,
+- **Encyclopedia** (Menu): every unit, building, wonder, technology and government, with its picture,
   stats, what it leads to, and the ruleset's help text.
 - **Map labels**: city name plates with size, owner shields, health bars for wounded units,
   activity badges (Fortified, Sentry, Working, Exploring, Goto), and dimmed units that are done.
@@ -109,7 +111,7 @@ cd 3ds_port && make             # build the client -> 3ds_port.3dsx
 ```
 
 `tools/make_font.py` (needs Pillow) regenerates the font atlas, `tools/make_pedia_icons.py` the
-Civilopedia icons, and `tools/make_audio.sh` (needs
+encyclopedia icons, and `tools/make_audio.sh` (needs
 ffmpeg) regenerates the audio. Both outputs are committed, so a normal build needs neither tool.
 
 ## How it works
@@ -131,12 +133,21 @@ ffmpeg) regenerates the audio. Both outputs are committed, so a normal build nee
 
 ## Credits and licences
 
-- **Freeciv** engine, rulesets, `trident` tileset, Civilopedia icons and sound set: the Freeciv project, GPL-2.0-or-later.
+- **Freeciv** engine, rulesets, `trident` and `Amplio2` tilesets, encyclopedia icons and the `stdsounds`
+  sound set (artists listed in Freeciv's `data/stdsounds.soundspec`): the Freeciv project, GPL-2.0-or-later.
+  The HOME-menu banner jingle is Freeciv's `stdsounds/fanfarehappy.ogg`, shortened.
 - **Original 3DS port**: [xPsycho999](https://github.com/xPsycho999/freeciv3ds), GPL-2.0-or-later.
-- **Menu music** "Dawning Fanfare": Cullam Bruce-Lockhart (Freeciv `stdmusic`).
-- **Game music** "Exploration", "Harvest Season", "Market Day" and "The Bard's Tale": RandomMind,
-  [opengameart.org](https://opengameart.org/users/randommind), CC0.
+- **Menu music** "Dawning Fanfare" by Cullam Bruce-Lockhart: shipped with Freeciv in `data/stdmusic`
+  (Freeciv patch #4753), distributed under Freeciv's licence, GPL-2.0-or-later.
+- **Game music** by RandomMind, released under CC0 1.0 (public domain dedication) on OpenGameArt:
+  [Exploration](https://opengameart.org/content/medieval-exploration),
+  [Harvest Season](https://opengameart.org/content/medieval-harvest-season),
+  [Market Day](https://opengameart.org/content/medieval-market-day) and
+  [The Bard's Tale](https://opengameart.org/content/medieval-the-bards-tale).
+- **UI click**: synthesized by `tools/make_click.py` (part of this project, GPL-2.0-or-later).
 - **Inter** font: Rasmus Andersson, SIL Open Font License 1.1 (`licenses/Inter-LICENSE.txt`).
 - **Cinzel** font (title logo): The Cinzel Project Authors, SIL Open Font License 1.1 (`licenses/Cinzel-OFL.txt`).
 
-This program is free software under the GNU General Public License, version 2 or later; see `LICENSE`.
+This program is free software under the GNU General Public License, version 2 or (at your option) any
+later version (GPL-2.0-or-later); see `LICENSE`. Freeciv files changed by `port-patches/freeciv-core.patch`
+are marked "Modified for freeciv-3ds" when the build applies the patch.

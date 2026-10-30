@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 the freeciv-3ds authors
 # Builds the upstream Freeciv engine (server, rulesets, AI) as static ARM11
 # libraries for the 3DS client to link against.
 #
@@ -20,6 +22,14 @@ git -C freeciv fetch -q --depth 1 origin "$FREECIV_COMMIT"
 git -C freeciv checkout -q --force FETCH_HEAD
 git -C freeciv clean -qfdx
 git -C freeciv apply "$ROOT/port-patches/freeciv-core.patch"
+# GPL-2 section 2(a): mark every Freeciv file the patch changes
+FC3DS_NOTE="Modified for freeciv-3ds (Nintendo 3DS port), 2026-10"
+for f in $(git -C freeciv diff --name-only); do
+	case "$f" in
+	*.c|*.h)       sed -i "1i /* $FC3DS_NOTE */" "freeciv/$f" ;;
+	configure.ac)  sed -i "1i dnl $FC3DS_NOTE" "freeciv/$f" ;;
+	esac
+done
 
 cd freeciv
 ./autogen.sh --no-configure-run

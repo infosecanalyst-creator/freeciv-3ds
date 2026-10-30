@@ -82,7 +82,7 @@ jobs:
           BT=$(find /tmp/tools/bannertool -type f -name bannertool -path '*linux*' | grep -i 'x86\|amd64' | head -1); chmod +x "$BT"
           cd "$GITHUB_WORKSPACE/in"
           "$BT" makebanner -i cia/banner.png -a cia/banner.wav -o cia/banner.bnr
-          "$BT" makesmdh -s "Freeciv 3DS" -l "Civilization-style strategy (Freeciv)" -p "Freeciv 3DS contributors" -i cia/icon.png -o cia/icon.icn
+          "$BT" makesmdh -s "Freeciv 3DS" -l "Empire-building strategy (Freeciv)" -p "Freeciv 3DS contributors" -i cia/icon.png -o cia/icon.icn
           "$MAKEROM" -f cia -o freeciv3ds.cia -elf 3ds_port.elf -rsf cia/cia.rsf -icon cia/icon.icn -banner cia/banner.bnr -exefslogo -target t
           ls -la freeciv3ds.cia
       - uses: actions/upload-artifact@v4

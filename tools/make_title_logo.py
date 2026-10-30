@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 the freeciv-3ds authors
 """Render the title-screen logo (gold Roman capitals) to 3ds_port/gfx/title_logo.png.
 
     python3 tools/make_title_logo.py Cinzel-900.ttf

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 xPsycho999 (original Freeciv 3DS port)
+# Copyright (C) 2026 the freeciv-3ds authors
 #---------------------------------------------------------------------------------
 .SUFFIXES:
 #---------------------------------------------------------------------------------
@@ -40,7 +43,7 @@ APP_TITLE	:=	Freeciv 3DS (Amplio2)
 else
 APP_TITLE	:=	Freeciv 3DS
 endif
-APP_DESCRIPTION	:=	Civilization-style strategy (Freeciv)
+APP_DESCRIPTION	:=	Empire-building strategy (Freeciv)
 APP_AUTHOR	:=	Freeciv 3DS contributors
 ICON		:=	cia/icon.png
 #---------------------------------------------------------------------------------
