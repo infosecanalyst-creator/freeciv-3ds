@@ -1,0 +1,43 @@
+name: build-3dsx
+# Builds the 3DS binary and publishes it to the `builds` branch (3dsx + logs + SOURCE_COMMIT)
+# so it can be fetched without a local PC build.
+on:
+  push:
+    branches: ["**", "!builds"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitarm
+    steps:
+      - name: Tools
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq build-essential autoconf automake libtool pkg-config gettext autopoint python3 zlib1g-dev libcurl4-openssl-dev libsqlite3-dev git unzip curl >/dev/null
+          git config --global --add safe.directory '*'
+      - uses: actions/checkout@v4
+      - name: 3DS libraries
+        run: for i in 1 2 3 4; do dkp-pacman -Sy --noconfirm --needed 3ds-dev 3ds-curl 3ds-mbedtls 3ds-zlib && break; sleep 30; done
+      - name: Freeciv engine
+        run: bash scripts/build_freeciv_core.sh 2>&1 | tee core.log
+      - name: 3DS client
+        run: |
+          export DEVKITPRO=/opt/devkitpro DEVKITARM=/opt/devkitpro/devkitARM
+          export PATH=$PATH:$DEVKITPRO/tools/bin:$DEVKITARM/bin
+          cd 3ds_port && make -j$(nproc) 2>&1 | tee ../build.log; cp 3ds_port.3dsx freeciv3ds.3dsx
+      - name: Collect
+        if: always()
+        run: |
+          mkdir -p out
+          cp 3ds_port/freeciv3ds.3dsx core.log build.log out/ 2>/dev/null || true
+          echo "$GITHUB_SHA" > out/SOURCE_COMMIT
+      - name: Publish to builds branch
+        if: always()
+        run: |
+          cd out
+          git init -q -b builds
+          git config user.name "build-bot"; git config user.email "build-bot@users.noreply.github.com"
+          git add -A; git commit -qm "build of ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" builds
