@@ -3442,7 +3442,7 @@ void render_title_controls_top(int frame)
         { "A / X",             "orders / next unit" },
         { "B",                 "back or cancel" },
         { "D-Pad, Circle Pad", "move the unit / scroll" },
-        { "L / R  ZL / ZR",    "research, taxes / zoom" },
+        { "L / R  ZL  ZR",    "research, tax / swap / zoom" },
         { "START / SEL+START", "end turn / quit" },
     };
     u32 key = C2D_Color32(0xFF, 0xE8, 0xA0, 0xFF), val = C2D_Color32(0xE0, 0xE6, 0xEE, 0xFF);

@@ -71,7 +71,8 @@ The full instruction manual is built into the game: Manual on the title screen, 
 | X | Next unit |
 | B | Back, close, or cancel a route |
 | L / R | Research / Tax rates |
-| ZL / ZR | Zoom out / in (New 3DS) |
+| ZL | Swap screens (3D and touch off while swapped) |
+| ZR | Zoom in (wraps back to the widest view); the on-screen + and - also work |
 | START | End turn |
 | SELECT + START | Quit |
 | In a city | Tap an item to build it now (or to queue it), L/R to pick a unit, Y to lead it out |

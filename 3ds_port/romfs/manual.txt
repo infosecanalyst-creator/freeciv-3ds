@@ -179,7 +179,8 @@ Menu then Spaceship appears once you start building one.
 | X | Next unit
 | Y | In a city: lead the first unit out. In research: list or tree
 | L / R | Research / tax rates. In a city: previous / next city
-| ZL / ZR | Zoom out / in
+| ZL | Swap screens (3D and touch off while swapped)
+| ZR | Zoom in, wrapping to the widest view
 | START | Same as the End Turn button
 | SELECT + START | Quit (asks first)
 

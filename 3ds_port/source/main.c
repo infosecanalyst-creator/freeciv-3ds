@@ -479,6 +479,24 @@ static bool write_new_game_script(const char *path, const NewGameOpts *o)
     return true;
 }
 
+// ZL swaps the screens (project standard). The top-screen picture (400x240)
+// is drawn on the touch screen at 0.8 scale; the touch-screen picture (320x240)
+// goes on the top screen centred. 3D and touch are off while swapped.
+static int fc_swapped = 0;
+static void fc_view_top_content(void)
+{
+    C2D_ViewReset();
+    if (fc_swapped) {
+        C2D_ViewTranslate(0.0f, 24.0f);
+        C2D_ViewScale(0.8f, 0.8f);
+    }
+}
+static void fc_view_bottom_content(void)
+{
+    C2D_ViewReset();
+    if (fc_swapped) C2D_ViewTranslate(40.0f, 0.0f);
+}
+
 int main(int argc, char* argv[])
 {
     // Redirect output to SD card to catch fatal errors
@@ -748,6 +766,12 @@ int main(int argc, char* argv[])
         u32 kDown = hidKeysDown();
         u32 kHeld = hidKeysHeld();
         u32 kUp = hidKeysUp();
+        if (kDown & KEY_ZL) {
+            fc_swapped = !fc_swapped;
+            gfxSet3D(!fc_swapped);
+        }
+        kDown &= ~KEY_ZL; kHeld &= ~KEY_ZL; kUp &= ~KEY_ZL;
+        if (fc_swapped) { kDown &= ~KEY_TOUCH; kHeld &= ~KEY_TOUCH; kUp &= ~KEY_TOUCH; }
         u32 kRep = hidKeysDownRepeat(); // held D-pad keeps scrolling lists
         audio_update();
         audio_set_music(app_state == APP_GAME ? MUSIC_GAME : MUSIC_MENU);
@@ -920,11 +944,12 @@ int main(int argc, char* argv[])
             snprintf(ng_summary, sizeof(ng_summary), "%s rules, %s map (about %d,000 tiles), %s, %d rival%s, %s AI, barbarians: %s.",
                      k_rules_names[ng.rules], k_size_names[ng.size], k_size_tiles[ng.size], k_land_names[ng.land],
                      ng.rivals, ng.rivals == 1 ? "" : "s", k_skill_names[ng.skill], k_barb_names[ng.barb]);
-            for (int eye = 0; eye < (osGet3DSliderState() > 0.02f ? 2 : 1); eye++) {
-                C3D_RenderTarget *tgt = eye ? top_right : top;
+            for (int eye = 0; eye < (!fc_swapped && osGet3DSliderState() > 0.02f ? 2 : 1); eye++) {
+                C3D_RenderTarget *tgt = fc_swapped ? bottom : (eye ? top_right : top);
                 C2D_TargetClear(tgt, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
                 C2D_SceneBegin(tgt);
                 C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_TOP, true);
+                fc_view_top_content();
                 render_set_stereo(osGet3DSliderState() > 0.02f ? (eye ? 1 : -1) : 0, osGet3DSliderState());
                 if (app_state == APP_START_MENU || app_state == APP_SETTINGS) {
                     static const char *lines[TI_COUNT] = {
@@ -950,13 +975,14 @@ int main(int argc, char* argv[])
                 render_set_stereo(0, 0);
             }
 
-            C2D_TargetClear(bottom, C2D_Color32(0x10, 0x10, 0x10, 0xFF));
-            C2D_SceneBegin(bottom);
-            C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_BOTTOM, true);
+            C2D_TargetClear(fc_swapped ? top : bottom, C2D_Color32(0x10, 0x10, 0x10, 0xFF));
+            C2D_SceneBegin(fc_swapped ? top : bottom);
+            C2D_SceneSize(GSP_SCREEN_WIDTH, fc_swapped ? GSP_SCREEN_HEIGHT_TOP : GSP_SCREEN_HEIGHT_BOTTOM, true);
+            fc_view_bottom_content();
             {   // pressed-button look, and a click when a tap lands on one
                 touchPosition tp; hidTouchRead(&tp);
                 u32 hd = hidKeysHeld(), dn = hidKeysDown();
-                if (render_press_frame((hd & KEY_TOUCH) != 0, (dn & KEY_TOUCH) != 0, tp.px, tp.py))
+                if (render_press_frame(!fc_swapped && (hd & KEY_TOUCH) != 0, !fc_swapped && (dn & KEY_TOUCH) != 0, tp.px, tp.py))
                     audio_play("ui_click");
             }
             if (app_state == APP_START_MENU || app_state == APP_CONTROLS) {
@@ -981,6 +1007,7 @@ int main(int argc, char* argv[])
             }
 
             render_press_end();
+            C2D_ViewReset();
             C3D_FrameEnd(0);
             continue;
         }
@@ -1019,8 +1046,8 @@ int main(int argc, char* argv[])
         }
 
         // ZL/ZR (New 3DS) zoom the map, keeping the view centre fixed.
-        if (ui_mode == UI_MAP && (kDown & (KEY_ZL | KEY_ZR))) {
-            int nz = zoom_idx + ((kDown & KEY_ZR) ? 1 : 0) - ((kDown & KEY_ZL) ? 1 : 0);
+        if (ui_mode == UI_MAP && (kDown & KEY_ZR)) {
+            int nz = zoom_idx + 1 >= ZOOM_COUNT ? 0 : zoom_idx + 1; // ZR cycles; ZL swaps screens
             set_zoom(nz, &zoom_idx, &zoom, &cam_x, &cam_y);
         }
 
@@ -2427,23 +2454,25 @@ int main(int argc, char* argv[])
             load_frame++;
             const char *what = reason == PROC_LOADING ? (s_started_from_save ? "Loading your game" : "Creating the world")
                              : reason == PROC_SAVING ? "Saving" : "Other civilizations are moving";
-            for (int eye = 0; eye < (osGet3DSliderState() > 0.02f ? 2 : 1); eye++) {
-                C3D_RenderTarget *tgt = eye ? top_right : top;
+            for (int eye = 0; eye < (!fc_swapped && osGet3DSliderState() > 0.02f ? 2 : 1); eye++) {
+                C3D_RenderTarget *tgt = fc_swapped ? bottom : (eye ? top_right : top);
                 C2D_TargetClear(tgt, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
                 C2D_SceneBegin(tgt);
                 C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_TOP, true);
+                fc_view_top_content();
                 render_set_stereo(osGet3DSliderState() > 0.02f ? (eye ? 1 : -1) : 0, osGet3DSliderState());
                 render_title_top(title_frame + load_frame, NULL, NULL);
                 render_set_stereo(0, 0);
             }
 
-            C2D_TargetClear(bottom, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
-            C2D_SceneBegin(bottom);
-            C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_BOTTOM, true);
+            C2D_TargetClear(fc_swapped ? top : bottom, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
+            C2D_SceneBegin(fc_swapped ? top : bottom);
+            C2D_SceneSize(GSP_SCREEN_WIDTH, fc_swapped ? GSP_SCREEN_HEIGHT_TOP : GSP_SCREEN_HEIGHT_BOTTOM, true);
+            fc_view_bottom_content();
             {   // pressed-button look, and a click when a tap lands on one
                 touchPosition tp; hidTouchRead(&tp);
                 u32 hd = hidKeysHeld(), dn = hidKeysDown();
-                if (render_press_frame((hd & KEY_TOUCH) != 0, (dn & KEY_TOUCH) != 0, tp.px, tp.py))
+                if (render_press_frame(!fc_swapped && (hd & KEY_TOUCH) != 0, !fc_swapped && (dn & KEY_TOUCH) != 0, tp.px, tp.py))
                     audio_play("ui_click");
             }
             if (engine_failed)
@@ -2454,9 +2483,9 @@ int main(int argc, char* argv[])
         } else {
             // Top screen, once per eye while the 3D slider is up.
             float slider = osGet3DSliderState();
-            int eyes = slider > 0.02f ? 2 : 1;
+            int eyes = (!fc_swapped && slider > 0.02f) ? 2 : 1;
             for (int eye = 0; eye < eyes; eye++) {
-            C3D_RenderTarget *tgt = eye ? top_right : top;
+            C3D_RenderTarget *tgt = fc_swapped ? bottom : (eye ? top_right : top);
             C2D_TargetClear(tgt, C2D_Color32(0x18, 0x24, 0x38, 0xFF));
             C2D_SceneBegin(tgt);
             render_set_stereo(eyes == 2 ? (eye ? 1 : -1) : 0, slider);
@@ -2466,6 +2495,7 @@ int main(int argc, char* argv[])
             // projection; passing the landscape dims scales/clips the scene
             // on hardware.
             C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_TOP, true);
+                fc_view_top_content();
             switch (game_over && !game_over_shown ? -1 : (int)ui_mode) {
             case -1:
                 render_game_over_top(game_won, game_score, game_end_turn);
@@ -2567,6 +2597,7 @@ int main(int argc, char* argv[])
             if (!busy) cap_valid = false;
             if (map_screen && cap && !busy && capture_next) {
                 C2D_TargetClear(cap, C2D_Color32(0x10, 0x10, 0x10, 0xFF));
+                C2D_ViewReset();
                 C2D_SceneBegin(cap);
                 int gx = pending_goto_x >= 0 ? pending_goto_x : ui_goto_x;
                 int gy = pending_goto_x >= 0 ? pending_goto_y : ui_goto_y;
@@ -2581,13 +2612,14 @@ int main(int argc, char* argv[])
             }
             capture_next = false;
 
-            C2D_TargetClear(bottom, C2D_Color32(0x10, 0x10, 0x10, 0xFF)); // Dark gray
-            C2D_SceneBegin(bottom);
-            C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_BOTTOM, true);
+            C2D_TargetClear(fc_swapped ? top : bottom, C2D_Color32(0x10, 0x10, 0x10, 0xFF)); // Dark gray
+            C2D_SceneBegin(fc_swapped ? top : bottom);
+            C2D_SceneSize(GSP_SCREEN_WIDTH, fc_swapped ? GSP_SCREEN_HEIGHT_TOP : GSP_SCREEN_HEIGHT_BOTTOM, true);
+            fc_view_bottom_content();
             {   // pressed-button look, and a click when a tap lands on one
                 touchPosition tp; hidTouchRead(&tp);
                 u32 hd = hidKeysHeld(), dn = hidKeysDown();
-                if (render_press_frame((hd & KEY_TOUCH) != 0, (dn & KEY_TOUCH) != 0, tp.px, tp.py))
+                if (render_press_frame(!fc_swapped && (hd & KEY_TOUCH) != 0, !fc_swapped && (dn & KEY_TOUCH) != 0, tp.px, tp.py))
                     audio_play("ui_click");
             }
             switch (game_over && !game_over_shown ? -1 : (int)ui_mode) {
@@ -2665,6 +2697,7 @@ int main(int argc, char* argv[])
         }
 
         render_press_end();
+            C2D_ViewReset();
             C3D_FrameEnd(0);
         if (end_turn_pending) {
             end_turn_pending = false;
