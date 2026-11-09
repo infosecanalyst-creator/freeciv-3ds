@@ -375,6 +375,7 @@ static void open_quit_menu(PopupMenu *m)
 
 // Left-handed play (Settings): the D-pad and A/B/X/Y swap jobs (Y<->up, A<->right, B<->down, X<->left).
 static int s_lefty = 0;
+int fc3ds_lefty(void) { return s_lefty; }
 static u32 remap_keys(u32 m)
 {
     static const u32 pr[4][2] = { { KEY_Y, KEY_DUP }, { KEY_A, KEY_DRIGHT }, { KEY_B, KEY_DDOWN }, { KEY_X, KEY_DLEFT } };

@@ -304,9 +304,35 @@ static u32 owner_color(int idx)
 // above that stack or the PICA200 depth test hides it, same failure mode as
 // the panel-rect z-order bug this file already fixed once (see
 // render_busy_indicator()'s comment).
+// Left-handed mode swaps the D-Pad and A/B/X/Y: hint text names the button the player presses.
+int fc3ds_lefty(void);
+static const char *lh(const char *s)
+{
+    static const char *const sw[][2] = {
+        { "Tap the marked square again to go there.  B: cancel", "Tap the marked square again to go there.  D-Down: cancel" },
+        { "No way to get there from here.  B: cancel", "No way to get there from here.  D-Down: cancel" },
+        { "L/R: other cities   Y: lead the first unit out   B: close", "L/R: other cities   D-Up: lead the first unit out   D-Down: close" },
+        { "L/R: other cities   B: close", "L/R: other cities   D-Down: close" },
+        { "B: close", "D-Down: close" },
+        { "Tap a technology below to research it.   Y: tree / list   B: close", "Tap a technology below to research it.   D-Up: tree / list   D-Down: close" },
+        { "Tap a government below to start a revolution.   B: close", "Tap a government below to start a revolution.   D-Down: close" },
+        { "Tap a civilization below.   B: close", "Tap a civilization below.   D-Down: close" },
+        { "A / X", "Right / Left" },
+        { "B", "Down" },
+        { "D-Pad, Circle Pad", "A/B/X/Y, Circle Pad" },
+        { "D-Pad: scroll   B: close", "A/B/X/Y: scroll   D-Down: close" },
+        { "L/R: scroll the text   D-Pad: list   B: close", "L/R: scroll the text   A/B/X/Y: list   D-Down: close" },
+        { "D-Pad / Circle Pad: scroll   L / R: section   B: close", "A/B/X/Y / Circle Pad: scroll   L / R: section   D-Down: close" },
+    };
+    if (!s || !fc3ds_lefty()) return s;
+    for (size_t i = 0; i < sizeof(sw) / sizeof(sw[0]); i++)
+        if (!strcmp(s, sw[i][0])) return sw[i][1];
+    return s;
+}
+
 static void draw_text_z(float x, float y, float z, float scale, u32 color, const char *str)
 {
-    font_draw(str, x, y, z, scale, color);
+    font_draw(lh(str), x, y, z, scale, color);
 }
 
 static void draw_text(float x, float y, float scale, u32 color, const char *str)
@@ -589,6 +615,7 @@ static void hud_strip(float y, float w, float h)
 // Text helpers that measure, for centring and right-aligning.
 static float text_width(const char *str, float scale)
 {
+    str = lh(str);
     return font_width(str, scale);
 }
 
