@@ -45,6 +45,7 @@ jobs:
           touch source/main.c && rm -f 3ds_port.smdh && make -j"$(nproc)"   # leave the normal build for the CIA
       - name: Publish the .3dsx to the builds branch (works even when artifact storage is full)
         if: github.ref == 'refs/heads/main'
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
