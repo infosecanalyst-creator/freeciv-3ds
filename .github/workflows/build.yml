@@ -42,6 +42,7 @@ jobs:
           cp 3ds_port.3dsx freeciv3ds-amplio.3dsx
           touch source/main.c && rm -f 3ds_port.smdh && make -j"$(nproc)"   # leave the normal build for the CIA
       - uses: actions/upload-artifact@v4
+        continue-on-error: true   # artifact storage quota may be full; the builds branch has the binary
         with:
           name: freeciv3ds
           path: |
@@ -49,6 +50,7 @@ jobs:
             3ds_port/freeciv3ds-amplio.3dsx
             3ds_port/3ds_port.elf
       - uses: actions/upload-artifact@v4
+        continue-on-error: true   # artifact storage quota may be full; the builds branch has the binary
         with:
           name: cia-inputs
           path: |
@@ -86,6 +88,7 @@ jobs:
           "$MAKEROM" -f cia -o freeciv3ds.cia -elf 3ds_port.elf -rsf cia/cia.rsf -icon cia/icon.icn -banner cia/banner.bnr -exefslogo -target t
           ls -la freeciv3ds.cia
       - uses: actions/upload-artifact@v4
+        continue-on-error: true   # artifact storage quota may be full; the builds branch has the binary
         with:
           name: freeciv3ds-cia
           path: in/freeciv3ds.cia
