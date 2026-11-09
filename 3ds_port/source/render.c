@@ -3402,19 +3402,20 @@ void render_title_bottom(int sel, bool has_continue, const char *continue_label,
     }
 }
 
-void render_title_settings(int music, int sfx, int text_large)
+void render_title_settings(int music, int sfx, int text_large, int lefty)
 {
     C2D_TextBufClear(g_textBuf);
     draw_backdrop(900, 320, 240, 0xC0);
     C2D_DrawRectSolid(0, 0, 0.1f, 320, 26, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
     draw_text_z(8, 3, 0.12f, 0.6f, 0xFFFFFFFF, "Settings");
-    const char *names[3] = { "Music", "Effects", "Text size" };
-    char vals[3][16];
+    const char *names[4] = { "Music", "Effects", "Text size", "Left hand" };
+    char vals[4][16];
     snprintf(vals[0], sizeof(vals[0]), "%d", music);
     snprintf(vals[1], sizeof(vals[1]), "%d", sfx);
     snprintf(vals[2], sizeof(vals[2]), "%s", text_large ? "Large" : "Normal");
-    int v[3] = { music, sfx, text_large }, hi[3] = { 10, 10, 1 };
-    for (int i = 0; i < 3; i++) {
+    snprintf(vals[3], sizeof(vals[3]), "%s", lefty ? "On" : "Off");
+    int v[4] = { music, sfx, text_large, lefty }, hi[4] = { 10, 10, 1, 1 };
+    for (int i = 0; i < 4; i++) {
         float y = SETUP_ROW_Y0 + i * SETUP_ROW_H;
         draw_text_z(12, y + 2, 0.12f, 0.5f, 0xFFFFFFFF, names[i]);
         draw_button(SETUP_MINUS_X, y, SETUP_BTN_W, SETUP_BTN_H, 0.12f, "-", 0.6f, v[i] > 0, false);

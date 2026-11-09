@@ -21,7 +21,7 @@ The same steps install every update. You never need to take the SD card out.
 | Continue | Opens your newest save. It is chosen already when you have one.
 | New Game | Set up a new world, then tap Start.
 | Load Game | Your saves, newest first, by turn and year.
-| Settings | Music and effects volume, text size.
+| Settings | Music and effects volume, text size, and Left hand: swaps the D-Pad with Y, A, B and X (Y is up, A is right, B is down, X is left, and the reverse) so the stylus can be held in the left hand. It is remembered.
 | Controls | The button chart.
 | Manual | This manual.
 | Quit | Back to the Homebrew Launcher.

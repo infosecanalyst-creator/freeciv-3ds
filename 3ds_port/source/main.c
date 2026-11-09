@@ -373,6 +373,21 @@ static void open_quit_menu(PopupMenu *m)
     m->x = (320 - m->w) / 2;
 }
 
+// Left-handed play (Settings): the D-pad and A/B/X/Y swap jobs (Y<->up, A<->right, B<->down, X<->left).
+static int s_lefty = 0;
+static u32 remap_keys(u32 m)
+{
+    static const u32 pr[4][2] = { { KEY_Y, KEY_DUP }, { KEY_A, KEY_DRIGHT }, { KEY_B, KEY_DDOWN }, { KEY_X, KEY_DLEFT } };
+    u32 r = m;
+    if (!s_lefty) return m;
+    for (int i = 0; i < 4; i++) r &= ~(pr[i][0] | pr[i][1]);
+    for (int i = 0; i < 4; i++) {
+        if (m & pr[i][0]) r |= pr[i][1];
+        if (m & pr[i][1]) r |= pr[i][0];
+    }
+    return r;
+}
+
 // ---- Settings (sdmc:/3ds/freeciv/settings.ini) ----
 #define SETTINGS_PATH "sdmc:/3ds/freeciv/settings.ini"
 typedef struct { int size, rivals, skill, rules, land, barb; } NewGameOptsFwd;
@@ -390,6 +405,7 @@ static void load_settings(void *ngp)
             sscanf(line, "effects=%d", &sv);
             int tb;
             if (sscanf(line, "text=%d", &tb) == 1) font_set_bias(tb);
+            if (sscanf(line, "lefty=%d", &tb) == 1) s_lefty = tb != 0;
             sscanf(line, "ng_size=%d", &s_saved_ng.size);
             sscanf(line, "ng_rivals=%d", &s_saved_ng.rivals);
             sscanf(line, "ng_skill=%d", &s_saved_ng.skill);
@@ -414,7 +430,7 @@ static void save_settings(void)
 {
     FILE *f = fopen(SETTINGS_PATH, "w");
     if (!f) return;
-    fprintf(f, "music=%d\neffects=%d\ntext=%d\n", audio_music_volume(), audio_sfx_volume(), font_get_bias());
+    fprintf(f, "music=%d\neffects=%d\ntext=%d\nlefty=%d\n", audio_music_volume(), audio_sfx_volume(), font_get_bias(), s_lefty);
     if (s_saved_ng.size >= 0)
         fprintf(f, "ng_size=%d\nng_rivals=%d\nng_skill=%d\nng_rules=%d\nng_land=%d\nng_barb=%d\n",
                 s_saved_ng.size, s_saved_ng.rivals, s_saved_ng.skill, s_saved_ng.rules,
@@ -763,16 +779,16 @@ int main(int argc, char* argv[])
     {
         frame_no++;
         hidScanInput();
-        u32 kDown = hidKeysDown();
-        u32 kHeld = hidKeysHeld();
-        u32 kUp = hidKeysUp();
+        u32 kDown = remap_keys(hidKeysDown());
+        u32 kHeld = remap_keys(hidKeysHeld());
+        u32 kUp = remap_keys(hidKeysUp());
         if (kDown & KEY_ZL) {
             fc_swapped = !fc_swapped;
             gfxSet3D(!fc_swapped);
         }
         kDown &= ~KEY_ZL; kHeld &= ~KEY_ZL; kUp &= ~KEY_ZL;
         if (fc_swapped) { kDown &= ~KEY_TOUCH; kHeld &= ~KEY_TOUCH; kUp &= ~KEY_TOUCH; }
-        u32 kRep = hidKeysDownRepeat(); // held D-pad keeps scrolling lists
+        u32 kRep = remap_keys(hidKeysDownRepeat()); // held D-pad keeps scrolling lists
         audio_update();
         audio_set_music(app_state == APP_GAME ? MUSIC_GAME : MUSIC_MENU);
 
@@ -861,13 +877,13 @@ int main(int argc, char* argv[])
                     if (it >= 0) { title_sel = it; title_choose = it; }
                 } else if (app_state == APP_SETTINGS) {
                     int row = (py - SETUP_ROW_Y0) / SETUP_ROW_H;
-                    bool in_rows = py >= SETUP_ROW_Y0 && row < 3 && (py - SETUP_ROW_Y0) % SETUP_ROW_H < SETUP_BTN_H;
+                    bool in_rows = py >= SETUP_ROW_Y0 && row < 4 && (py - SETUP_ROW_Y0) % SETUP_ROW_H < SETUP_BTN_H;
                     int d = 0;
                     if (in_rows && px >= SETUP_MINUS_X && px < SETUP_MINUS_X + SETUP_BTN_W) d = -1;
                     if (in_rows && px >= SETUP_PLUS_X && px < SETUP_PLUS_X + SETUP_BTN_W) d = 1;
                     if (d) {
                         int mv = audio_music_volume(), fx = audio_sfx_volume(), tb = font_get_bias() ? 1 : 0;
-                        if (row == 0) mv += d; else if (row == 1) fx += d; else tb = d > 0;
+                        if (row == 0) mv += d; else if (row == 1) fx += d; else if (row == 2) tb = d > 0; else s_lefty = d > 0;
                         audio_set_volumes(mv, fx);
                         font_set_bias(tb);
                         if (row == 1) audio_play("e_city_build");
@@ -991,7 +1007,7 @@ int main(int argc, char* argv[])
             } else if (app_state == APP_MANUAL) {
                 render_manual_bottom(title_frame);
             } else if (app_state == APP_SETTINGS) {
-                render_title_settings(audio_music_volume(), audio_sfx_volume(), font_get_bias() ? 1 : 0);
+                render_title_settings(audio_music_volume(), audio_sfx_volume(), font_get_bias() ? 1 : 0, s_lefty);
             } else if (app_state == APP_NEW_GAME) {
                 char rv[8];
                 snprintf(rv, sizeof(rv), "%d", ng.rivals);

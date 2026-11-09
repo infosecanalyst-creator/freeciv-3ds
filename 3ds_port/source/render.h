@@ -370,7 +370,7 @@ int  title_hit(int px, int py, bool has_continue);   // TI_* or -1
 void render_title_top(int frame, const char *line, const char *headline);
 void render_title_bottom(int sel, bool has_continue, const char *continue_label, int frame);
 // Settings page (rows like New Game: label, -, value, +) and a Back button.
-void render_title_settings(int music, int sfx, int text_large);
+void render_title_settings(int music, int sfx, int text_large, int lefty);
 // Controls page on the top screen.
 void render_title_controls_top(int frame);
 // Loading splash on the bottom while a game starts.
