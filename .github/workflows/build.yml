@@ -11,6 +11,8 @@ jobs:
   n3ds:
     name: Nintendo 3DS
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     container: devkitpro/devkitarm:latest
     steps:
       - uses: actions/checkout@v4
@@ -41,6 +43,27 @@ jobs:
           touch source/main.c && rm -f 3ds_port.smdh && make -j"$(nproc)" AMPLIO=1
           cp 3ds_port.3dsx freeciv3ds-amplio.3dsx
           touch source/main.c && rm -f 3ds_port.smdh && make -j"$(nproc)"   # leave the normal build for the CIA
+      - name: Publish the .3dsx to the builds branch (works even when artifact storage is full)
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          git config --global --add safe.directory '*'
+          git clone --depth 1 --branch builds "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" /tmp/pub 2>/dev/null \
+            || { mkdir /tmp/pub && cd /tmp/pub && git init -q -b builds; }
+          cd /tmp/pub
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          mkdir -p 3ds
+          cp "$GITHUB_WORKSPACE/3ds_port/freeciv3ds.3dsx" freeciv3ds.3dsx
+          cp "$GITHUB_WORKSPACE/3ds_port/freeciv3ds.3dsx" 3ds/freeciv3ds.3dsx
+          echo "$GITHUB_SHA" > SOURCE_COMMIT
+          printf '%s\n%s\n%s\n' "${GITHUB_SHA}" "${GITHUB_RUN_NUMBER}" "$(date -u +%FT%TZ)" > BUILD.txt
+          git config user.name "freeciv-3ds-ci"; git config user.email "ci@users.noreply.github.com"
+          git add -A
+          git commit -q -m "build ${GITHUB_RUN_NUMBER} from ${GITHUB_SHA::7}" || exit 0
+          git push -q -f origin builds
       - uses: actions/upload-artifact@v4
         continue-on-error: true   # artifact storage quota may be full; the builds branch has the binary
         with:
