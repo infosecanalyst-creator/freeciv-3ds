@@ -1116,9 +1116,11 @@ static void draw_help_block(const char *text, float x, float y, float w, float b
     static char last[2048];
     static int nlines = 0;
     static u64 t0 = 0;
-    if (strncmp(last, text, sizeof(last) - 1) != 0) { // new text: wrap it once
+    static float last_w = -1;
+    if (strncmp(last, text, sizeof(last) - 1) != 0 || w != last_w) { // new text or width (ZL swap): wrap it again
+        if (strncmp(last, text, sizeof(last) - 1) != 0) t0 = svcGetSystemTick();
+        last_w = w;
         snprintf(last, sizeof(last), "%s", text);
-        t0 = svcGetSystemTick();
         nlines = 0;
         const char *p = text;
         while (*p && nlines < 48) {
