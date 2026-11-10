@@ -108,6 +108,7 @@ bool iso_screen_to_tile(int px, int py, int cam_x, int cam_y, float scale, int *
 // Stereo 3D for the top screen: call before drawing each eye (eye -1 left,
 // +1 right, 0 mono; amount = pixels of separation per unit of depth).
 void render_set_stereo(int eye, float amount);
+void render_set_base(float tx, float ty, float sx, float sy);   // view transform kept across render.c view resets
 
 // Top-screen minimap rect.
 #define MINIMAP_X      6

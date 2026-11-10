@@ -248,11 +248,29 @@ void render_init(void)
 static int s_eye;
 static float s_stereo;
 
+// Base view transform for the screen being drawn (the swapped layout shrinks the
+// dashboard to the touch screen and stretches the game across the top). Every
+// view reset in here puts it back, so text never mixes two scales.
+static float s_base_tx, s_base_ty, s_base_sx = 1.0f, s_base_sy = 1.0f;
+void render_set_base(float tx, float ty, float sx, float sy)
+{
+    s_base_tx = tx; s_base_ty = ty; s_base_sx = sx; s_base_sy = sy;
+    C2D_ViewReset();
+    if (tx || ty) C2D_ViewTranslate(tx, ty);
+    if (sx != 1.0f || sy != 1.0f) C2D_ViewScale(sx, sy);
+}
+static void view_base(void)
+{
+    C2D_ViewReset();
+    if (s_base_tx || s_base_ty) C2D_ViewTranslate(s_base_tx, s_base_ty);
+    if (s_base_sx != 1.0f || s_base_sy != 1.0f) C2D_ViewScale(s_base_sx, s_base_sy);
+}
+
 void render_set_stereo(int eye, float amount)
 {
     s_eye = eye;
     s_stereo = amount;
-    C2D_ViewReset();
+    view_base();
 }
 
 // Depth is in "levels" (0 = screen plane, 4 = the selection card). Each eye
@@ -262,7 +280,7 @@ void render_set_stereo(int eye, float amount)
 // disparity) - the 3DS stays comfortable well under ~10 px.
 static void layer(float depth)
 {
-    C2D_ViewReset();
+    view_base();
     if (!s_eye) return;
     float px = s_stereo * depth * 0.75f;
     if (px > 3.0f) px = 3.0f;

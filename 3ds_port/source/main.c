@@ -547,16 +547,15 @@ static void fc_draw_pointer(void)    // on the swapped top screen, in 320x240 pi
 }
 static void fc_view_top_content(void)
 {
-    C2D_ViewReset();
-    if (fc_swapped) {
-        C2D_ViewTranslate(0.0f, 24.0f);
-        C2D_ViewScale(0.8f, 0.8f);
-    }
+    // swapped: the 400x240 dashboard shrinks evenly to fit the 320-wide touch screen
+    if (fc_swapped) render_set_base(0.0f, 24.0f, 0.8f, 0.8f);
+    else render_set_base(0.0f, 0.0f, 1.0f, 1.0f);
 }
 static void fc_view_bottom_content(void)
 {
-    C2D_ViewReset();
-    if (fc_swapped) C2D_ViewScale(400.0f / 320.0f, 1.0f);   // UI rule 8: fill the top screen, no side bars
+    // UI rule 8: swapped, the game fills the top screen, no side bars
+    if (fc_swapped) render_set_base(0.0f, 0.0f, 400.0f / 320.0f, 1.0f);
+    else render_set_base(0.0f, 0.0f, 1.0f, 1.0f);
 }
 
 int main(int argc, char* argv[])
@@ -1070,7 +1069,7 @@ int main(int argc, char* argv[])
 
             render_press_end();
             fc_draw_pointer();
-            C2D_ViewReset();
+            render_set_base(0.0f, 0.0f, 1.0f, 1.0f);
             C3D_FrameEnd(0);
             continue;
         }
@@ -2761,7 +2760,7 @@ int main(int argc, char* argv[])
 
         render_press_end();
             fc_draw_pointer();
-            C2D_ViewReset();
+            render_set_base(0.0f, 0.0f, 1.0f, 1.0f);
             C3D_FrameEnd(0);
         if (end_turn_pending) {
             end_turn_pending = false;
