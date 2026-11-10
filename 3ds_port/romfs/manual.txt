@@ -4,8 +4,8 @@ Freeciv 3DS is the open-source empire-building strategy game, made for the New 3
 You play on the touch screen with the stylus, the way the PC game is played with a mouse. The top screen is your dashboard: it shows what you have selected, your research and the state of your empire.
 
 ## Reading this manual
-- Tap a section on the touch screen to open it.
-- Circle Pad or D-pad up and down: scroll.
+- Tap a section on the touch screen to open it, or move to it with the D-pad.
+- Circle Pad or C-Stick up and down: scroll (hold to keep scrolling).
 - L and R: previous and next section.
 - B or Start: close. The manual opens again where you left it.
 

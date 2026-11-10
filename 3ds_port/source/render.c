@@ -340,7 +340,7 @@ static const char *lh(const char *s)
         { "D-Pad, Circle Pad", "A/B/X/Y, Circle Pad" },
         { "D-Pad: scroll   B: close", "A/B/X/Y: scroll   D-Down: close" },
         { "L/R: scroll the text   D-Pad: list   B: close", "L/R: scroll the text   A/B/X/Y: list   D-Down: close" },
-        { "D-Pad / Circle Pad: scroll   L / R: section   B: close", "A/B/X/Y / Circle Pad: scroll   L / R: section   D-Down: close" },
+        { "Sticks: scroll   D-Pad, L / R: section   B: close", "Sticks: scroll   A/B/X/Y, L / R: section   D-Down: close" },
     };
     if (!s || !fc3ds_lefty()) return s;
     for (size_t i = 0; i < sizeof(sw) / sizeof(sw[0]); i++)
@@ -357,6 +357,14 @@ static void draw_text(float x, float y, float scale, u32 color, const char *str)
 {
     draw_text_z(x, y, 0.0f, scale, color, str);
 }
+
+// Width of the information screen's picture: 400 on the top screen, 320 when ZL has swapped it
+// onto the touch screen. Every information panel lays itself out for this width at full size,
+// so its text is never shrunk or stretched (principle: both screens stay readable when swapped).
+static float g_tw = 400.0f;
+void render_set_top_width(float w) { g_tw = w; }
+#define TW g_tw
+#define NARROW (g_tw < 360.0f)
 
 // --- Minimap Globals ---
 //
@@ -1015,6 +1023,48 @@ static int draw_wrapped(const char *text, float x, float y, float w, float scale
     return lines;
 }
 
+// Largest scale <= scale (and >= lo) at which text fits w.
+static float fit_scale(const char *text, float scale, float w, float lo)
+{
+    float tw = font_width(text, scale);
+    if (tw > w && tw > 0) scale = scale * w / tw;
+    return scale < lo ? lo : scale;
+}
+
+// One line in width w: shrinks to 0.38 at the most, then ends in "..." rather than run over.
+static void draw_fit_z(float x, float y, float z, float w, float scale, u32 color, const char *text)
+{
+    float s2 = fit_scale(text, scale, w, 0.38f);
+    if (font_width(text, s2) <= w) draw_text_z(x, y + (scale - s2) * 10, z, s2, color, text);
+    else draw_wrapped(text, x, y + (scale - s2) * 10, w, s2, color, 1, 14, z);
+}
+static void draw_fit(float x, float y, float w, float scale, u32 color, const char *text)
+{
+    draw_fit_z(x, y, 0.0f, w, scale, color, text);
+}
+
+// The hint strip at the foot of an information panel. A long hint shrinks a little, then takes a
+// second line; it is never cut off and never smaller than 0.40. Returns the strip's top edge.
+static float hint_strip_top(const char *text)
+{
+    if (!text) return 240 - 17;
+    text = lh(text);
+    return fit_scale(text, 0.45f, TW - 10, 0.0f) >= 0.40f ? 240 - 17 : 240 - 29;
+}
+static void hint_strip(const char *text, u32 color)
+{
+    float top = hint_strip_top(text);
+    C2D_DrawRectSolid(0, top, 0.0f, TW, 240 - top, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
+    if (!text) return;
+    text = lh(text);
+    if (top == 240 - 17) {
+        float hs = fit_scale(text, 0.45f, TW - 10, 0.40f);
+        draw_text(5, 240 - 16 + (0.45f - hs) * 14, hs, color, text);
+    } else {
+        draw_wrapped(text, 5, top + 1, TW - 10, 0.42f, color, 2, 13, 0.0f);
+    }
+}
+
 static u32 msg_color(int cat)
 {
     switch (cat) {
@@ -1033,15 +1083,15 @@ static void draw_turn_report(const TopInfo *ti)
     u32 label = C2D_Color32(0x8C, 0xA0, 0xB4, 0xFF);
     char line[64];
     layer(3.0f);
-    C2D_DrawRectSolid(6, 22, 0.0f, 388, 198, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
-    C2D_DrawRectSolid(6, 22, 0.01f, 388, 2, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF));
+    C2D_DrawRectSolid(6, 22, 0.0f, TW - 12, 198, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
+    C2D_DrawRectSolid(6, 22, 0.01f, TW - 12, 2, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF));
     snprintf(line, sizeof(line), "Since last turn");
     draw_text(14, 25, 0.6f, white, line);
     float y = 50;
     for (int i = 0; i < ti->report_n && y < 205; i++) {
         const GameMessage *m = &ti->report[i];
         C2D_DrawRectSolid(14, y + 5, 0.01f, 6, 6, msg_color(m->category));
-        int used = draw_wrapped(m->text, 26, y, 360, 0.44f, C2D_Color32(0xD8, 0xE0, 0xEA, 0xFF), 2, 15, 0.01f);
+        int used = draw_wrapped(m->text, 26, y, TW - 40, 0.44f, C2D_Color32(0xD8, 0xE0, 0xEA, 0xFF), 2, 15, 0.01f);
         y += used * 15 + 3;
     }
     if (ti->report_more > 0) {
@@ -1130,25 +1180,27 @@ void render_top_info(const TopInfo *ti)
     char line[128];
 
     // Status bar.
-    C2D_DrawRectSolid(0, 0, 0.0f, 400, 18, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
-    C2D_DrawRectSolid(0, 18, 0.0f, 400, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
+    C2D_DrawRectSolid(0, 0, 0.0f, TW, 18, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
+    C2D_DrawRectSolid(0, 18, 0.0f, TW, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
+    const float ss = NARROW ? 0.47f : 0.52f; // status-bar text: a little smaller on the narrow screen
     int turn = get_game_turn();
     if (turn > 0) {
         if (ti->civ && ti->civ->year[0]) snprintf(line, sizeof(line), "Turn %d, %s", turn, ti->civ->year);
         else snprintf(line, sizeof(line), "Turn %d", turn);
-        draw_text(5, 1, 0.52f, white, line);
-        float gx = 5 + text_width(line, 0.52f) + 12;
+        draw_text(5, 1 + (0.52f - ss) * 6, ss, white, line);
+        float gx = 5 + text_width(line, ss) + (NARROW ? 8 : 12);
         if (ti->civ) {
             snprintf(line, sizeof(line), "Gold %d (%+d)", ti->civ->gold, ti->civ->gold_per_turn);
-            draw_text(gx, 1, 0.52f, gold, line);
-            gx += text_width(line, 0.52f) + 10;
+            draw_text(gx, 1 + (0.52f - ss) * 6, ss, gold, line);
+            gx += text_width(line, ss) + 10;
             snprintf(line, sizeof(line), "%s  Tax %d Lux %d Sci %d", ti->civ->government_name,
                      ti->civ->tax, ti->civ->lux, ti->civ->sci);
             float rs = 0.45f;
-            while (rs > 0.38f && 395 - text_width(line, rs) < gx) rs -= 0.01f;
-            if (395 - text_width(line, rs) < gx) // still no room: drop the government name
+            while (rs > 0.38f && TW - 5 - text_width(line, rs) < gx) rs -= 0.01f;
+            if (TW - 5 - text_width(line, rs) < gx) // still no room: drop the government name
                 snprintf(line, sizeof(line), "Tax %d Lux %d Sci %d", ti->civ->tax, ti->civ->lux, ti->civ->sci);
-            draw_text(395 - text_width(line, rs), 2, rs, soft, line);
+            if (TW - 5 - text_width(line, rs) >= gx) // never over the gold (the Tax screen has the rates)
+                draw_text(TW - 5 - text_width(line, rs), 2, rs, soft, line);
         }
     } else {
         draw_text(5, 1, 0.52f, white, "Generating world...");
@@ -1157,8 +1209,7 @@ void render_top_info(const TopInfo *ti)
     if (ti->report_n > 0) {
         draw_turn_report(ti);
         layer(0.0f);
-        C2D_DrawRectSolid(0, 240 - 17, 0.0f, 400, 17, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
-        draw_text(5, 240 - 16, 0.45f, soft, "Tap or press anything to carry on.");
+        hint_strip("Tap or press anything to carry on.", soft);
         return;
     }
 
@@ -1166,33 +1217,34 @@ void render_top_info(const TopInfo *ti)
     layer(2.5f);
     int mcx, mcy; float mvw, mvh;
     minimap_cam(ti->cam_x, ti->cam_y, ti->zoom, &mcx, &mcy, &mvw, &mvh);
-    draw_minimap(mcx, mcy, mvw, mvh,
-                 ti->tile_x, ti->tile_y);
+    const float MW = NARROW ? 120 : MINIMAP_W; // narrow screen: a slimmer minimap, the card keeps its room
+    draw_minimap_in(MINIMAP_X, MINIMAP_Y, MW, MINIMAP_H, mcx, mcy, mvw, mvh, ti->tile_x, ti->tile_y);
     if (ti->civ && ti->civ->research_name[0]) {
         float y = MINIMAP_Y + MINIMAP_H + 6;
         float lb = font_get_bias() ? 2.0f : 0.0f; // Large text needs a little more room
         draw_text(MINIMAP_X, y - lb, 0.45f, label, "Researching");
-        draw_text(MINIMAP_X, y + 13 + lb, 0.5f, white, ti->civ->research_name);
+        draw_fit(MINIMAP_X, y + 13 + lb, MW, 0.5f, white, ti->civ->research_name);
         int need = ti->civ->bulbs_needed > 0 ? ti->civ->bulbs_needed : 1;
         float frac = (float)ti->civ->bulbs / need;
         if (frac < 0) frac = 0;
         if (frac > 1) frac = 1;
-        C2D_DrawRectSolid(MINIMAP_X, y + 31 + lb, 0.0f, MINIMAP_W, 6, C2D_Color32(0x24, 0x30, 0x40, 0xFF));
-        C2D_DrawRectSolid(MINIMAP_X, y + 31 + lb, 0.01f, MINIMAP_W * frac, 6, C2D_Color32(0x50, 0xA0, 0xF0, 0xFF));
+        C2D_DrawRectSolid(MINIMAP_X, y + 31 + lb, 0.0f, MW, 6, C2D_Color32(0x24, 0x30, 0x40, 0xFF));
+        C2D_DrawRectSolid(MINIMAP_X, y + 31 + lb, 0.01f, MW * frac, 6, C2D_Color32(0x50, 0xA0, 0xF0, 0xFF));
         if (ti->civ->research_turns >= 0)
             snprintf(line, sizeof(line), "%d/%d bulbs, %d turns", ti->civ->bulbs, ti->civ->bulbs_needed, ti->civ->research_turns);
         else
             snprintf(line, sizeof(line), "%d/%d bulbs", ti->civ->bulbs, ti->civ->bulbs_needed);
-        draw_text(MINIMAP_X, y + 39 + lb, 0.42f, soft, line);
+        draw_fit(MINIMAP_X, y + 39 + lb, MW, 0.42f, soft, line);
         if (ti->civ->goal_name[0]) {
             snprintf(line, sizeof(line), "Goal: %s", ti->civ->goal_name);
-            draw_text(MINIMAP_X, y + 53 + lb, 0.42f, gold, line);
+            draw_fit(MINIMAP_X, y + 53 + lb, MW, 0.42f, gold, line);
         }
     }
 
     // Right: what's selected (in front; the portrait most of all).
     layer(4.0f);
-    const float CX = 206, CW = 190;
+    const float CX = NARROW ? 134 : 206, CW = NARROW ? 180 : 190;
+    const float help_bottom = hint_strip_top(ti->hint) - 5; // the Encyclopedia text stops above the hint
     C2D_DrawRectSolid(CX - 4, 24, 0.0f, CW + 6, 196, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
     if (ti->unit && ti->unit->valid) {
         const UnitInfo *u = ti->unit;
@@ -1208,21 +1260,21 @@ void render_top_info(const TopInfo *ti)
         C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, get_unit_sprite(u->rule_name)),
                         CX + 4, 32, 0.02f, NULL, 2.0f, 2.0f);
         layer(4.0f);
-        draw_text(CX + 72, 30, 0.6f, white, u->name);
+        draw_fit(CX + 72, 30, CW - 74, 0.6f, white, u->name);
         if (u->veteran > 0) {
             snprintf(line, sizeof(line), "Veteran %d", u->veteran);
             draw_text(CX + 72, 50, 0.45f, gold, line);
         }
         snprintf(line, sizeof(line), "%s", u->activity);
-        draw_text(CX + 72, 66, 0.45f, u->idle ? soft : C2D_Color32(0x90, 0xE0, 0x90, 0xFF), line);
+        draw_fit(CX + 72, 66, CW - 74, 0.45f, u->idle ? soft : C2D_Color32(0x90, 0xE0, 0x90, 0xFF), line);
         if (u->home[0]) {
             snprintf(line, sizeof(line), "Home: %s", u->home);
-            draw_text(CX + 72, 80, 0.42f, label, line);
+            draw_fit(CX + 72, 80, CW - 74, 0.42f, label, line);
         }
         // Compact stats, so the Encyclopedia text fits below.
         snprintf(line, sizeof(line), "A %d  D %d  FP %d  Moves %s", u->attack, u->defense, u->firepower,
                  u->moves_left > 0 ? u->moves : "0");
-        draw_text(CX + 72, u->home[0] ? 92 : 80, 0.42f, u->moves_left > 0 ? white : label, line);
+        draw_fit(CX + 72, u->home[0] ? 92 : 80, CW - 74, 0.42f, u->moves_left > 0 ? white : label, line);
         float y = 104;
         float hpf = u->hp_max > 0 ? (float)u->hp / u->hp_max : 0;
         draw_text(CX + 2, y - 2, 0.40f, label, "HP");
@@ -1242,7 +1294,7 @@ void render_top_info(const TopInfo *ti)
                      t->has_farmland ? ", Farmland" : t->has_irrigation ? ", Irrigated" : "",
                      t->has_mine ? ", Mine" : "",
                      ti->stack_n > 1 ? "" : "");
-            draw_text(CX + 2, y, 0.40f, soft, line);
+            draw_fit(CX + 2, y, CW - 4, 0.40f, soft, line);
             y += 13;
         }
         if (ti->stack_n > 1) {
@@ -1250,7 +1302,7 @@ void render_top_info(const TopInfo *ti)
             draw_text(CX + 2, y, 0.40f, label, line);
             y += 13;
         }
-        draw_help_block(ti->help, CX + 2, y + 2, CW - 4, 218);
+        draw_help_block(ti->help, CX + 2, y + 2, CW - 4, help_bottom);
     } else if (ti->tile && ti->tile_x >= 0) {
         const TileInfo *t = ti->tile;
         draw_text(CX + 2, 28, 0.45f, label, "This square");
@@ -1267,12 +1319,12 @@ void render_top_info(const TopInfo *ti)
                      t->has_farmland ? "Farmland  " : t->has_irrigation ? "Irrigation  " : "",
                      t->has_mine ? "Mine  " : "",
                      t->has_pollution ? "Pollution" : t->has_fallout ? "Fallout" : "");
-            if (extra[0]) { draw_text(CX + 2, y, 0.45f, soft, extra); y += 16; }
+            if (extra[0]) y += 16 * draw_wrapped(extra, CX + 2, y, CW - 4, 0.45f, soft, 2, 16, 0.0f);
             if (t->resource_tag[0]) {
                 char res[48];
                 pretty_tag(t->resource_tag, res, sizeof(res));
                 snprintf(line, sizeof(line), "Resource: %s", res);
-                draw_text(CX + 2, y, 0.45f, gold, line);
+                draw_fit(CX + 2, y, CW - 4, 0.45f, gold, line);
                 y += 16;
             }
             if (t->has_village) { draw_text(CX + 2, y, 0.45f, gold, "Village (hut)"); y += 16; }
@@ -1280,13 +1332,13 @@ void render_top_info(const TopInfo *ti)
             if (t->city_owner >= 0) {
                 y += 4;
                 snprintf(line, sizeof(line), "%s  (size %d)", t->city_name[0] ? t->city_name : "City", t->city_size);
-                draw_text(CX + 2, y, 0.55f, owner_color(t->city_owner), line);
+                draw_fit(CX + 2, y, CW - 4, 0.55f, owner_color(t->city_owner), line);
                 y += 20;
             }
             for (int i = 0; i < ti->stack_n && i < 5; i++) {
                 snprintf(line, sizeof(line), "%s%s", ti->stack[i].name,
                          ti->stack[i].mine && !ti->stack[i].can_move ? "  (done)" : "");
-                draw_text(CX + 2, y, 0.47f, owner_color(ti->stack[i].owner), line);
+                draw_fit(CX + 2, y, CW - 4, 0.47f, owner_color(ti->stack[i].owner), line);
                 y += 16;
             }
             if (ti->stack_n > 5) {
@@ -1294,24 +1346,17 @@ void render_top_info(const TopInfo *ti)
                 draw_text(CX + 2, y, 0.45f, label, line);
                 y += 16;
             }
-            draw_help_block(ti->help, CX + 2, y + 2, CW - 4, 218);
+            draw_help_block(ti->help, CX + 2, y + 2, CW - 4, help_bottom);
         }
     } else {
-        draw_text(CX + 2, 30, 0.5f, soft, "Tap the map below.");
+        draw_text(CX + 2, 30, 0.5f, soft, "Tap a square on the map.");
         draw_text(CX + 2, 50, 0.45f, label, "Tap a unit for its orders.");
         draw_text(CX + 2, 66, 0.45f, label, "Drag to scroll the map.");
     }
 
     // Hint line (on the screen plane).
     layer(0.0f);
-    C2D_DrawRectSolid(0, 240 - 17, 0.0f, 400, 17, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
-    if (ti->hint) {
-        // Shrink long hints (e.g. combat odds with long unit names) to fit the strip.
-        float hs = 0.45f, w = text_width(ti->hint, hs);
-        if (w > 390) hs = hs * 390 / w;
-        if (hs < 0.40f) hs = 0.40f; // legibility floor: hints are written to fit
-        draw_text(5, 240 - 16 + (0.45f - hs) * 14, hs, ti->hint_color ? ti->hint_color : soft, ti->hint);
-    }
+    hint_strip(ti->hint, ti->hint_color ? ti->hint_color : soft); // long hints shrink, then wrap
 }
 
 // Neighbour lookups for coastline / terrain-edge matching. Coordinates are
@@ -2405,18 +2450,18 @@ void render_city_top(const CityInfo *info, int garrison_sel)
 
     // Header: owner colour band, name, size badge.
     u32 oc = owner_color(info->owner);
-    C2D_DrawRectSolid(0, 0, 0.0f, 400, 32, C2D_Color32(0x14, 0x1E, 0x2E, 0xFF));
+    C2D_DrawRectSolid(0, 0, 0.0f, TW, 32, C2D_Color32(0x14, 0x1E, 0x2E, 0xFF));
     C2D_DrawRectSolid(0, 0, 0.01f, 6, 32, oc);
-    C2D_DrawRectSolid(0, 32, 0.0f, 400, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
+    C2D_DrawRectSolid(0, 32, 0.0f, TW, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
     draw_text(14, 3, 0.85f, white, info->name[0] ? info->name : "?");
     snprintf(line, sizeof(line), "Size %d", info->size);
     float sw = text_width(line, 0.55f);
-    C2D_DrawRectSolid(392 - sw - 12, 6, 0.01f, sw + 12, 20, oc);
-    draw_text_z(392 - sw - 6, 4, 0.02f, 0.55f, contrast_text(oc), line);
+    C2D_DrawRectSolid(TW - 8 - sw - 12, 6, 0.01f, sw + 12, 20, oc);
+    draw_text_z(TW - 8 - sw - 6, 4, 0.02f, 0.55f, contrast_text(oc), line);
     // Mood, left of the size badge: disorder is the classic early surprise.
     {
         char mood[64];
-        float right = 392 - sw - 20, nw = text_width(info->name[0] ? info->name : "?", 0.85f) + 22;
+        float right = TW - 8 - sw - 20, nw = text_width(info->name[0] ? info->name : "?", 0.85f) + 22;
         if (info->disorder) {
             snprintf(mood, sizeof(mood), "DISORDER");
             float mw = text_width(mood, 0.5f) + 10;
@@ -2436,13 +2481,14 @@ void render_city_top(const CityInfo *info, int garrison_sel)
     // Left column: yields, growth, production.
     layer(2.5f);
     float x = 12, y = 42;
+    const float LW = NARROW ? 180 : 224, YC = NARROW ? 92 : 116; // left column width, yield columns
     struct { const char *n; int v; u32 c; } yv[6] = {
         { "Food", info->surplus[0], food }, { "Shields", info->surplus[1], shld },
         { "Trade", info->surplus[2], trade }, { "Gold", info->surplus[3], C2D_Color32(0xFF, 0xD0, 0x40, 0xFF) },
         { "Luxury", info->surplus[4], C2D_Color32(0xE0, 0x90, 0xE0, 0xFF) }, { "Science", info->surplus[5], C2D_Color32(0x70, 0xB8, 0xFF, 0xFF) },
     };
     for (int i = 0; i < 6; i++) {
-        float cx = x + (i % 2) * 116, cy = y - 4 + (i / 2) * 16;
+        float cx = x + (i % 2) * YC, cy = y - 4 + (i / 2) * 16;
         C2D_DrawRectSolid(cx, cy + 5, 0.0f, 8, 8, yv[i].c);
         snprintf(line, sizeof(line), "%s %+d", yv[i].n, yv[i].v);
         draw_text(cx + 12, cy, 0.45f, soft, line);
@@ -2451,19 +2497,19 @@ void render_city_top(const CityInfo *info, int garrison_sel)
     y = 94;
     draw_text(x, y, 0.45f, label, "Growth");
     snprintf(line, sizeof(line), "%d/%d", info->food_stock, info->food_needed);
-    draw_text(x + 160, y, 0.45f, soft, line);
-    progress_bar(x, y + 18, 224, 6, info->food_needed > 0 ? (float)info->food_stock / info->food_needed : 0, food);
+    draw_text(NARROW ? x + LW - text_width(line, 0.45f) : x + 160, y, 0.45f, soft, line);
+    progress_bar(x, y + 18, LW, 6, info->food_needed > 0 ? (float)info->food_stock / info->food_needed : 0, food);
     if (info->grow_turns >= 0) snprintf(line, sizeof(line), "Grows in %d turn%s", info->grow_turns, info->grow_turns == 1 ? "" : "s");
     else snprintf(line, sizeof(line), "Not growing");
     draw_text(x, y + 25, 0.42f, info->grow_turns >= 0 ? soft : C2D_Color32(0xE0, 0x80, 0x60, 0xFF), line);
 
     y = 142;
     draw_text(x, y, 0.45f, label, "Building");
-    draw_text(x, y + 15, 0.55f, white, info->producing[0] ? info->producing : "?");
-    progress_bar(x, y + 37, 224, 6, info->prod_cost > 0 ? (float)info->shield_stock / info->prod_cost : 0, shld);
+    draw_fit(x, y + 15, LW, 0.55f, white, info->producing[0] ? info->producing : "?");
+    progress_bar(x, y + 37, LW, 6, info->prod_cost > 0 ? (float)info->shield_stock / info->prod_cost : 0, shld);
     snprintf(line, sizeof(line), "%d/%d shields, %d turn%s", info->shield_stock, info->prod_cost,
              info->prod_turns, info->prod_turns == 1 ? "" : "s");
-    draw_text(x, y + 44, 0.42f, soft, line);
+    draw_fit(x, y + 44, LW, 0.42f, soft, line);
     if (info->can_buy) {
         snprintf(line, sizeof(line), "Buy now: %d gold", info->buy_cost);
         draw_text(x, y + 60, 0.42f, C2D_Color32(0x70, 0xE0, 0x70, 0xFF), line);
@@ -2471,8 +2517,9 @@ void render_city_top(const CityInfo *info, int garrison_sel)
 
     // Right column: units in the city (Y leads the highlighted one out).
     layer(4.0f);
-    float rx = 252;
-    C2D_DrawRectSolid(rx - 6, 38, 0.0f, 152, 172, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
+    const float BW = NARROW ? 118 : 152; // units box width
+    float rx = TW - BW + 4;
+    C2D_DrawRectSolid(rx - 6, 38, 0.0f, BW, 172, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
     snprintf(line, sizeof(line), "Units here (%d)", info->garrison_count);
     draw_text(rx, 40, 0.45f, label, line);
     if (info->garrison_count == 0) {
@@ -2484,11 +2531,11 @@ void render_city_top(const CityInfo *info, int garrison_sel)
             int idx = window + i;
             float uy = 60 + i * 29;
             bool sel = idx == garrison_sel;
-            if (sel) C2D_DrawRectSolid(rx - 4, uy - 1, 0.01f, 148, 28, C2D_Color32(0x34, 0x50, 0x78, 0xFF));
+            if (sel) C2D_DrawRectSolid(rx - 4, uy - 1, 0.01f, BW - 4, 28, C2D_Color32(0x34, 0x50, 0x78, 0xFF));
             C2D_DrawImageAt(C2D_SpriteSheetGetImage(g_spriteSheet, get_unit_sprite(info->garrison_names[idx])),
                             rx - 2, uy - 2, 0.02f, NULL, 1.0f, 1.0f);
-            draw_text_z(rx + 32, uy + 3, 0.03f, 0.47f, sel ? C2D_Color32(0xFF, 0xE8, 0x80, 0xFF) : soft,
-                        info->garrison_names[idx]);
+            draw_fit_z(rx + 32, uy + 3, 0.03f, BW - 40, 0.47f, sel ? C2D_Color32(0xFF, 0xE8, 0x80, 0xFF) : soft,
+                       info->garrison_names[idx]);
         }
         if (window + per < info->garrison_count) {
             snprintf(line, sizeof(line), "+%d more", info->garrison_count - window - per);
@@ -2497,10 +2544,9 @@ void render_city_top(const CityInfo *info, int garrison_sel)
     }
 
     layer(0.0f);
-    C2D_DrawRectSolid(0, 240 - 17, 0.0f, 400, 17, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
-    draw_text(5, 240 - 16, 0.45f, soft, info->garrison_count > 0
-              ? "L/R: other cities   Y: lead the first unit out   B: close"
-              : "L/R: other cities   B: close");
+    hint_strip(info->garrison_count > 0
+               ? "L/R: other cities   Y: lead the first unit out   B: close"
+               : "L/R: other cities   B: close", soft);
 }
 
 void draw_scroll_list(int x, const ScrollRow *rows, int count)
@@ -2798,65 +2844,69 @@ void render_civ_top(const CivInfo *civ, const char *title)
     u32 c_sci = C2D_Color32(0x70, 0xB8, 0xFF, 0xFF);
     char line[128];
 
-    C2D_DrawRectSolid(0, 0, 0.0f, 400, 32, C2D_Color32(0x14, 0x1E, 0x2E, 0xFF));
+    C2D_DrawRectSolid(0, 0, 0.0f, TW, 32, C2D_Color32(0x14, 0x1E, 0x2E, 0xFF));
     C2D_DrawRectSolid(0, 0, 0.01f, 6, 32, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
-    C2D_DrawRectSolid(0, 32, 0.0f, 400, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
+    C2D_DrawRectSolid(0, 32, 0.0f, TW, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
     draw_text(14, 3, 0.85f, white, title);
     snprintf(line, sizeof(line), "Gold %d  (%+d a turn)", civ->gold, civ->gold_per_turn);
-    draw_text(392 - text_width(line, 0.55f), 7, 0.55f, civ->gold_per_turn < 0 ? C2D_Color32(0xFF, 0x80, 0x70, 0xFF) : c_tax, line);
+    float gs = 0.55f, tleft = 14 + text_width(title, 0.85f) + 10;
+    if (TW - 8 - text_width(line, gs) < tleft) // narrow screen: the short form, a little smaller if need be
+        snprintf(line, sizeof(line), "Gold %d (%+d)", civ->gold, civ->gold_per_turn);
+    while (gs > 0.42f && TW - 8 - text_width(line, gs) < tleft) gs -= 0.01f;
+    draw_text(TW - 8 - text_width(line, gs), 7 + (0.55f - gs) * 10, gs, civ->gold_per_turn < 0 ? C2D_Color32(0xFF, 0x80, 0x70, 0xFF) : c_tax, line);
 
     // Research card.
     layer(3.0f);
-    C2D_DrawRectSolid(8, 40, 0.0f, 188, 84, card);
+    const float CW2 = NARROW ? (TW - 24) / 2 : 188, C2X = 8 + CW2 + 8; // two cards side by side
+    C2D_DrawRectSolid(8, 40, 0.0f, CW2, 84, card);
     draw_text(16, 42, 0.45f, label, "Researching");
-    draw_text(16, 58, 0.6f, white, civ->research_name[0] ? civ->research_name : "Nothing");
-    progress_bar(16, 84, 172, 7, civ->bulbs_needed > 0 ? (float)civ->bulbs / civ->bulbs_needed : 0, c_sci);
+    draw_fit(16, 58, CW2 - 16, 0.6f, white, civ->research_name[0] ? civ->research_name : "Nothing");
+    progress_bar(16, 84, CW2 - 16, 7, civ->bulbs_needed > 0 ? (float)civ->bulbs / civ->bulbs_needed : 0, c_sci);
     if (civ->research_turns >= 0)
         snprintf(line, sizeof(line), "%d/%d bulbs, %d turn%s", civ->bulbs, civ->bulbs_needed,
                  civ->research_turns, civ->research_turns == 1 ? "" : "s");
     else
         snprintf(line, sizeof(line), "%d/%d bulbs, no science", civ->bulbs, civ->bulbs_needed);
-    draw_text(16, 96, 0.42f, soft, line);
+    draw_fit(16, 96, CW2 - 16, 0.42f, soft, line);
     if (civ->goal_name[0]) {
         snprintf(line, sizeof(line), "Goal: %s", civ->goal_name);
-        draw_text(16, 108, 0.42f, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF), line);
+        draw_fit(16, 108, CW2 - 16, 0.42f, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF), line);
     }
 
     // Government card.
-    C2D_DrawRectSolid(204, 40, 0.0f, 188, 84, card);
-    draw_text(212, 42, 0.45f, label, "Government");
-    draw_text(212, 58, 0.6f, white, civ->government_name[0] ? civ->government_name : "?");
+    C2D_DrawRectSolid(C2X, 40, 0.0f, CW2, 84, card);
+    draw_text(C2X + 8, 42, 0.45f, label, "Government");
+    draw_fit(C2X + 8, 58, CW2 - 16, 0.6f, white, civ->government_name[0] ? civ->government_name : "?");
     if (civ->target_government_id >= 0) {
         snprintf(line, sizeof(line), "Revolution: %d turn%s left", civ->revolution_turns,
                  civ->revolution_turns == 1 ? "" : "s");
-        draw_text(212, 88, 0.45f, C2D_Color32(0xFF, 0xA0, 0x60, 0xFF), line);
+        draw_fit(C2X + 8, 88, CW2 - 16, 0.45f, C2D_Color32(0xFF, 0xA0, 0x60, 0xFF), line);
     } else {
-        draw_text(212, 88, 0.42f, soft, "Stable");
+        draw_text(C2X + 8, 88, 0.42f, soft, "Stable");
     }
 
     // Rates: one stacked bar.
-    C2D_DrawRectSolid(8, 132, 0.0f, 384, 76, card);
+    C2D_DrawRectSolid(8, 132, 0.0f, TW - 16, 76, card);
     draw_text(16, 134, 0.45f, label, "Where your trade goes");
-    float bx = 16, bw = 368, by = 156;
+    float bx = 16, bw = TW - 32, by = 156;
     C2D_DrawRectSolid(bx, by, 0.01f, bw * civ->tax / 100.0f, 12, c_tax);
     C2D_DrawRectSolid(bx + bw * civ->tax / 100.0f, by, 0.01f, bw * civ->lux / 100.0f, 12, c_lux);
     C2D_DrawRectSolid(bx + bw * (civ->tax + civ->lux) / 100.0f, by, 0.01f, bw * civ->sci / 100.0f, 12, c_sci);
     snprintf(line, sizeof(line), "Tax %d%%", civ->tax);
     draw_text(16, 174, 0.47f, c_tax, line);
     snprintf(line, sizeof(line), "Luxury %d%%", civ->lux);
-    draw_text(136, 174, 0.47f, c_lux, line);
+    draw_text(NARROW ? 16 + bw * 0.31f : 136, 174, 0.47f, c_lux, line);
     snprintf(line, sizeof(line), "Science %d%%", civ->sci);
-    draw_text(266, 174, 0.47f, c_sci, line);
+    draw_text(NARROW ? TW - 16 - text_width(line, 0.47f) : 266, 174, 0.47f, c_sci, line);
     snprintf(line, sizeof(line), "Highest rate allowed by %s: %d%%", civ->government_name, civ->max_rate);
-    draw_text(16, 190, 0.4f, label, line);
+    draw_fit(16, 190, TW - 32, 0.4f, label, line);
 
     layer(0.0f);
-    C2D_DrawRectSolid(0, 240 - 17, 0.0f, 400, 17, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
     const char *hint = "B: close";
     if (!strcmp(title, "Research")) hint = "Tap a technology below to research it.   Y: tree / list   B: close";
     else if (!strcmp(title, "Tax & Science")) hint = "Use - and + below to set tax and luxury; science takes the rest.";
     else if (!strcmp(title, "Government")) hint = "Tap a government below to start a revolution.   B: close";
-    draw_text(5, 240 - 16, 0.45f, soft, hint);
+    hint_strip(hint, soft);
 }
 
 void render_research_panel(const TechOption *opts, int n, int scroll)
@@ -3197,37 +3247,37 @@ void render_diplomacy_top(int stage, const char *counterpart_name, const DiploIn
     u32 ok    = C2D_Color32(0x70, 0xE0, 0x70, 0xFF);
     char line[96];
 
-    C2D_DrawRectSolid(0, 0, 0.0f, 400, 32, C2D_Color32(0x14, 0x1E, 0x2E, 0xFF));
+    C2D_DrawRectSolid(0, 0, 0.0f, TW, 32, C2D_Color32(0x14, 0x1E, 0x2E, 0xFF));
     C2D_DrawRectSolid(0, 0, 0.01f, 6, 32, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
-    C2D_DrawRectSolid(0, 32, 0.0f, 400, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
+    C2D_DrawRectSolid(0, 32, 0.0f, TW, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
     draw_text(14, 3, 0.85f, white, "Diplomacy");
 
     layer(3.0f);
     if (stage == 1) {
-        C2D_DrawRectSolid(8, 44, 0.0f, 384, 120, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
+        C2D_DrawRectSolid(8, 44, 0.0f, TW - 16, 120, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
         draw_text(18, 52, 0.6f, white, "Meet another leader");
-        draw_text(18, 80, 0.47f, soft, "Pick a civilization below to open talks.");
-        draw_text(18, 100, 0.47f, soft, "You can offer peace, a ceasefire, an embassy");
-        draw_text(18, 118, 0.47f, soft, "or gold. A treaty is made when both accept.");
+        draw_wrapped("Pick a civilization below to open talks.", 18, 80, TW - 36, 0.47f, soft, 1, 18, 0.0f);
+        draw_wrapped("You can offer peace, a ceasefire, an embassy or gold. A treaty is made when both accept.",
+                     18, 100, TW - 36, 0.47f, soft, 3, 18, 0.0f);
     } else {
-        C2D_DrawRectSolid(8, 44, 0.0f, 384, 166, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
+        C2D_DrawRectSolid(8, 44, 0.0f, TW - 16, 166, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
         draw_text(18, 48, 0.45f, label, "Talks with");
         float ns = 0.7f; // long leader names must stop short of the badges
-        while (ns > 0.42f && text_width(counterpart_name, ns) > 228) ns -= 0.02f;
+        while (ns > 0.42f && text_width(counterpart_name, ns) > TW - 172) ns -= 0.02f;
         draw_text(18, 64 + (0.7f - ns) * 12, ns, white, counterpart_name);
         // acceptance badges
         struct { const char *who; bool yes; } b[2] = { { "You", diplo->accept_self }, { "Them", diplo->accept_other } };
         for (int i = 0; i < 2; i++) {
-            float x = 250 + i * 70;
+            float x = TW - 150 + i * 70;
             C2D_DrawRectSolid(x, 52, 0.01f, 62, 36, b[i].yes ? C2D_Color32(0x2E, 0x6A, 0x34, 0xFF) : C2D_Color32(0x2A, 0x30, 0x3C, 0xFF));
             draw_text_z(x + 31 - text_width(b[i].who, 0.42f) / 2, 52, 0.02f, 0.42f, soft, b[i].who);
             const char *st = b[i].yes ? "Accepts" : "Thinking";
             draw_text_z(x + 31 - text_width(st, 0.42f) / 2, 68, 0.02f, 0.42f, b[i].yes ? ok : label, st);
         }
         draw_text(18, 98, 0.45f, label, "On the table");
-        if (diplo->clause_count == 0) draw_text(18, 116, 0.47f, soft, "Nothing yet - add something below.");
+        if (diplo->clause_count == 0) draw_fit(18, 116, TW - 36, 0.47f, soft, "Nothing yet - add something below.");
         for (int i = 0; i < diplo->clause_count && i < 5; i++) {
-            draw_text(18, 116 + i * 17, 0.47f, white, diplo->clauses[i].desc);
+            draw_fit(18, 116 + i * 17, TW - 36, 0.47f, white, diplo->clauses[i].desc);
         }
         if (diplo->clause_count > 5) {
             snprintf(line, sizeof(line), "+%d more", diplo->clause_count - 5);
@@ -3235,9 +3285,8 @@ void render_diplomacy_top(int stage, const char *counterpart_name, const DiploIn
         }
     }
     layer(0.0f);
-    C2D_DrawRectSolid(0, 240 - 17, 0.0f, 400, 17, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
-    draw_text(5, 240 - 16, 0.45f, soft, stage == 1 ? "Tap a civilization below.   B: close"
-                                                   : "Add terms, then Accept. Tap a term below to remove it.");
+    hint_strip(stage == 1 ? "Tap a civilization below.   B: close"
+                          : "Add terms, then Accept. Tap a term below to remove it.", soft);
 }
 
 void render_diplomacy_panel(int stage, const char *counterpart_name,
@@ -3390,7 +3439,7 @@ void render_title_top(int frame, const char *line, const char *headline)
 {
     C2D_TextBufClear(g_textBuf);
     layer(0.0f);
-    draw_backdrop(frame, 400, 240, 0x70);
+    draw_backdrop(frame, TW, 240, 0x70);
     // Logo floats in front (stereo), with a gentle bob.
     if (!s_title_sheet) s_title_sheet = C2D_SpriteSheetLoad("romfs:/gfx/title.t3x");
     layer(4.0f);
@@ -3398,19 +3447,19 @@ void render_title_top(int frame, const char *line, const char *headline)
     if (s_title_sheet) {
         C2D_Image logo = C2D_SpriteSheetGetImage(s_title_sheet, 0);
         float lw = logo.subtex->width;
-        C2D_DrawImageAt(logo, (400 - lw) / 2, 44 + bob, 0.5f, NULL, 1.0f, 1.0f);
+        C2D_DrawImageAt(logo, (TW - lw) / 2, 44 + bob, 0.5f, NULL, 1.0f, 1.0f);
     } else {
-        draw_text_z(120, 50, 0.2f, 0.9f, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF), "FREECIV");
+        draw_text_z(TW / 2 - 80, 50, 0.2f, 0.9f, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF), "FREECIV");
     }
     layer(2.0f);
     const char *tag = headline ? headline : "Build a civilization, on two screens";
-    float tw = text_width(tag, 0.55f);
-    draw_text_z((400 - tw) / 2, 116 + bob * 0.5f, 0.2f, 0.55f, C2D_Color32(0xF4, 0xEC, 0xD8, 0xFF), tag);
+    float tsc = fit_scale(tag, 0.55f, TW - 20, 0.42f), tw = text_width(tag, tsc);
+    draw_text_z((TW - tw) / 2, 116 + bob * 0.5f, 0.2f, tsc, C2D_Color32(0xF4, 0xEC, 0xD8, 0xFF), tag);
     layer(0.0f);
     if (line && line[0]) {
-        C2D_DrawRectSolid(0, 240 - 30, 0.02f, 400, 30, C2D_Color32(0x06, 0x0A, 0x12, 0xC8));
-        C2D_DrawRectSolid(0, 240 - 30, 0.03f, 400, 1, C2D_Color32(0xFF, 0xD8, 0x60, 0x90));
-        draw_wrapped(line, 10, 240 - 26, 380, 0.47f, C2D_Color32(0xE0, 0xE6, 0xEE, 0xFF), 2, 15, 0.04f);
+        C2D_DrawRectSolid(0, 240 - 30, 0.02f, TW, 30, C2D_Color32(0x06, 0x0A, 0x12, 0xC8));
+        C2D_DrawRectSolid(0, 240 - 30, 0.03f, TW, 1, C2D_Color32(0xFF, 0xD8, 0x60, 0x90));
+        draw_wrapped(line, 10, 240 - 26, TW - 20, 0.47f, C2D_Color32(0xE0, 0xE6, 0xEE, 0xFF), 2, 15, 0.04f);
     }
 }
 
@@ -3476,7 +3525,7 @@ void render_title_controls_top(int frame)
 {
     C2D_TextBufClear(g_textBuf);
     layer(0.0f);
-    draw_backdrop(frame, 400, 240, 0xD0);
+    draw_backdrop(frame, TW, 240, 0xD0);
     draw_text_z(12, 6, 0.2f, 0.6f, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF), "Controls");
     static const char *rows[][2] = {
         { "Tap a unit",        "select it; orders show above the bar" },
@@ -3494,10 +3543,12 @@ void render_title_controls_top(int frame)
     u32 key = C2D_Color32(0xFF, 0xE8, 0xA0, 0xFF), val = C2D_Color32(0xE0, 0xE6, 0xEE, 0xFF);
     for (int i = 0; i < (int)(sizeof(rows) / sizeof(rows[0])); i++) {
         float y = 30 + i * 19;
-        draw_text_z(12, y, 0.2f, 0.45f, key, rows[i][0]);
-        float sc = 0.45f;
-        while (text_width(rows[i][1], sc) > 400 - 140 - 8 && sc > 0.34f) sc -= 0.01f;
-        draw_text_z(140, y, 0.2f, sc, val, rows[i][1]);
+        // Narrow screen (swapped): a slimmer key column so the descriptions keep a readable size.
+        const float kx = NARROW ? 8 : 12, vx = NARROW ? 114 : 140;
+        float ks = fit_scale(rows[i][0], 0.45f, vx - kx - 6, 0.38f);
+        draw_text_z(kx, y + (0.45f - ks) * 8, 0.2f, ks, key, rows[i][0]);
+        float sc = fit_scale(rows[i][1], 0.45f, TW - vx - 6, NARROW ? 0.38f : 0.34f);
+        draw_text_z(vx, y + (0.45f - sc) * 8, 0.2f, sc, val, rows[i][1]);
     }
 }
 
@@ -3554,14 +3605,13 @@ void render_new_game_top(bool is_new_3ds, const char *summary)
     u32 label = C2D_Color32(0x8C, 0xA0, 0xB4, 0xFF);
     int f = (int)(osGetTime() / 17); // same for both eyes
     layer(0.0f);
-    draw_backdrop(f, 400, 240, 0xC8);
+    draw_backdrop(f, TW, 240, 0xC8);
     draw_text_z(16, 20, 0.2f, 0.9f, white, "Freeciv 3DS");
-    draw_wrapped(summary, 16, 56, 368, 0.5f, soft, 4, 17, 0.2f);
+    draw_wrapped(summary, 16, 56, TW - 32, 0.5f, soft, 5, 17, 0.2f);
     if (!strncmp(summary, "Pick a saved", 12)) return; // load picker: the hardware notes are for new games
-    draw_text_z(16, 150, 0.2f, 0.45f, label, is_new_3ds
-        ? "New 3DS detected: 804 MHz, room for big maps."
-        : "Old 3DS detected: smaller maps keep turns quick.");
-    draw_text_z(16, 170, 0.2f, 0.45f, label, "Larger maps and more rivals mean longer AI turns.");
+    int n = draw_wrapped(is_new_3ds ? "New 3DS detected: 804 MHz, room for big maps."
+                                    : "Old 3DS detected: smaller maps keep turns quick.", 16, 150, TW - 32, 0.45f, label, 2, 15, 0.2f);
+    draw_wrapped("Larger maps and more rivals mean longer AI turns.", 16, 155 + n * 15, TW - 32, 0.45f, label, 2, 15, 0.2f);
 }
 
 void render_messages_panel(const GameMessage *msgs, int n, int scroll, int highlight)
@@ -3592,26 +3642,25 @@ void render_messages_top(const GameMessage *m)
 {
     C2D_TextBufClear(g_textBuf);
     u32 soft = C2D_Color32(0xC0, 0xCE, 0xDC, 0xFF);
-    C2D_DrawRectSolid(0, 0, 0.0f, 400, 32, C2D_Color32(0x14, 0x1E, 0x2E, 0xFF));
+    C2D_DrawRectSolid(0, 0, 0.0f, TW, 32, C2D_Color32(0x14, 0x1E, 0x2E, 0xFF));
     C2D_DrawRectSolid(0, 0, 0.01f, 6, 32, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF));
-    C2D_DrawRectSolid(0, 32, 0.0f, 400, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
+    C2D_DrawRectSolid(0, 32, 0.0f, TW, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
     draw_text(14, 3, 0.85f, 0xFFFFFFFF, "Messages");
     layer(3.0f);
-    C2D_DrawRectSolid(8, 44, 0.0f, 384, 166, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
+    C2D_DrawRectSolid(8, 44, 0.0f, TW - 16, 166, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
     if (m) {
         static const char *cats[] = { "News", "Combat", "Cities", "Science", "Diplomacy", "Good news" };
         char line[48];
         snprintf(line, sizeof(line), "%s - turn %d", cats[m->category % 6], m->turn);
         C2D_DrawRectSolid(16, 54, 0.01f, 8, 8, msg_color(m->category));
         draw_text(30, 48, 0.47f, msg_color(m->category), line);
-        draw_wrapped(m->text, 18, 72, 364, 0.55f, 0xFFFFFFFF, 7, 19, 0.01f);
+        draw_wrapped(m->text, 18, 72, TW - 36, NARROW ? 0.5f : 0.55f, 0xFFFFFFFF, 6, NARROW ? 17 : 19, 0.01f);
         if (m->x >= 0) draw_text(18, 190, 0.42f, soft, "Tap it again below to go there.");
     } else {
         draw_text(18, 52, 0.55f, soft, "Nothing has happened yet.");
     }
     layer(0.0f);
-    C2D_DrawRectSolid(0, 240 - 17, 0.0f, 400, 17, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
-    draw_text(5, 240 - 16, 0.45f, soft, "D-Pad: scroll   B: close");
+    hint_strip("D-Pad: scroll   B: close", soft);
 }
 
 void render_pedia_panel(int kind, const PediaEntry *list, int n, int scroll, int selected)
@@ -3650,12 +3699,12 @@ void render_pedia_top(const char *title, const char *text, int scroll_lines,
 {
     C2D_TextBufClear(g_textBuf);
     u32 soft = C2D_Color32(0xC0, 0xCE, 0xDC, 0xFF);
-    C2D_DrawRectSolid(0, 0, 0.0f, 400, 32, C2D_Color32(0x14, 0x1E, 0x2E, 0xFF));
+    C2D_DrawRectSolid(0, 0, 0.0f, TW, 32, C2D_Color32(0x14, 0x1E, 0x2E, 0xFF));
     C2D_DrawRectSolid(0, 0, 0.01f, 6, 32, C2D_Color32(0x70, 0xB8, 0xFF, 0xFF));
-    C2D_DrawRectSolid(0, 32, 0.0f, 400, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
+    C2D_DrawRectSolid(0, 32, 0.0f, TW, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
     draw_text(14, 3, 0.85f, 0xFFFFFFFF, title && title[0] ? title : "Encyclopedia");
     layer(3.0f);
-    C2D_DrawRectSolid(8, 40, 0.0f, 384, 176, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
+    C2D_DrawRectSolid(8, 40, 0.0f, TW - 16, 176, C2D_Color32(0x10, 0x18, 0x26, 0xFF));
 
     // The entry's picture, framed at the top right; text beside it wraps
     // narrower until it clears the frame. The icon sheet loads on first use.
@@ -3679,10 +3728,12 @@ void render_pedia_top(const char *title, const char *text, int scroll_lines,
             }
         }
     }
-    float text_w_near = 368, pic_bottom = 0;
+    float text_w_near = TW - 32, pic_bottom = 0;
+    const char *foot = "L/R: scroll the text   D-Pad: list   B: close";
+    const float text_end = hint_strip_top(foot) - 20; // last line starts above the hint
     if (pic.tex) {
         float pw = pic.subtex->width * pic_scale, ph = pic.subtex->height * pic_scale;
-        float fx = 384 - 4 - 84, fy = 44;
+        float fx = TW - 16 - 4 - 84, fy = 44;
         C2D_DrawRectSolid(fx, fy, 0.01f, 84, 68, C2D_Color32(0x1C, 0x28, 0x3A, 0xFF));
         C2D_DrawImageAt(pic, fx + (84 - pw) / 2, fy + (68 - ph) / 2, 0.02f, NULL, pic_scale, pic_scale);
         text_w_near = fx - 16 - 8;
@@ -3693,7 +3744,7 @@ void render_pedia_top(const char *title, const char *text, int scroll_lines,
     int line_no = 0;
     const char *p = text ? text : "";
     char para[1200];
-    while (*p && y < 204) {
+    while (*p && y < text_end) {
         const char *e = strchr(p, '\n');
         int l = e ? (int)(e - p) : (int)strlen(p);
         if (l >= (int)sizeof(para)) l = sizeof(para) - 1;
@@ -3710,14 +3761,14 @@ void render_pedia_top(const char *title, const char *text, int scroll_lines,
                 while (q[j] && q[j] != ' ') j++;
                 if (j >= (int)sizeof(line)) break;
                 memcpy(line, q, j); line[j] = 0;
-                if (font_width(line, 0.47f) > (y < pic_bottom ? text_w_near : 368) && best) break;
+                if (font_width(line, 0.47f) > (y < pic_bottom ? text_w_near : TW - 32) && best) break;
                 best = j;
                 if (!q[j]) break;
                 i = j + 1;
             }
             if (!best) best = strlen(q) < sizeof(line) - 1 ? (int)strlen(q) : (int)sizeof(line) - 1;
             memcpy(line, q, best); line[best] = 0;
-            if (line_no++ >= scroll_lines && y < 204) {
+            if (line_no++ >= scroll_lines && y < text_end) {
                 draw_text_z(16, y, 0.01f, 0.47f, 0xFFFFFFFF, line);
                 y += 16;
             }
@@ -3726,8 +3777,7 @@ void render_pedia_top(const char *title, const char *text, int scroll_lines,
         }
     }
     layer(0.0f);
-    C2D_DrawRectSolid(0, 240 - 17, 0.0f, 400, 17, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
-    draw_text(5, 240 - 16, 0.45f, soft, "L/R: scroll the text   D-Pad: list   B: close");
+    hint_strip(foot, soft);
 }
 
 void render_spaceship_top(const SpaceshipInfo *s)
@@ -3735,24 +3785,23 @@ void render_spaceship_top(const SpaceshipInfo *s)
     C2D_TextBufClear(g_textBuf);
     u32 soft = C2D_Color32(0xC0, 0xCE, 0xDC, 0xFF), label = C2D_Color32(0x8C, 0xA0, 0xB4, 0xFF);
     char line[96];
-    C2D_DrawRectSolid(0, 0, 0.0f, 400, 240, C2D_Color32(0x06, 0x08, 0x14, 0xFF));
+    C2D_DrawRectSolid(0, 0, 0.0f, TW, 240, C2D_Color32(0x06, 0x08, 0x14, 0xFF));
     // a few stars
     for (int i = 0; i < 60; i++) {
-        int x = (i * 97 + 13) % 400, y = (i * 53 + 29) % 240;
+        int x = (i * 97 + 13) % (int)TW, y = (i * 53 + 29) % 240;
         C2D_DrawRectSolid(x, y, 0.0f, 1 + (i % 3 == 0), 1 + (i % 3 == 0), C2D_Color32(0xC0, 0xC8, 0xE0, 0xC0));
     }
     draw_text(14, 6, 0.85f, 0xFFFFFFFF, "Spaceship");
     layer(4.0f);
-    C2D_DrawRectSolid(8, 44, 0.0f, 384, 170, C2D_Color32(0x10, 0x18, 0x26, 0xE8));
+    C2D_DrawRectSolid(8, 44, 0.0f, TW - 16, 170, C2D_Color32(0x10, 0x18, 0x26, 0xE8));
     static const char *states[] = { "Not started", "Under construction", "On its way", "Arrived" };
     draw_text(18, 50, 0.6f, 0xFFFFFFFF, states[s->state & 3]);
     if (s->state == 0) {
-        draw_text(18, 80, 0.47f, soft, "Research Space Flight, then build the Apollo Program.");
-        draw_text(18, 98, 0.47f, soft, "Cities can then build Structurals, Components and");
-        draw_text(18, 116, 0.47f, soft, "Modules. Parts are fitted automatically each turn.");
+        draw_wrapped("Research Space Flight, then build the Apollo Program. Cities can then build Structurals, "
+                     "Components and Modules. Parts are fitted automatically each turn.", 18, 80, TW - 36, 0.47f, soft, 7, 18, 0.0f);
     } else {
         snprintf(line, sizeof(line), "Structurals %d   Components %d   Modules %d", s->structurals, s->components, s->modules);
-        draw_text(18, 80, 0.5f, soft, line);
+        draw_fit(18, 80, TW - 36, 0.5f, soft, line);
         snprintf(line, sizeof(line), "Colonists %d", s->population);
         draw_text(18, 102, 0.5f, soft, line);
         snprintf(line, sizeof(line), "Chance of success: %d%%", s->success_pct);
@@ -3782,14 +3831,15 @@ void render_game_over_top(bool won, int score, int turn)
 {
     C2D_TextBufClear(g_textBuf);
     char line[64];
-    C2D_DrawRectSolid(0, 0, 0.0f, 400, 240, won ? C2D_Color32(0x14, 0x22, 0x18, 0xFF) : C2D_Color32(0x22, 0x12, 0x14, 0xFF));
+    C2D_DrawRectSolid(0, 0, 0.0f, TW, 240, won ? C2D_Color32(0x14, 0x22, 0x18, 0xFF) : C2D_Color32(0x22, 0x12, 0x14, 0xFF));
     layer(4.0f);
     const char *title = won ? "Victory!" : "Your civilization has fallen";
-    draw_text(200 - text_width(title, 0.9f) / 2, 60, 0.9f, won ? C2D_Color32(0xFF, 0xE0, 0x60, 0xFF) : 0xFFFFFFFF, title);
+    float ts = fit_scale(title, 0.9f, TW - 20, 0.5f);
+    draw_text(TW / 2 - text_width(title, ts) / 2, 60 + (0.9f - ts) * 12, ts, won ? C2D_Color32(0xFF, 0xE0, 0x60, 0xFF) : 0xFFFFFFFF, title);
     snprintf(line, sizeof(line), "Turn %d", turn);
-    draw_text(200 - text_width(line, 0.55f) / 2, 110, 0.55f, C2D_Color32(0xC0, 0xCE, 0xDC, 0xFF), line);
+    draw_text(TW / 2 - text_width(line, 0.55f) / 2, 110, 0.55f, C2D_Color32(0xC0, 0xCE, 0xDC, 0xFF), line);
     snprintf(line, sizeof(line), "Score %d", score);
-    draw_text(200 - text_width(line, 0.7f) / 2, 136, 0.7f, 0xFFFFFFFF, line);
+    draw_text(TW / 2 - text_width(line, 0.7f) / 2, 136, 0.7f, 0xFFFFFFFF, line);
     layer(0.0f);
 }
 
@@ -3857,7 +3907,7 @@ void render_load_picker(const SaveFile *files, int n, int scroll)
 #define MAN_MAX_SECTIONS 24
 #define MAN_MAX_LINES    600
 #define MAN_TEXT_X       12
-#define MAN_TEXT_W       376
+#define MAN_TEXT_W       ((int)TW - 24) // follows the screen it is on (wider on top, 320 when swapped)
 #define MAN_TOP          28
 #define MAN_BOTTOM       222
 #define MAN_SCALE        0.47f
@@ -3871,7 +3921,7 @@ static const char *s_man_body[MAN_MAX_SECTIONS], *s_man_end[MAN_MAX_SECTIONS];
 static int     s_man_n;
 static int     s_man_sec, s_man_scroll;      // section, scroll in px
 static ManLine *s_ml;
-static int     s_ml_n, s_ml_sec = -1, s_ml_bias = -1, s_ml_h;
+static int     s_ml_n, s_ml_sec = -1, s_ml_bias = -1, s_ml_h, s_ml_w = -1;
 
 static bool man_parse(FILE *f)
 {
@@ -3962,8 +4012,8 @@ static void man_wrap(const char *text, float w, float scale, int kind, int x, co
 
 static void man_layout(void)
 {
-    if (s_ml_sec == s_man_sec && s_ml_bias == font_get_bias()) return;
-    s_ml_sec = s_man_sec; s_ml_bias = font_get_bias();
+    if (s_ml_sec == s_man_sec && s_ml_bias == font_get_bias() && s_ml_w == MAN_TEXT_W) return;
+    s_ml_sec = s_man_sec; s_ml_bias = font_get_bias(); s_ml_w = MAN_TEXT_W;
     s_ml_n = 0; s_ml_h = 0;
     if (s_man_sec < 0 || s_man_sec >= s_man_n) return;
     const char *p = s_man_body[s_man_sec];
@@ -3993,7 +4043,8 @@ static void man_layout(void)
             while (*a == ' ') a++;
             for (char *e = a + strlen(a); e > a && e[-1] == ' '; ) *--e = 0;
             while (*b == ' ') b++;
-            man_wrap(b, MAN_TEXT_W - 132, 0.45f, ML_ROW, 132, a, true);
+            const int kc = NARROW ? 110 : 132; // key column of a two-column row
+            man_wrap(b, MAN_TEXT_W - kc, 0.45f, ML_ROW, kc, a, true);
         } else {
             man_wrap(ln, MAN_TEXT_W, MAN_SCALE, ML_TEXT, 0, "", false);
         }
@@ -4014,21 +4065,25 @@ void render_manual_top(void)
     man_load();
     man_layout();
     u32 white = 0xFFFFFFFF, soft = C2D_Color32(0xC0, 0xCE, 0xDC, 0xFF), gold = C2D_Color32(0xFF, 0xD8, 0x60, 0xFF);
-    C2D_DrawRectSolid(0, 0, 0.0f, 400, 240, C2D_Color32(0x10, 0x16, 0x22, 0xFF));
+    man_layout(); // again: the width may have changed (ZL swap)
+    if (s_man_scroll > man_max_scroll()) s_man_scroll = man_max_scroll();
+    C2D_DrawRectSolid(0, 0, 0.0f, TW, 240, C2D_Color32(0x10, 0x16, 0x22, 0xFF));
     // Header and footer bands sit in front of the text, hiding what scrolls under them.
-    C2D_DrawRectSolid(0, 0, 0.5f, 400, 24, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
-    C2D_DrawRectSolid(0, 24, 0.5f, 400, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
+    C2D_DrawRectSolid(0, 0, 0.5f, TW, 24, C2D_Color32(0x2C, 0x50, 0x80, 0xFF));
+    C2D_DrawRectSolid(0, 24, 0.5f, TW, 1, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
     char hdr[64];
     if (s_man_n == 0) {
         draw_text_z(10, 3, 0.51f, 0.6f, white, "Manual");
-        draw_text(12, 40, 0.5f, soft, "The manual is missing or has no \"# \" sections.");
+        draw_wrapped("The manual is missing or has no \"# \" sections.", 12, 40, TW - 24, 0.5f, soft, 3, 18, 0.0f);
         return;
     }
-    draw_text_z(10, 2, 0.51f, 0.6f, white, s_man_title[s_man_sec]);
     snprintf(hdr, sizeof(hdr), "%d of %d", s_man_sec + 1, s_man_n);
-    draw_text_z(392 - text_width(hdr, 0.45f), 5, 0.51f, 0.45f, C2D_Color32(0xC8, 0xD8, 0xE8, 0xFF), hdr);
-    C2D_DrawRectSolid(0, MAN_BOTTOM + 1, 0.5f, 400, 240 - MAN_BOTTOM - 1, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
-    draw_text_z(5, 240 - 16, 0.51f, 0.45f, soft, "D-Pad / Circle Pad: scroll   L / R: section   B: close");
+    float hw = text_width(hdr, 0.45f);
+    draw_fit_z(10, 2, 0.51f, TW - 8 - hw - 18, 0.6f, white, s_man_title[s_man_sec]);
+    draw_text_z(TW - 8 - hw, 5, 0.51f, 0.45f, C2D_Color32(0xC8, 0xD8, 0xE8, 0xFF), hdr);
+    C2D_DrawRectSolid(0, MAN_BOTTOM + 1, 0.5f, TW, 240 - MAN_BOTTOM - 1, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
+    const char *foot = lh("Sticks: scroll   D-Pad, L / R: section   B: close");
+    draw_text_z(5, 240 - 16, 0.51f, fit_scale(foot, 0.45f, TW - 10, 0.40f), soft, foot);
 
     int y = MAN_TOP - s_man_scroll;
     for (int i = 0; i < s_ml_n; i++) {
@@ -4057,8 +4112,8 @@ void render_manual_top(void)
     int ms = man_max_scroll();
     if (ms > 0) {
         float track = MAN_BOTTOM - MAN_TOP, th = track * track / (track + ms);
-        C2D_DrawRectSolid(395, MAN_TOP, 0.2f, 3, track, C2D_Color32(0x22, 0x2C, 0x3A, 0xFF));
-        C2D_DrawRectSolid(395, MAN_TOP + (track - th) * s_man_scroll / ms, 0.21f, 3, th, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
+        C2D_DrawRectSolid(TW - 5, MAN_TOP, 0.2f, 3, track, C2D_Color32(0x22, 0x2C, 0x3A, 0xFF));
+        C2D_DrawRectSolid(TW - 5, MAN_TOP + (track - th) * s_man_scroll / ms, 0.21f, 3, th, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));
     }
 }
 
@@ -4117,6 +4172,16 @@ bool manual_input(u32 kDown, u32 kHeld, bool touched, int px, int py, int circle
     int prev = s_man_sec;
     if (kDown & KEY_L) s_man_sec = (s_man_sec + s_man_n - 1) % s_man_n;
     if (kDown & KEY_R) s_man_sec = (s_man_sec + 1) % s_man_n;
+    // Manual standard (all ports): the D-Pad moves between the section buttons, it does not scroll.
+    {
+        int ncell = s_man_n < MAN_COLS * MAN_ROWS ? s_man_n : MAN_COLS * MAN_ROWS - 1;
+        int t = s_man_sec;
+        if (kDown & KEY_DLEFT)  t -= 1;
+        if (kDown & KEY_DRIGHT) t += 1;
+        if (kDown & KEY_DUP)    t -= MAN_COLS;
+        if (kDown & KEY_DDOWN)  t += MAN_COLS;
+        if (t != s_man_sec && t >= 0 && t < ncell) s_man_sec = t;
+    }
     if (touched) {
         int hit = man_hit(px, py);
         if (hit == -2) return false;
@@ -4124,8 +4189,9 @@ bool manual_input(u32 kDown, u32 kHeld, bool touched, int px, int py, int circle
     }
     if (s_man_sec != prev) s_man_scroll = 0;
     man_layout();
-    if (kHeld & KEY_DUP)   s_man_scroll -= 4;
-    if (kHeld & KEY_DDOWN) s_man_scroll += 4;
+    // Circle Pad and C-Stick scroll (hold to keep scrolling).
+    if (kHeld & KEY_CSTICK_UP)   s_man_scroll -= 4;
+    if (kHeld & KEY_CSTICK_DOWN) s_man_scroll += 4;
     if (circle_dy > 20 || circle_dy < -20) s_man_scroll -= circle_dy / 12; // up = scroll up
     int ms = man_max_scroll();
     if (s_man_scroll > ms) s_man_scroll = ms;

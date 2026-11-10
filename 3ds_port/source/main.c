@@ -496,8 +496,8 @@ static bool write_new_game_script(const char *path, const NewGameOpts *o)
     return true;
 }
 
-// ZL swaps the screens (project standard). The top-screen picture (400x240)
-// is drawn on the touch screen at 0.8 scale; the touch-screen picture (320x240)
+// ZL swaps the screens (project standard). The information panels are laid out
+// again at 320 wide on the touch screen (full-size text); the touch-screen picture (320x240)
 // fills the top screen (scaled 1.25 across). 3D is off while swapped; the touch screen is a touchpad.
 static int fc_swapped = 0;
 // Swapped (UI rule 7): the touch screen is a touchpad. Slide moves a pointer over the game picture
@@ -545,11 +545,12 @@ static void fc_draw_pointer(void)    // on the swapped top screen, in 320x240 pi
     C2D_DrawTriangle(x, y, C2D_Color32(255, 255, 255, 255), x, y + 11, C2D_Color32(255, 255, 255, 255),
                      x + 8, y + 9, C2D_Color32(255, 255, 255, 255), 0.995f);
 }
+// Swapped, the information panels are laid out natively for the 320-wide touch screen
+// (never shrunk: principle, both screens stay readable when swapped).
 static void fc_view_top_content(void)
 {
-    // swapped: the 400x240 dashboard shrinks evenly to fit the 320-wide touch screen
-    if (fc_swapped) render_set_base(0.0f, 24.0f, 0.8f, 0.8f);
-    else render_set_base(0.0f, 0.0f, 1.0f, 1.0f);
+    render_set_base(0.0f, 0.0f, 1.0f, 1.0f); // no shrinking: the panels lay themselves out for this width
+    render_set_top_width(fc_swapped ? 320.0f : 400.0f);
 }
 static void fc_view_bottom_content(void)
 {
@@ -1009,7 +1010,7 @@ int main(int argc, char* argv[])
                 C3D_RenderTarget *tgt = fc_swapped ? bottom : (eye ? top_right : top);
                 C2D_TargetClear(tgt, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
                 C2D_SceneBegin(tgt);
-                C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_TOP, true);
+                C2D_SceneSize(GSP_SCREEN_WIDTH, fc_swapped ? GSP_SCREEN_HEIGHT_BOTTOM : GSP_SCREEN_HEIGHT_TOP, true);
                 fc_view_top_content();
                 render_set_stereo(osGet3DSliderState() > 0.02f ? (eye ? 1 : -1) : 0, osGet3DSliderState());
                 if (app_state == APP_START_MENU || app_state == APP_SETTINGS) {
@@ -2520,7 +2521,7 @@ int main(int argc, char* argv[])
                 C3D_RenderTarget *tgt = fc_swapped ? bottom : (eye ? top_right : top);
                 C2D_TargetClear(tgt, C2D_Color32(0x14, 0x1C, 0x28, 0xFF));
                 C2D_SceneBegin(tgt);
-                C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_TOP, true);
+                C2D_SceneSize(GSP_SCREEN_WIDTH, fc_swapped ? GSP_SCREEN_HEIGHT_BOTTOM : GSP_SCREEN_HEIGHT_TOP, true);
                 fc_view_top_content();
                 render_set_stereo(osGet3DSliderState() > 0.02f ? (eye ? 1 : -1) : 0, osGet3DSliderState());
                 render_title_top(title_frame + load_frame, NULL, NULL);
@@ -2556,7 +2557,7 @@ int main(int argc, char* argv[])
             // (240x400 top, 240x320 bottom) to hit its cached, correct
             // projection; passing the landscape dims scales/clips the scene
             // on hardware.
-            C2D_SceneSize(GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_TOP, true);
+            C2D_SceneSize(GSP_SCREEN_WIDTH, fc_swapped ? GSP_SCREEN_HEIGHT_BOTTOM : GSP_SCREEN_HEIGHT_TOP, true);
                 fc_view_top_content();
             switch (game_over && !game_over_shown ? -1 : (int)ui_mode) {
             case -1:
@@ -2650,7 +2651,7 @@ int main(int argc, char* argv[])
             }
                 break;
             }
-            if (show_busy_indicator) render_busy_indicator(SCREEN_WIDTH_TOP);
+            if (show_busy_indicator) render_busy_indicator(fc_swapped ? 320 : SCREEN_WIDTH_TOP);
             render_set_stereo(0, 0);
             } // eyes
 

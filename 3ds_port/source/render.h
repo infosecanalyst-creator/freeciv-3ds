@@ -95,6 +95,8 @@ typedef struct {
     const char      *help;        // Encyclopedia text for the selection, may be NULL
 } TopInfo;
 void render_top_info(const TopInfo *ti);
+// Width the information panels lay themselves out for: 400 on the top screen, 320 when swapped.
+void render_set_top_width(float w);
 void render_set_idle_count(int n); // shown on the Next button
 // Press feedback: call right after starting the bottom screen each frame
 // (true = the touch began on something tappable: play the click), and
