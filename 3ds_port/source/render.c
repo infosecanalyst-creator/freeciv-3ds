@@ -1026,8 +1026,10 @@ static int draw_wrapped(const char *text, float x, float y, float w, float scale
 // Largest scale <= scale (and >= lo) at which text fits w.
 static float fit_scale(const char *text, float scale, float w, float lo)
 {
+    // font widths are not exactly proportional to the scale (the text-size setting adds to it), so step down
     float tw = font_width(text, scale);
     if (tw > w && tw > 0) scale = scale * w / tw;
+    while (scale > lo && font_width(text, scale) > w) scale -= 0.01f;
     return scale < lo ? lo : scale;
 }
 
@@ -1274,8 +1276,12 @@ void render_top_info(const TopInfo *ti)
         // Compact stats, so the Encyclopedia text fits below.
         snprintf(line, sizeof(line), "A %d  D %d  FP %d  Moves %s", u->attack, u->defense, u->firepower,
                  u->moves_left > 0 ? u->moves : "0");
-        draw_fit(CX + 72, u->home[0] ? 92 : 80, CW - 74, 0.42f, u->moves_left > 0 ? white : label, line);
         float y = 104;
+        if (NARROW) { // narrow card: the stats get the full width, under the portrait
+            draw_fit(CX + 2, 98, CW - 4, 0.42f, u->moves_left > 0 ? white : label, line);
+            y = 114;
+        } else
+            draw_fit(CX + 72, u->home[0] ? 92 : 80, CW - 74, 0.42f, u->moves_left > 0 ? white : label, line);
         float hpf = u->hp_max > 0 ? (float)u->hp / u->hp_max : 0;
         draw_text(CX + 2, y - 2, 0.40f, label, "HP");
         C2D_DrawRectSolid(CX + 24, y + 3, 0.01f, 120, 6, C2D_Color32(0x40, 0x18, 0x18, 0xFF));
