@@ -124,6 +124,7 @@ jobs:
     if: always() && github.ref == 'refs/heads/main' && needs.n3ds.result == 'success'
     needs: [n3ds, cia]
     runs-on: ubuntu-latest
+    continue-on-error: true   # extra copy only: the n3ds job already put the .3dsx on the builds branch
     permissions:
       contents: write
     steps:
