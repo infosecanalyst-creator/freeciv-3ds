@@ -498,8 +498,53 @@ static bool write_new_game_script(const char *path, const NewGameOpts *o)
 
 // ZL swaps the screens (project standard). The top-screen picture (400x240)
 // is drawn on the touch screen at 0.8 scale; the touch-screen picture (320x240)
-// goes on the top screen centred. 3D and touch are off while swapped.
+// fills the top screen (scaled 1.25 across). 3D is off while swapped; the touch screen is a touchpad.
 static int fc_swapped = 0;
+// Swapped (UI rule 7): the touch screen is a touchpad. Slide moves a pointer over the game picture
+// (now on the top screen); a short tap becomes a tap at the pointer. Every touch read goes through
+// fc_touch_read, which reports the pointer while swapped.
+static int fc_ptr_x = 160, fc_ptr_y = 120, fc_tap_frames = 0;
+static void fc_touch_read(touchPosition *tp)
+{
+    if (fc_swapped) { tp->px = (u16)fc_ptr_x; tp->py = (u16)fc_ptr_y; return; }
+    hidTouchRead(tp);
+}
+// Returns the synthetic KEY_TOUCH bits for this frame: down / held / up of a tap at the pointer.
+static void fc_touchpad(u32 *kDown, u32 *kHeld, u32 *kUp)
+{
+    static int on = 0, moved = 0, lx, ly, sx, sy;
+    static u64 at;
+    const u32 rd = hidKeysDown(), rh = hidKeysHeld();
+    *kDown &= ~KEY_TOUCH; *kHeld &= ~KEY_TOUCH; *kUp &= ~KEY_TOUCH;
+    if (fc_tap_frames > 0) {                 // a tap: down on frame 1, up on frame 2
+        if (fc_tap_frames == 2) { *kDown |= KEY_TOUCH; *kHeld |= KEY_TOUCH; }
+        else *kUp |= KEY_TOUCH;
+        fc_tap_frames--;
+        return;
+    }
+    touchPosition t;
+    if (rd & KEY_TOUCH) { hidTouchRead(&t); on = 1; moved = 0; lx = sx = t.px; ly = sy = t.py; at = osGetTime(); }
+    else if (on && (rh & KEY_TOUCH)) {
+        hidTouchRead(&t);
+        if (abs(t.px - sx) + abs(t.py - sy) > 6) moved = 1;
+        fc_ptr_x += t.px - lx; fc_ptr_y += t.py - ly;
+        if (fc_ptr_x < 0) fc_ptr_x = 0; if (fc_ptr_x > 319) fc_ptr_x = 319;
+        if (fc_ptr_y < 0) fc_ptr_y = 0; if (fc_ptr_y > 239) fc_ptr_y = 239;
+        lx = t.px; ly = t.py;
+    } else if (on) {
+        on = 0;
+        if (!moved && osGetTime() - at < 350) fc_tap_frames = 2;
+    }
+}
+static void fc_draw_pointer(void)    // on the swapped top screen, in 320x240 picture coordinates
+{
+    if (!fc_swapped) return;
+    const float x = (float)fc_ptr_x, y = (float)fc_ptr_y;
+    C2D_DrawTriangle(x - 1, y - 2, C2D_Color32(0, 0, 0, 255), x - 1, y + 14, C2D_Color32(0, 0, 0, 255),
+                     x + 10, y + 10, C2D_Color32(0, 0, 0, 255), 0.99f);
+    C2D_DrawTriangle(x, y, C2D_Color32(255, 255, 255, 255), x, y + 11, C2D_Color32(255, 255, 255, 255),
+                     x + 8, y + 9, C2D_Color32(255, 255, 255, 255), 0.995f);
+}
 static void fc_view_top_content(void)
 {
     C2D_ViewReset();
@@ -511,7 +556,7 @@ static void fc_view_top_content(void)
 static void fc_view_bottom_content(void)
 {
     C2D_ViewReset();
-    if (fc_swapped) C2D_ViewTranslate(40.0f, 0.0f);
+    if (fc_swapped) C2D_ViewScale(400.0f / 320.0f, 1.0f);   // UI rule 8: fill the top screen, no side bars
 }
 
 int main(int argc, char* argv[])
@@ -788,7 +833,7 @@ int main(int argc, char* argv[])
             gfxSet3D(!fc_swapped);
         }
         kDown &= ~KEY_ZL; kHeld &= ~KEY_ZL; kUp &= ~KEY_ZL;
-        if (fc_swapped) { kDown &= ~KEY_TOUCH; kHeld &= ~KEY_TOUCH; kUp &= ~KEY_TOUCH; }
+        if (fc_swapped) fc_touchpad(&kDown, &kHeld, &kUp);
         u32 kRep = remap_keys(hidKeysDownRepeat()); // held D-pad keeps scrolling lists
         audio_update();
         audio_set_music(app_state == APP_GAME ? MUSIC_GAME : MUSIC_MENU);
@@ -807,7 +852,7 @@ int main(int argc, char* argv[])
         // The manual (title or in-game) takes every input while it is open.
         if (app_state == APP_MANUAL || (app_state == APP_GAME && ui_mode == UI_MANUAL)) {
             touchPosition mt;
-            hidTouchRead(&mt);
+            fc_touch_read(&mt);
             circlePosition mc;
             hidCircleRead(&mc);
             if (!manual_input(kDown, kHeld, (kDown & KEY_TOUCH) != 0, mt.px, mt.py, mc.dy)) {
@@ -841,7 +886,7 @@ int main(int argc, char* argv[])
             bool start_key = app_state == APP_NEW_GAME && (kDown & KEY_START); // START = Start
             if ((kDown & KEY_TOUCH) || start_key) {
                 touchPosition touch;
-                hidTouchRead(&touch);
+                fc_touch_read(&touch);
                 int px = (int)touch.px, py = (int)touch.py;
                 if (start_key) { px = SETUP_START_X + 1; py = SETUP_FOOT_Y + 1; }
 
@@ -997,7 +1042,7 @@ int main(int argc, char* argv[])
             C2D_SceneSize(GSP_SCREEN_WIDTH, fc_swapped ? GSP_SCREEN_HEIGHT_TOP : GSP_SCREEN_HEIGHT_BOTTOM, true);
             fc_view_bottom_content();
             {   // pressed-button look, and a click when a tap lands on one
-                touchPosition tp; hidTouchRead(&tp);
+                touchPosition tp; fc_touch_read(&tp);
                 u32 hd = hidKeysHeld(), dn = hidKeysDown();
                 if (render_press_frame(!fc_swapped && (hd & KEY_TOUCH) != 0, !fc_swapped && (dn & KEY_TOUCH) != 0, tp.px, tp.py))
                     audio_play("ui_click");
@@ -1024,6 +1069,7 @@ int main(int argc, char* argv[])
             }
 
             render_press_end();
+            fc_draw_pointer();
             C2D_ViewReset();
             C3D_FrameEnd(0);
             continue;
@@ -1036,7 +1082,7 @@ int main(int argc, char* argv[])
         // End-of-game screen: Look at the map, or Quit.
         if (game_over && !game_over_shown && (kDown & KEY_TOUCH)) {
             touchPosition touch;
-            hidTouchRead(&touch);
+            fc_touch_read(&touch);
             if (touch.py >= GAMEOVER_BTN_Y && touch.py < GAMEOVER_BTN_Y + 44) {
                 if (touch.px < 160) game_over_shown = true;
                 else break;
@@ -1315,7 +1361,7 @@ int main(int argc, char* argv[])
         if (ui_mode == UI_MAP && ui_mode_frame_start == UI_MAP) {
             if (kDown & KEY_TOUCH) {
                 touchPosition touch;
-                hidTouchRead(&touch);
+                fc_touch_read(&touch);
                 t_hold = 0;
                 bool was_peeking = peek_timer > 0;
                 peek_timer = 0; // any new touch puts a peek away
@@ -1382,7 +1428,7 @@ int main(int argc, char* argv[])
             }
             if (t_active && (kHeld & KEY_TOUCH) && !t_consumed) {
                 touchPosition touch;
-                hidTouchRead(&touch);
+                fc_touch_read(&touch);
                 int dx = touch.px - t_x0, dy = touch.py - t_y0;
                 if (!t_dragging && abs(dx) + abs(dy) > 8) t_dragging = true;
                 // Held still for ~half a second on the map: peek, don't act.
@@ -1416,11 +1462,11 @@ int main(int argc, char* argv[])
         if (ui_mode_frame_start != UI_MAP && ui_mode != UI_MANUAL) {
             touchPosition mt;
             if (kDown & KEY_TOUCH) {
-                hidTouchRead(&mt);
+                fc_touch_read(&mt);
                 m_active = true; m_drag = false;
                 m_x0 = mt.px; m_y0 = mt.py; m_scroll0 = ui_scroll; m_mode = ui_mode;
             } else if (m_active && (kHeld & KEY_TOUCH)) {
-                hidTouchRead(&mt);
+                fc_touch_read(&mt);
                 int dy = (int)mt.py - m_y0;
                 bool in_list = m_y0 > PANEL_HEADER_H && m_y0 < PANEL_FOOTER_Y;
                 if (!m_drag && in_list && abs(dy) > 10) m_drag = true;
@@ -2487,7 +2533,7 @@ int main(int argc, char* argv[])
             C2D_SceneSize(GSP_SCREEN_WIDTH, fc_swapped ? GSP_SCREEN_HEIGHT_TOP : GSP_SCREEN_HEIGHT_BOTTOM, true);
             fc_view_bottom_content();
             {   // pressed-button look, and a click when a tap lands on one
-                touchPosition tp; hidTouchRead(&tp);
+                touchPosition tp; fc_touch_read(&tp);
                 u32 hd = hidKeysHeld(), dn = hidKeysDown();
                 if (render_press_frame(!fc_swapped && (hd & KEY_TOUCH) != 0, !fc_swapped && (dn & KEY_TOUCH) != 0, tp.px, tp.py))
                     audio_play("ui_click");
@@ -2634,7 +2680,7 @@ int main(int argc, char* argv[])
             C2D_SceneSize(GSP_SCREEN_WIDTH, fc_swapped ? GSP_SCREEN_HEIGHT_TOP : GSP_SCREEN_HEIGHT_BOTTOM, true);
             fc_view_bottom_content();
             {   // pressed-button look, and a click when a tap lands on one
-                touchPosition tp; hidTouchRead(&tp);
+                touchPosition tp; fc_touch_read(&tp);
                 u32 hd = hidKeysHeld(), dn = hidKeysDown();
                 if (render_press_frame(!fc_swapped && (hd & KEY_TOUCH) != 0, !fc_swapped && (dn & KEY_TOUCH) != 0, tp.px, tp.py))
                     audio_play("ui_click");
@@ -2714,6 +2760,7 @@ int main(int argc, char* argv[])
         }
 
         render_press_end();
+            fc_draw_pointer();
             C2D_ViewReset();
             C3D_FrameEnd(0);
         if (end_turn_pending) {
