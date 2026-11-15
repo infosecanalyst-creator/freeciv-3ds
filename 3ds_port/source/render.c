@@ -701,27 +701,24 @@ static u32 darken(u32 c, int pct)
 static void draw_button(float x, float y, float w, float h, float z, const char *label,
                         float scale, bool enabled, bool highlight)
 {
+    // house style (claude/3ds-look-and-feel.md): face 40,56,120, edge 120,150,230, shadow line,
+    // pressed 220,180,60 with the label sunk a pixel; disabled grey. Green "highlight" keeps its meaning.
     bool down = enabled && pressed_at(x, y, w, h);
-    u32 bg = highlight ? C2D_Color32(0x3C, 0x78, 0x40, 0xF0)
-           : enabled   ? C2D_Color32(0x2C, 0x50, 0x80, 0xF0) : C2D_Color32(0x24, 0x2C, 0x38, 0xF0);
-    u32 border = highlight ? C2D_Color32(0x8C, 0xE0, 0x90, 0xFF) : C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF);
-    if (down) {
-        // pressed in: darker face, a shadow along the top, the light edge moves to the bottom
-        C2D_DrawRectSolid(x, y, z, w, h, darken(bg, 62));
-        C2D_DrawRectSolid(x, y, z + 0.001f, w, 2, C2D_Color32(0x06, 0x0A, 0x12, 0xFF));
-        C2D_DrawRectSolid(x, y + h - 1, z + 0.001f, w, 1, darken(border, 80));
-    } else {
-        C2D_DrawRectSolid(x, y, z, w, h, bg);
-        C2D_DrawRectSolid(x, y, z + 0.001f, w, 2, border);
-    }
+    u32 face = highlight ? C2D_Color32(0x3C, 0x78, 0x40, 0xFF)
+             : enabled   ? C2D_Color32(40, 56, 120, 0xFF) : C2D_Color32(0x30, 0x34, 0x40, 0xFF);
+    u32 edge = highlight ? C2D_Color32(0x8C, 0xE0, 0x90, 0xFF)
+             : enabled   ? C2D_Color32(120, 150, 230, 0xFF) : C2D_Color32(0x60, 0x64, 0x70, 0xFF);
+    C2D_DrawRectSolid(x, y, z, w, h, edge);
+    C2D_DrawRectSolid(x + 1, y + 1, z + 0.0005f, w - 2, h - 2, down ? C2D_Color32(220, 180, 60, 0xFF) : face);
+    C2D_DrawRectSolid(x, y + h - 1, z + 0.0008f, w, 1, C2D_Color32(20, 30, 70, 0xFF));
     float tw = text_width(label, scale);
     while (tw > w - 6 && scale > 0.3f) { // long labels (or Large text) shrink to fit
         scale -= 0.02f;
         tw = text_width(label, scale);
     }
-    float dy = down ? 1.5f : 0;
+    float dy = down ? 1.0f : 0;
     draw_text_z(x + (w - tw) / 2, y + (h - 30 * scale) / 2 + 1 + dy, z + 0.002f, scale,
-                enabled ? (down ? C2D_Color32(0xD8, 0xE4, 0xF0, 0xFF) : 0xFFFFFFFF) : C2D_Color32(0x80, 0x88, 0x94, 0xFF), label);
+                enabled ? 0xFFFFFFFF : C2D_Color32(0x96, 0x96, 0xA5, 0xFF), label);
 }
 
 static void pretty_tag(const char *tag, char *out, int n)
@@ -775,16 +772,23 @@ int popup_hit_test(const PopupMenu *m, int px, int py)
 static void draw_popup(const PopupMenu *m)
 {
     const float Z = 0.93f;
-    C2D_DrawRectSolid(m->x - 1, m->y - 1, Z, m->w + 2, m->h + 2, C2D_Color32(0x8C, 0xB8, 0xE8, 0xFF));
-    C2D_DrawRectSolid(m->x, m->y, Z + 0.001f, m->w, m->h, C2D_Color32(0x10, 0x18, 0x26, 0xF4));
+    C2D_DrawRectSolid(m->x - 1, m->y - 1, Z, m->w + 2, m->h + 2, C2D_Color32(120, 150, 230, 0xFF));
+    C2D_DrawRectSolid(m->x, m->y, Z + 0.001f, m->w, m->h, C2D_Color32(8, 12, 40, 0xFA));
     float ts = 0.5f; // long titles shrink to fit the menu
     while (ts > 0.4f && text_width(m->title, ts) > m->w - 8) ts -= 0.02f;
-    draw_text_z(m->x + 5, m->y + 2, Z + 0.002f, ts, C2D_Color32(0xFF, 0xE0, 0x80, 0xFF), m->title);
+    draw_text_z(m->x + 5, m->y + 2, Z + 0.002f, ts, C2D_Color32(255, 204, 64, 0xFF), m->title);
     int rows = (m->n + m->cols - 1) / m->cols;
     for (int i = 0; i < m->n; i++) {
         int col = i / rows, row = i % rows;
-        draw_button(m->x + 3 + col * (POPUP_ITEM_W + 3), m->y + POPUP_TITLE_H + row * (POPUP_ITEM_H + 3),
-                    POPUP_ITEM_W, POPUP_ITEM_H, Z + 0.003f, m->label[i], 0.5f, m->enabled[i], false);
+        float bx = m->x + 3 + col * (POPUP_ITEM_W + 3), by = m->y + POPUP_TITLE_H + row * (POPUP_ITEM_H + 3);
+        draw_button(bx, by, POPUP_ITEM_W, POPUP_ITEM_H, Z + 0.003f, m->label[i], 0.5f, m->enabled[i], false);
+        if (i == m->focus && m->enabled[i]) {   // D-Pad focus: 2 px gold ring
+            u32 g = C2D_Color32(255, 204, 64, 0xFF);
+            C2D_DrawRectSolid(bx, by, Z + 0.006f, POPUP_ITEM_W, 2, g);
+            C2D_DrawRectSolid(bx, by + POPUP_ITEM_H - 2, Z + 0.006f, POPUP_ITEM_W, 2, g);
+            C2D_DrawRectSolid(bx, by, Z + 0.006f, 2, POPUP_ITEM_H, g);
+            C2D_DrawRectSolid(bx + POPUP_ITEM_W - 2, by, Z + 0.006f, 2, POPUP_ITEM_H, g);
+        }
     }
 }
 

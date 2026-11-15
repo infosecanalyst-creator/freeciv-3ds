@@ -140,7 +140,7 @@ The End Turn button turns green when every unit has its orders. Before it ends t
 | City: Starving | A city is about to run out of food. It opens on the Tiles tab.
 | End Turn | Nothing is waiting. Tap to end the turn.
 
-After you pick, you go straight back to the map. START does the same as the button.
+After you pick, you go straight back to the map. SELECT does the same as the button.
 
 If some units still have no orders, the first tap on End Turn shows how many. Tap again within two seconds to end the turn anyway.
 
@@ -162,9 +162,8 @@ Menu then Spaceship appears once you start building one.
 
 # Saving
 - The game saves itself at the start of every turn.
-- Menu then Save Game saves now. "Saved" appears once it is written. If the SD card is full or locked, "Save failed" appears instead, and Save & Quit does not quit.
-- Menu then Save & Quit saves, then quits.
-- SELECT and START together asks before quitting.
+- Menu then Save Game saves now. "Saved" appears once it is written. If the SD card is full or locked, "Save failed" appears instead, and Save & Exit does not exit.
+- START, then Exit Game asks: Save & Exit, Exit, no save, or No.
 - Continue on the title screen opens your newest save.
 
 # Controls
@@ -181,8 +180,8 @@ Menu then Spaceship appears once you start building one.
 | L / R | Research / tax rates. In a city: previous / next city
 | ZL | Swap screens (3D and touch off while swapped)
 | ZR | Zoom in, wrapping to the widest view
-| START | Same as the End Turn button
-| SELECT + START | Quit (asks first)
+| START | Menu: Resume, options, saving, Exit Game
+| SELECT | Same as the End Turn button
 
 # Tips
 - Found your second and third cities early. More cities mean more of everything.
