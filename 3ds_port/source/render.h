@@ -36,6 +36,7 @@ typedef struct {
     bool enabled[POPUP_MAX];
     char title[40];
     int  x, y, w, h, cols;        // set by popup_layout()
+    int  focus;                   // D-Pad focus (gold ring); 0 after memset
 } PopupMenu;
 // Places the popup beside the anchor point, kept on screen above the HUD.
 void popup_layout(PopupMenu *m, int anchor_x, int anchor_y);

@@ -286,7 +286,7 @@ enum { POPUP_NONE, POPUP_UNIT, POPUP_CONFIRM_DISBAND, POPUP_STACK, POPUP_MENU, P
 #define PID_NO          0
 #define PID_CITY_ACTION 1000            // + Freeciv action id
 enum { MENU_RESEARCH = 1, MENU_RATES, MENU_GOVERNMENT, MENU_DIPLOMACY, MENU_SAVE, MENU_MUSIC, MENU_EFFECTS, MENU_CLOSE, MENU_MESSAGES, MENU_PEDIA, MENU_SPACESHIP, MENU_TEXT,
-       MENU_OPTIONS, MENU_SAVE_QUIT, MENU_QUIT, MENU_BACK, MENU_MANUAL };
+       MENU_OPTIONS, MENU_SAVE_QUIT, MENU_QUIT, MENU_BACK, MENU_MANUAL, MENU_EXIT_ASK };
 static bool s_has_spaceship;   // refreshed while the engine is parked
 static bool s_quit_after_save; // Save & Quit: leave once the save has run
 
@@ -332,6 +332,7 @@ static void open_game_menu(PopupMenu *m)
 {
     memset(m, 0, sizeof(*m));
     snprintf(m->title, sizeof(m->title), "Menu");
+    popup_add(m, MENU_CLOSE,      "Resume", true);
     popup_add(m, MENU_RESEARCH,   "Research", true);
     popup_add(m, MENU_RATES,      "Tax Rates", true);
     popup_add(m, MENU_GOVERNMENT, "Government", true);
@@ -342,7 +343,7 @@ static void open_game_menu(PopupMenu *m)
     popup_add(m, MENU_SAVE,       "Save Game", true);
     popup_add(m, MENU_OPTIONS,    "Options", true);
     popup_add(m, MENU_MANUAL,     "Manual", true);
-    popup_add(m, MENU_SAVE_QUIT,  "Save & Quit", true);
+    popup_add(m, MENU_EXIT_ASK,   "Exit Game", true);
     popup_layout(m, HUD_MENU_X, HUD_Y - 10);
     m->x = 2;
 }
@@ -365,12 +366,13 @@ static void open_options_menu(PopupMenu *m)
 static void open_quit_menu(PopupMenu *m)
 {
     memset(m, 0, sizeof(*m));
-    snprintf(m->title, sizeof(m->title), "Quit the game?");
-    popup_add(m, MENU_SAVE_QUIT,  "Save & Quit", true);
-    popup_add(m, MENU_QUIT,       "Quit, no save", true);
-    popup_add(m, MENU_CLOSE,      "Keep playing", true);
+    snprintf(m->title, sizeof(m->title), "Exit the game?");
+    popup_add(m, MENU_SAVE_QUIT,  "Save & Exit", true);
+    popup_add(m, MENU_QUIT,       "Exit, no save", true);
+    popup_add(m, MENU_CLOSE,      "No", true);
     popup_layout(m, 160, 110);
     m->x = (320 - m->w) / 2;
+    m->focus = 2;                 // house style: the focus starts on No
 }
 
 // ---- Settings (sdmc:/3ds/freeciv/settings.ini) ----
@@ -802,16 +804,16 @@ int main(int argc, char* argv[])
 
         // Quit: START on the start menu, SELECT+START in a game (START alone
         // ends the turn there). HOME -> Close also works at any time.
-        if ((kDown & KEY_START) && (app_state == APP_START_MENU || fc3ds_server_failed())) {
+        // House style: no button quits outright. START on the title screen does nothing (Quit is a
+        // button there); in a game START opens the menu (Exit Game asks first). Only a failed server
+        // (nothing to lose) still quits on START.
+        if ((kDown & KEY_START) && fc3ds_server_failed()) {
             break; // fc3ds_server_shutdown() (below, after the loop) does the rest
         }
-        if ((kDown & KEY_START) && (kHeld & KEY_SELECT) && app_state == APP_GAME) {
-            if (get_game_turn() <= 0) break; // nothing to save yet
-            if (ui_mode == UI_DIPLOMACY && ui_dipl_stage == 2) freeciv_request_diplomacy_cancel(ui_dipl_counterpart);
-            ui_mode = UI_MAP; // close any panel: the question is asked on the map
+        if ((kDown & KEY_START) && app_state == APP_GAME && ui_mode == UI_MAP) {
             kDown &= ~KEY_START;
-            open_quit_menu(&popup);
-            popup_kind = POPUP_MENU;
+            if (popup_kind == POPUP_MENU) popup_kind = POPUP_NONE;   // START again closes it
+            else { open_game_menu(&popup); popup_kind = POPUP_MENU; }
         }
 
         // Start menu / load picker (handoff-nohw.md §A.3): the server
@@ -1033,10 +1035,11 @@ int main(int argc, char* argv[])
         bool report_tap = false; // the report never costs a tap
         if (report_n > 0 && kDown) report_n = 0;
 
-        if (ui_mode == UI_MAP && (kDown & KEY_START) && !(kHeld & KEY_SELECT) && !fc3ds_server_is_busy()
+        // End Turn (and the turn's decisions first) is SELECT; START is the menu.
+        if (ui_mode == UI_MAP && popup_kind == POPUP_NONE && (kDown & KEY_SELECT) && !fc3ds_server_is_busy()
             && smart_kind != SMART_END) {
             want_smart = smart_kind; // same as the button: the decision comes first
-        } else if (ui_mode == UI_MAP && (kDown & KEY_START) && !(kHeld & KEY_SELECT) && !fc3ds_server_is_busy()) {
+        } else if (ui_mode == UI_MAP && popup_kind == POPUP_NONE && (kDown & KEY_SELECT) && !fc3ds_server_is_busy()) {
             end_armed = 0;
             report_seen = get_message_total();
             end_turn_pending = true; // sent after this frame is drawn (and the map captured)
@@ -1140,6 +1143,25 @@ int main(int argc, char* argv[])
             if (kDown & KEY_B) ui_mode = UI_MAP;
         } else if (popup_kind != POPUP_NONE) {
             if (kDown & KEY_B) popup_kind = POPUP_NONE;
+            else if (popup.n > 0) {
+                // D-Pad moves the gold focus ring (items are laid out down the columns), A picks
+                int rows = (popup.n + popup.cols - 1) / (popup.cols > 0 ? popup.cols : 1);
+                int f = popup.focus, step = 0;
+                if (kRep & KEY_DUP) step = -1;
+                if (kRep & KEY_DDOWN) step = 1;
+                if (kRep & KEY_DLEFT) step = -rows;
+                if (kRep & KEY_DRIGHT) step = rows;
+                if (step) {
+                    for (int tries = 0; tries < popup.n; tries++) {
+                        f += step;
+                        if (f < 0) f += popup.n * ((-f + popup.n - 1) / popup.n);
+                        f %= popup.n;
+                        if (popup.enabled[f]) break;
+                    }
+                    popup.focus = f;
+                }
+                if ((kDown & KEY_A) && popup.enabled[popup.focus]) popup_choice = popup.focus;
+            }
         } else if (selected_unit_id >= 0) {
             // A unit is selected: D-Pad orders a one-tile move instead of
             // panning. Edge-triggered (kDown, not kHeld) so holding the
@@ -1891,6 +1913,11 @@ int main(int argc, char* argv[])
                         break;
                     case MENU_BACK:
                         open_game_menu(&popup);
+                        popup_kind = POPUP_MENU;
+                        break;
+                    case MENU_EXIT_ASK:
+                        if (get_game_turn() <= 0) { quit_now = true; break; } // nothing to save yet
+                        open_quit_menu(&popup);
                         popup_kind = POPUP_MENU;
                         break;
                     case MENU_QUIT:
