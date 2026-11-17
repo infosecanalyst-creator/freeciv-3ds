@@ -975,7 +975,7 @@ hud:
         C2D_DrawRectSolid(HUD_END_X, by, Z, HUD_END_W, bh, dn ? C2D_Color32(0x5A, 0x3A, 0x08, 0xF0) : C2D_Color32(0x8A, 0x5A, 0x10, 0xF0));
         C2D_DrawRectSolid(HUD_END_X, by, Z + 0.001f, HUD_END_W, 2, dn ? C2D_Color32(0x06, 0x0A, 0x12, 0xFF) : C2D_Color32(0xFF, 0xC8, 0x50, 0xFF));
         float s2 = 0.5f, tw = text_width(end_label, s2);
-        while (tw > HUD_END_W - 6 && s2 > 0.32f) { s2 -= 0.02f; tw = text_width(end_label, s2); }
+        while (tw > HUD_END_W - 6 && s2 > 0.38f) { s2 -= 0.02f; tw = text_width(end_label, s2); }
         draw_text_z(HUD_END_X + (HUD_END_W - tw) / 2, by + (bh - 30 * s2) / 2 + 1, Z + 0.002f, s2, 0xFFFFFFFF, end_label);
     } else {
         draw_button(HUD_END_X, by, HUD_END_W, bh, Z, "End Turn", 0.5f, true, all_moved);
@@ -1172,7 +1172,7 @@ static void draw_help_block(const char *text, float x, float y, float w, float b
     if (pages > 1) {
         char pg[8];
         snprintf(pg, sizeof(pg), "%d/%d", page + 1, pages);
-        draw_text(x + w - font_width(pg, 0.36f), y - 14, 0.36f, C2D_Color32(0x8C, 0xA0, 0xB4, 0xFF), pg);
+        draw_text(x + w - font_width(pg, 0.38f), y - 14, 0.38f, C2D_Color32(0x8C, 0xA0, 0xB4, 0xFF), pg);
     }
 }
 
@@ -2106,7 +2106,7 @@ static void render_iso_view(int cam_x, int cam_y, float scale, int view_w, int v
                 char t[2] = { ti->unit_badge, 0 };
                 float bx = px + 33 * S, by = py + 4 * S;
                 C2D_DrawRectSolid(bx, by, iz(), 9, 10, C2D_Color32(0x10, 0x18, 0x26, 0xD8));
-                font_draw(t, bx + 1.5f, by - 3, iz(), 0.36f, C2D_Color32(0xFF, 0xF0, 0xA0, 0xFF));
+                font_draw(t, bx + 1.5f, by - 3, iz(), 0.38f, C2D_Color32(0xFF, 0xF0, 0xA0, 0xFF));
             }
             if (ti->num_units > 1) {
                 float sx = px + 33 * S, sy = py - 4 * S;
@@ -2689,7 +2689,7 @@ void render_city_tiles_panel(const CityInfo *info, const CityTileInfo *tiles, in
             for (int k = 0; k < 3; k++) {
                 snprintf(d, sizeof(d), "%d", v[k] > 9 ? 9 : v[k]);
                 float dx = x + 2 + k * 7;
-                font_draw(d, dx, y + c - 16, 0.04f, 0.34f, v[k] ? col[k] : C2D_Color32(0x50, 0x50, 0x50, 0xFF));
+                font_draw(d, dx, y + c - 16, 0.04f, 0.38f, v[k] ? col[k] : C2D_Color32(0x50, 0x50, 0x50, 0xFF));
             }
             font_set_bias(bias);
         }
@@ -3026,7 +3026,7 @@ void render_tech_tree_panel(const TechNode *nodes, int n, int scroll)
             char nm[32];
             snprintf(nm, sizeof(nm), "%s", node->name);
             float sc = 0.42f;
-            while (sc > 0.36f && font_width(nm, sc) > TECHTREE_BOX_W - 6) sc -= 0.02f;
+            while (sc > 0.38f && font_width(nm, sc) > TECHTREE_BOX_W - 6) sc -= 0.02f;
             while (nm[0] && font_width(nm, sc) > TECHTREE_BOX_W - 6) nm[strlen(nm) - 1] = 0;
             draw_text_z(bx + 3, y + 4, 0.01f, sc, fg, nm);
         }
@@ -3559,8 +3559,7 @@ void render_title_controls_top(int frame)
         const float kx = NARROW ? 8 : 12, vx = NARROW ? 114 : 140;
         float ks = fit_scale(rows[i][0], 0.45f, vx - kx - 6, 0.38f);
         draw_text_z(kx, y + (0.45f - ks) * 8, 0.2f, ks, key, rows[i][0]);
-        float sc = fit_scale(rows[i][1], 0.45f, TW - vx - 6, NARROW ? 0.38f : 0.34f);
-        draw_text_z(vx, y + (0.45f - sc) * 8, 0.2f, sc, val, rows[i][1]);
+        draw_fit_z(vx, y + 0.0f, 0.2f, TW - vx - 6, 0.45f, val, rows[i][1]);   // never below 0.38; ends in "..." if still too long
     }
 }
 
@@ -4166,7 +4165,7 @@ void render_manual_bottom(int frame)
         man_cell(i, &x, &y, &w, &h);
         const char *t = s_man_title[i];
         float sc = 0.47f;
-        while (sc > 0.36f && text_width(t, sc) > w - 8) sc -= 0.01f;
+        while (sc > 0.38f && text_width(t, sc) > w - 8) sc -= 0.01f;
         draw_button(x, y, w, h, 0.12f, t, sc, true, i == s_man_sec);
     }
     float x, y, w, h, x2, y2, w2, h2;
