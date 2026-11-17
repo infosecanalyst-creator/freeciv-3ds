@@ -1282,12 +1282,10 @@ void render_top_info(const TopInfo *ti)
         // Compact stats, so the Encyclopedia text fits below.
         snprintf(line, sizeof(line), "A %d  D %d  FP %d  Moves %s", u->attack, u->defense, u->firepower,
                  u->moves_left > 0 ? u->moves : "0");
-        float y = 104;
-        if (NARROW) { // narrow card: the stats get the full width, under the portrait
-            draw_fit(CX + 2, 98, CW - 4, 0.42f, u->moves_left > 0 ? white : label, line);
-            y = 114;
-        } else
-            draw_fit(CX + 72, u->home[0] ? 92 : 80, CW - 74, 0.42f, u->moves_left > 0 ? white : label, line);
+        // the stats get the full card width, under the portrait (beside it they ended in "Move..."
+        // on the 400-wide card once text stopped shrinking below 0.38)
+        draw_fit(CX + 2, 98, CW - 4, 0.42f, u->moves_left > 0 ? white : label, line);
+        float y = 114;
         float hpf = u->hp_max > 0 ? (float)u->hp / u->hp_max : 0;
         draw_text(CX + 2, y - 2, 0.40f, label, "HP");
         C2D_DrawRectSolid(CX + 24, y + 3, 0.01f, 120, 6, C2D_Color32(0x40, 0x18, 0x18, 0xFF));
