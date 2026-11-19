@@ -273,12 +273,12 @@ void render_set_stereo(int eye, float amount)
     view_base();
 }
 
-// Depth is in "levels" (0 = screen plane, 4 = the selection card). Each eye
+// Depth is in "levels" (0 = screen plane; the minimap uses 2.5). Each eye
 // moves by a WHOLE number of pixels: fractional offsets resample the
 // point-sampled sprites and font differently per eye, which reads as blur and
 // ghosting. At full slider the nearest layer gets 3 px per eye (6 px total
 // disparity) - the 3DS stays comfortable well under ~10 px.
-static void layer(float depth)
+static void world_layer(float depth)
 {
     view_base();
     if (!s_eye) return;
@@ -286,6 +286,14 @@ static void layer(float depth)
     if (px > 3.0f) px = 3.0f;
     int ipx = (int)(px + 0.5f);
     if (ipx) C2D_ViewTranslate((float)(-s_eye * ipx), 0);
+}
+
+// Rule 18 (Ryan's 3D slider rule): menus, text and panels stay at screen depth; only the
+// game world (the minimap) gets depth. Panels keep their old layer() calls, now flat.
+static void layer(float depth)
+{
+    (void)depth;
+    view_base();
 }
 
 // Black or white, whichever reads better on `bg` (ABGR).
@@ -1222,11 +1230,12 @@ void render_top_info(const TopInfo *ti)
     }
 
     // Left: minimap and research (slightly in front).
-    layer(2.5f);
+    world_layer(2.5f);   // the minimap is the game world: it keeps its depth
     int mcx, mcy; float mvw, mvh;
     minimap_cam(ti->cam_x, ti->cam_y, ti->zoom, &mcx, &mcy, &mvw, &mvh);
     const float MW = NARROW ? 120 : MINIMAP_W; // narrow screen: a slimmer minimap, the card keeps its room
     draw_minimap_in(MINIMAP_X, MINIMAP_Y, MW, MINIMAP_H, mcx, mcy, mvw, mvh, ti->tile_x, ti->tile_y);
+    layer(0.0f);         // research text at screen depth
     if (ti->civ && ti->civ->research_name[0]) {
         float y = MINIMAP_Y + MINIMAP_H + 6;
         float lb = font_get_bias() ? 2.0f : 0.0f; // Large text needs a little more room

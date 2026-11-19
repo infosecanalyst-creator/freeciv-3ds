@@ -51,7 +51,7 @@ supports the Old 3DS.
 - **End of game**: victory or defeat screen with your score.
 - **Sound and music**: Freeciv's sound set (unit moves, combat, cities, technology) plus a rotation of
   CC0 medieval music. Volumes are in the Menu.
-- **Stereo 3D** on the top screen, driven by the 3D slider: panels float gently in front of the screen.
+- **Stereo 3D** on the top screen, driven by the 3D slider: the minimap gets depth; panels and text stay at screen depth so they read sharply.
 - **Crisp text**: the UI font is pre-rendered at exact pixel sizes, not scaled.
 - Save and load to the SD card, plus autosaves. Suspending with HOME is safe.
 
