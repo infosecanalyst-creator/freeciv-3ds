@@ -393,6 +393,7 @@ static u32 remap_keys(u32 m)
 
 // ---- Settings (sdmc:/3ds/freeciv/settings.ini) ----
 #define SETTINGS_PATH "sdmc:/3ds/freeciv/settings.ini"
+static int fc_swapped;   // ZL swap (defined with the swap code below); kept in settings.ini (rule 16)
 typedef struct { int size, rivals, skill, rules, land, barb; } NewGameOptsFwd;
 static NewGameOptsFwd s_saved_ng = { -1, -1, -1, -1, -1, -1 };
 
@@ -409,6 +410,7 @@ static void load_settings(void *ngp)
             int tb;
             if (sscanf(line, "text=%d", &tb) == 1) font_set_bias(tb);
             if (sscanf(line, "lefty=%d", &tb) == 1) s_lefty = tb != 0;
+            if (sscanf(line, "swapped=%d", &tb) == 1) fc_swapped = tb != 0;
             sscanf(line, "ng_size=%d", &s_saved_ng.size);
             sscanf(line, "ng_rivals=%d", &s_saved_ng.rivals);
             sscanf(line, "ng_skill=%d", &s_saved_ng.skill);
@@ -433,7 +435,7 @@ static void save_settings(void)
 {
     FILE *f = fopen(SETTINGS_PATH, "w");
     if (!f) return;
-    fprintf(f, "music=%d\neffects=%d\ntext=%d\nlefty=%d\n", audio_music_volume(), audio_sfx_volume(), font_get_bias(), s_lefty);
+    fprintf(f, "music=%d\neffects=%d\ntext=%d\nlefty=%d\nswapped=%d\n", audio_music_volume(), audio_sfx_volume(), font_get_bias(), s_lefty, fc_swapped);
     if (s_saved_ng.size >= 0)
         fprintf(f, "ng_size=%d\nng_rivals=%d\nng_skill=%d\nng_rules=%d\nng_land=%d\nng_barb=%d\n",
                 s_saved_ng.size, s_saved_ng.rivals, s_saved_ng.skill, s_saved_ng.rules,
@@ -501,7 +503,6 @@ static bool write_new_game_script(const char *path, const NewGameOpts *o)
 // ZL swaps the screens (project standard). The information panels are laid out
 // again at 320 wide on the touch screen (full-size text); the touch-screen picture (320x240)
 // fills the top screen (scaled 1.25 across). 3D is off while swapped; the touch screen is a touchpad.
-static int fc_swapped = 0;
 // Swapped (UI rule 7): the touch screen is a touchpad. Slide moves a pointer over the game picture
 // (now on the top screen); a short tap becomes a tap at the pointer. Every touch read goes through
 // fc_touch_read, which reports the pointer while swapped.
@@ -799,6 +800,7 @@ int main(int argc, char* argv[])
         ng_max_size = 1; ng_max_rivals = 4;
     }
     load_settings(&ng);
+    gfxSet3D(!fc_swapped);   // a remembered swap: 3D is off while swapped
     if (ng.size > ng_max_size) ng.size = ng_max_size;
     if (ng.rivals > ng_max_rivals) ng.rivals = ng_max_rivals;
 
@@ -833,6 +835,7 @@ int main(int argc, char* argv[])
         if (kDown & KEY_ZL) {
             fc_swapped = !fc_swapped;
             gfxSet3D(!fc_swapped);
+            save_settings();
         }
         kDown &= ~KEY_ZL; kHeld &= ~KEY_ZL; kUp &= ~KEY_ZL;
         if (fc_swapped) fc_touchpad(&kDown, &kHeld, &kUp);
