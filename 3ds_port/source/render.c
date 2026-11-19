@@ -4200,10 +4200,28 @@ bool manual_input(u32 kDown, u32 kHeld, bool touched, int px, int py, int circle
         if (kDown & KEY_DDOWN)  t += MAN_COLS;
         if (t != s_man_sec && t >= 0 && t < ncell) s_man_sec = t;
     }
-    if (touched) {
-        int hit = man_hit(px, py);
-        if (hit == -2) return false;
-        if (hit >= 0) s_man_sec = hit;
+    // Touch: a tap (lifted within 6 px) presses the button where it went down; a touch that
+    // moves further drags the text (rule 13), with a little momentum after the stylus lifts.
+    {
+        static int tx0, ty0, tylast, tstate;   // 0 none, 1 maybe a tap, 2 dragging
+        static float mom;
+        if (touched) { tx0 = px; ty0 = py; tylast = py; tstate = 1; mom = 0; }
+        else if (tstate && (kHeld & KEY_TOUCH)) {
+            if (tstate == 1 && (abs(px - tx0) > 6 || abs(py - ty0) > 6)) tstate = 2;
+            if (tstate == 2) { s_man_scroll += tylast - py; mom = (float)(tylast - py); }
+            tylast = py;
+        } else if (tstate) {
+            int was = tstate;
+            tstate = 0;
+            if (was == 1) {
+                int hit = man_hit(tx0, ty0);
+                if (hit == -2) return false;
+                if (hit >= 0) s_man_sec = hit;
+            }
+        } else if (mom > 0.5f || mom < -0.5f) {
+            s_man_scroll += (int)mom;
+            mom *= 0.88f;
+        }
     }
     if (s_man_sec != prev) s_man_scroll = 0;
     man_layout();
