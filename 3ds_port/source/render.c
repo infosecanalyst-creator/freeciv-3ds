@@ -3224,6 +3224,13 @@ void render_toast(const char *text)
     const float TOAST_Z = 0.95f;
     float sc = 0.5f, tw = text_width(text, sc);
     while (tw > 290 && sc > 0.4f) { sc -= 0.02f; tw = text_width(text, sc); }
+    char cut[128];
+    if (tw > 296) {   // still too long at the smallest size: end it in "..." (never cut off)
+        int n = (int)strlen(text);
+        if (n > (int)sizeof(cut) - 4) n = (int)sizeof(cut) - 4;
+        do { n--; memcpy(cut, text, n); strcpy(cut + n, "..."); tw = text_width(cut, sc); } while (n > 1 && tw > 296);
+        text = cut;
+    }
     float w = tw + 16, x = (320 - w) / 2;
     C2D_DrawRectSolid(x, 8, TOAST_Z, w, 22, C2D_Color32(0x20, 0x40, 0x60, 0xF0));
     C2D_DrawRectSolid(x, 8, TOAST_Z + 0.001f, w, 2, C2D_Color32(0x6C, 0xA8, 0xE0, 0xFF));

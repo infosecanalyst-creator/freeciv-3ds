@@ -682,7 +682,7 @@ int main(int argc, char* argv[])
     int dpad_dir = -1;    // D-pad move to resolve while !busy (same path as a tap)
     static char help_buf[2048]; // Encyclopedia text for the selection (top-screen card)
     u32 frame_no = 0;     // counts main-loop iterations
-    char toast_msg[48] = "Saved";
+    char toast_msg[112] = "Saved";
     int moved_refresh = 20; // frames until the End Turn button is re-evaluated
     int dipl_wait = 0;      // parked frames waiting for talks to open
     int city_scrolled = -1; // city whose Build list was scrolled to its current item
@@ -1377,6 +1377,31 @@ int main(int argc, char* argv[])
             }
         }
 
+        // UI rule 14 (critical info where the eyes are): the news list is on the other
+        // screen, so a combat event (a unit or city lost or won, an uprising...) also shows
+        // as a toast on the map. Read only between steps: the server thread writes the log.
+        {
+            static int alert_seen = -1;
+            if (!busy) {
+                int total = get_message_total();
+                if (alert_seen < 0 || total < alert_seen) alert_seen = total;   // nothing old on load
+                int first = -1, more = 0;
+                for (int i = alert_seen; i < total; i++) {
+                    GameMessage m;
+                    if (!get_message(i, &m) || m.category != MSG_COMBAT) continue;
+                    if (first < 0) first = i; else more++;
+                }
+                if (first >= 0) {
+                    GameMessage m;
+                    if (get_message(first, &m)) {
+                        if (more) snprintf(toast_msg, sizeof(toast_msg), "! %.80s (+%d more)", m.text, more);
+                        else snprintf(toast_msg, sizeof(toast_msg), "! %.96s", m.text);
+                        save_toast_frames = SAVE_TOAST_FRAMES * 2;
+                    }
+                }
+                alert_seen = total;
+            }
+        }
         if (save_toast_frames > 0) save_toast_frames--;
         if (end_armed > 0) end_armed--;
 
