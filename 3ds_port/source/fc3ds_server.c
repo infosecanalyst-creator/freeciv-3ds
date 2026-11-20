@@ -263,10 +263,19 @@ void fc3ds_server_shutdown(void)
     LightEvent_Signal(&s_ev_start_chosen); // still on the title screen: let it return
 
     // A failed engine thread is parked in an endless sleep: don't wait on it.
-    if (s_srv_thread && !s_failed)
-        threadJoin(s_srv_thread, 5ULL * 1000 * 1000 * 1000);
-    // s_quitting stays set: if the join timed out, the engine thread's later
-    // exit() must still end only that thread (see __wrap_exit).
+    // FC-01: an AI turn can run much longer than 5 s, and tearing libctru down
+    // under a running engine thread crashes (same class as UQM's exit crash).
+    // Wait up to 2 minutes; if it still runs, end the process without the
+    // libctru teardown (no SD unmount under the engine's feet).
+    if (s_srv_thread && !s_failed) {
+        if (R_FAILED(threadJoin(s_srv_thread, 120ULL * 1000 * 1000 * 1000))) {
+            printf("fc3ds: engine thread still running after 120 s, ending the process\n");
+            fflush(stdout);
+            svcExitProcess();
+        }
+    }
+    // s_quitting stays set: the engine thread's exit() ends only that thread
+    // (see __wrap_exit).
 }
 
 void fc3ds_server_wait_parked(int ms)
