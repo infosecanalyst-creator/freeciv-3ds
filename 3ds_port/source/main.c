@@ -2824,6 +2824,32 @@ int main(int argc, char* argv[])
         }
     }
 
+    // HOME -> Close (aptMainLoop() false, not the game's own Exit): save the
+    // game in play the way Save & Exit does - the same CMD_SAVE_GAME, run on
+    // the engine thread at its park point - before the shutdown below joins
+    // that thread. Only from a parked engine (a step mid-turn is never
+    // interrupted, and no game state is read while it runs): wait up to 5 s
+    // for one to finish; if it doesn't, skip the save rather than fake it.
+    if (aptShouldClose() && !quit_now && app_state == APP_GAME && !game_over
+        && fc3ds_server_is_ready() && !fc3ds_server_failed()) {
+        fc3ds_server_resume();                    // in case a HOME suspend left it paused
+        if (fc3ds_server_is_busy()) fc3ds_server_wait_parked(5000);
+        if (fc3ds_server_is_busy()) {
+            printf("fc3ds: HOME -> Close during a running step, not saved\n");
+        } else if (get_game_turn() > 0) {
+            take_save_result();                   // drop a result nobody read yet
+            freeciv_request_save_game();
+            int r = 0;
+            for (int ms = 0; ms < 10000 && r == 0; ms += 10) {
+                fc3ds_server_pump();
+                svcSleepThread(10 * 1000 * 1000);
+                if (!fc3ds_server_is_busy()) r = take_save_result();
+            }
+            printf("fc3ds: HOME -> Close save %s\n", r == 1 ? "written" : r < 0 ? "FAILED" : "timed out");
+            fflush(stdout);
+        }
+    }
+
     // Exit path.
     //
     // fc3ds_server_shutdown() marks the game over, drives the (possibly
