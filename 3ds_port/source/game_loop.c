@@ -2602,6 +2602,11 @@ static bool is_savegame_name(const char *name)
 #define FC3DS_AUTOSLOTS   5
 #define AUTOSLOTS_PATH    "sdmc:/3ds/freeciv/saves/.autoslots"
 static int  s_slot_turn[FC3DS_AUTOSLOTS + 1], s_slot_year[FC3DS_AUTOSLOTS + 1];
+// The order the slots were written in (1, 2, 3, ...; 0 = not known). A slot is overwritten
+// every five turns, so its place in the Load list has to come from here: on hardware the
+// slots rewritten since the list was last opened showed up below older ones (turn 23 and 22
+// under turn 19), and after a crash Continue could have picked a slot two turns old.
+static long s_slot_seq[FC3DS_AUTOSLOTS + 1], s_slot_seq_max;
 static bool s_slot_set[FC3DS_AUTOSLOTS + 1], s_slots_loaded;
 static int  s_slot_pending = 0;
 static u64  s_slot_t0;
@@ -2613,9 +2618,17 @@ static void autoslots_load(void)
     s_slots_loaded = true;
     FILE *f = fopen(AUTOSLOTS_PATH, "r");
     if (!f) return;
-    int k, turn, year;
-    while (fscanf(f, "%d %d %d", &k, &turn, &year) == 3)
-        if (k >= 1 && k <= FC3DS_AUTOSLOTS) { s_slot_turn[k] = turn; s_slot_year[k] = year; s_slot_set[k] = true; }
+    char line[80];
+    while (fgets(line, sizeof(line), f)) {   // "<slot> <turn> <year> [<write order>]"
+        int k, turn, year;
+        long seq = 0;
+        if (sscanf(line, "%d %d %d %ld", &k, &turn, &year, &seq) < 3) continue;
+        if (k >= 1 && k <= FC3DS_AUTOSLOTS) {
+            s_slot_turn[k] = turn; s_slot_year[k] = year; s_slot_set[k] = true;
+            s_slot_seq[k] = seq > 0 ? seq : 0;
+            if (seq > s_slot_seq_max) s_slot_seq_max = seq;
+        }
+    }
     fclose(f);
 }
 
@@ -2626,6 +2639,7 @@ void fc3ds_autosave_slot(int turn, int year, char *name, size_t size)
     autoslots_load();
     fc_snprintf(name, size, "freeciv-auto-%d", k);
     s_slot_turn[k] = turn; s_slot_year[k] = year;
+    s_slot_seq[k] = ++s_slot_seq_max;
     s_slot_pending = k;
     s_slot_t0 = osGetTime();
 }
@@ -2641,7 +2655,7 @@ void fc3ds_autosave_done(void)
     if (!f) return;
     bool ok = true;
     for (int k = 1; k <= FC3DS_AUTOSLOTS; k++)
-        if (s_slot_set[k] && fprintf(f, "%d %d %d\n", k, s_slot_turn[k], s_slot_year[k]) < 0) ok = false;
+        if (s_slot_set[k] && fprintf(f, "%d %d %d %ld\n", k, s_slot_turn[k], s_slot_year[k], s_slot_seq[k]) < 0) ok = false;
     if (fclose(f) != 0) ok = false;
     if (ok) { remove(AUTOSLOTS_PATH); rename(AUTOSLOTS_PATH ".tmp", AUTOSLOTS_PATH); }
     if (fc3ds_debug_log())   // debug.txt only: how long the turn autosave took
@@ -2658,6 +2672,18 @@ bool fc3ds_autoslot_info(const char *fn, int *turn, int *year)
     if (!s_slot_set[k]) { *turn = -1; *year = 0; return true; }
     *turn = s_slot_turn[k]; *year = s_slot_year[k];
     return true;
+}
+
+// For the Load list's order: 0 when fn is not an autosave slot, else its slot number, with the
+// order it was written in (0 = not known: an .autoslots from before this was recorded) and its turn.
+static int autoslot_order(const char *fn, long *seq, int *turn)
+{
+    int k;
+    if (sscanf(fn, "freeciv-auto-%d", &k) != 1 || k < 1 || k > FC3DS_AUTOSLOTS) return 0;
+    autoslots_load();
+    *seq = s_slot_seq[k];
+    *turn = s_slot_set[k] ? s_slot_turn[k] : -1;
+    return k;
 }
 
 // --- Load-order index (port-owned recency truth) ----------------------------
@@ -2757,6 +2783,35 @@ int get_save_files(SaveFile *out, int max)
         }
     }
     closedir(dir);
+
+    // 2b. The autosave slots (freeciv-auto-1..5) are overwritten in turn, and several of them
+    //     change between two opens of this list: step 2 then appends them in directory order,
+    //     not in the order they were written. Their true order is known (.autoslots), so the
+    //     places their latest records hold in the index are handed out again, oldest first.
+    {
+        int pos[FC3DS_AUTOSLOTS], npos = 0;
+        for (int i = 0; i < nidx && npos < FC3DS_AUTOSLOTS; i++) {
+            long seq; int turn;
+            if (!autoslot_order(idx[i].name, &seq, &turn)) continue;
+            bool latest = true;
+            for (int k = i + 1; k < nidx; k++) {
+                if (strcmp(idx[k].name, idx[i].name) == 0) { latest = false; break; }
+            }
+            if (latest) pos[npos++] = i;
+        }
+        for (int a = 1; a < npos; a++) {   // insertion sort of the entries at pos[]: write order, else turn
+            for (int b = a; b > 0; b--) {
+                long s1, s2; int t1, t2;
+                autoslot_order(idx[pos[b - 1]].name, &s1, &t1);
+                autoslot_order(idx[pos[b]].name, &s2, &t2);
+                bool later = (s1 > 0 && s2 > 0) ? s1 > s2 : t1 > t2;
+                if (!later) break;
+                SaveIndexEntry tmp = idx[pos[b - 1]];
+                idx[pos[b - 1]] = idx[pos[b]];
+                idx[pos[b]] = tmp;
+            }
+        }
+    }
 
     // 3. Emit the newest `max` DISTINCT names that still exist (newest first).
     int n = 0;
