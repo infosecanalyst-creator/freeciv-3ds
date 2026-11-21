@@ -161,9 +161,11 @@ Menu then Encyclopedia: units, buildings, wonders, technologies and governments,
 Menu then Spaceship appears once you start building one.
 
 # Saving
-- The game saves itself at the start of every turn.
+- The game saves itself at the start of every turn, into five rotating slots named freeciv-auto-1 to freeciv-auto-5 (the turn number decides which one). So the last five turns are always kept, the oldest one is replaced, and the saves folder never grows. Autosaves from older versions, one file per turn, are left as they are.
 - Menu then Save Game saves now. "Saved" appears once it is written. If the SD card is full or locked, "Save failed" appears instead, and Save & Exit does not exit.
 - START, then Exit Game asks: Save & Exit, Exit, no save, or No.
+- Closing the game from the HOME menu (HOME, then Close) while a game is running saves it the way Save & Exit does. If the engine is in the middle of a step it quits without saving; the last autosave is at most one turn old.
+- "Save failed" outranks other messages on the map: combat alerts wait until it is gone.
 - Continue on the title screen opens your newest save.
 
 # Controls
@@ -180,7 +182,7 @@ Menu then Spaceship appears once you start building one.
 | L / R | Research / tax rates. In a city: previous / next city
 | ZL | Swap screens (3D and touch off while swapped)
 | ZR | Zoom in, wrapping to the widest view
-| START | Menu: Resume, options, saving, Exit Game
+| START | Menu: Resume, options, Save, Manual, Exit Game
 | SELECT | Same as the End Turn button
 
 # Tips
@@ -199,12 +201,16 @@ Homebrew needs a dump of the 3DS sound firmware. Run DSP1 from the Homebrew Laun
 Bigger maps and more rivals mean more for the computer to think about. Start a game with a smaller map or fewer rivals. On an Old 3DS, Small maps work best.
 
 ## A save will not load
-The game says so and START quits. Try the next save in Load Game: there is one for every turn.
+The game says so and START quits. Try another save in Load Game: the five newest autosaves (freeciv-auto-1 to 5) are there, one for each of the last five turns.
 
 ## The game crashed
-sdmc:/freeciv_out.log records what the game was doing. Send it along with a note of what happened.
+sdmc:/freeciv_out.log records what the game was doing: the engine's errors and the start and exit lines. It is buffered, and it stops at a size cap. Send it along with a note of what happened.
 
-For a detailed log, create an empty file named debug.txt in sdmc:/3ds/freeciv/ and start the game again. Delete it afterwards: the detailed log slows the game.
+For a detailed log (the engine's normal log and timing lines), create an empty file named debug.txt in sdmc:/3ds/freeciv/ and start the game again. It rolls over at 1 MB. Delete it afterwards: the detailed log slows the game.
+
+## Where everything is
+- The program: sdmc:/3ds/freeciv3ds.3dsx (directly in /3ds).
+- Saves: sdmc:/3ds/freeciv/saves/. Settings: sdmc:/3ds/freeciv/settings.ini.
 
 ## Changing this manual
 A file named manual.txt in sdmc:/3ds/freeciv/ replaces the built-in text. Sections start with "# ", headings with "## ", list items with "- ", steps with "1. ", and table rows with "| ".

@@ -1,5 +1,7 @@
 # Freeciv 3DS
 
+**Bring your own game files:** Freeciv needs none. The engine, rulesets and art all ship in the app (no commercial game data is involved), so there is nothing to supply.
+
 [Freeciv](https://www.freeciv.org/), the open-source empire-building strategy game, as a Nintendo 3DS
 homebrew app with a handheld interface built for the two screens and the stylus.
 
@@ -53,7 +55,7 @@ supports the Old 3DS.
   CC0 medieval music. Volumes are in the Menu.
 - **Stereo 3D** on the top screen, driven by the 3D slider: the minimap gets depth; panels and text stay at screen depth so they read sharply.
 - **Crisp text**: the UI font is pre-rendered at exact pixel sizes, not scaled.
-- Save and load to the SD card, plus autosaves. Suspending with HOME is safe.
+- Save and load to the SD card, plus a turn autosave in five rotating slots (`freeciv-auto-1` to `freeciv-auto-5`: the last five turns, the folder never grows). HOME > Close saves a game in play, as Save & Exit does. Suspending with HOME is safe.
 
 ## Manual
 
