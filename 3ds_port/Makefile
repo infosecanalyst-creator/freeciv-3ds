@@ -56,6 +56,11 @@ CFLAGS	:=	-g -Wall -O2 -mword-relocations \
 			$(ARCH)
 
 CFLAGS	+=	$(INCLUDE) -D__3DS__
+# Port version on the title screen: git describe of freeciv-3ds (exported so the
+# recursive make in build/ keeps the value taken at the top).
+PORT_VERSION ?= $(shell git -c safe.directory='*' -C "$(CURDIR)" describe --always --dirty 2>/dev/null || echo unknown)
+export PORT_VERSION
+CFLAGS	+=	-DPORT_VERSION=\"$(PORT_VERSION)\"
 # make AMPLIO=1: new games use the isometric map (Amplio2 graphics).
 ifeq ($(AMPLIO),1)
 CFLAGS	+=	-DFC3DS_AMPLIO

@@ -59,6 +59,10 @@ jobs:
           mkdir -p 3ds
           cp "$GITHUB_WORKSPACE/3ds_port/freeciv3ds.3dsx" freeciv3ds.3dsx
           cp "$GITHUB_WORKSPACE/3ds_port/freeciv3ds.3dsx" 3ds/freeciv3ds.3dsx
+          # symbols for reading crash addresses, matching this .3dsx (the raw .elf in 3ds/ only
+          # follows when the artifact-based publish-latest job runs)
+          gzip -9c "$GITHUB_WORKSPACE/3ds_port/3ds_port.elf" > 3ds_port.elf.gz
+          /opt/devkitpro/devkitARM/bin/arm-none-eabi-nm -C -n "$GITHUB_WORKSPACE/3ds_port/3ds_port.elf" | gzip -9 > 3ds_port.sym.gz
           echo "$GITHUB_SHA" > SOURCE_COMMIT
           printf '%s\n%s\n%s\n' "${GITHUB_SHA}" "${GITHUB_RUN_NUMBER}" "$(date -u +%FT%TZ)" > BUILD.txt
           git config user.name "freeciv-3ds-ci"; git config user.email "ci@users.noreply.github.com"

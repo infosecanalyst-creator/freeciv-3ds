@@ -15,6 +15,9 @@
 #include <math.h>
 #include <ctype.h>
 #include <string.h>
+#ifndef PORT_VERSION
+#define PORT_VERSION "unknown"
+#endif
 
 C2D_SpriteSheet g_spriteSheet;
 static C2D_TextBuf g_textBuf;
@@ -3476,6 +3479,10 @@ void render_title_top(int frame, const char *line, const char *headline)
         C2D_DrawImageAt(logo, (TW - lw) / 2, 44 + bob, 0.5f, NULL, 1.0f, 1.0f);
     } else {
         draw_text_z(TW / 2 - 80, 50, 0.2f, 0.9f, C2D_Color32(0xFF, 0xD8, 0x60, 0xFF), "FREECIV");
+    }
+    {   // port version, small in the top-right corner
+        const char *ver = "Build " PORT_VERSION;
+        draw_text_z(TW - 6 - text_width(ver, 0.4f), 4, 0.2f, 0.4f, C2D_Color32(0xA0, 0xA8, 0xB4, 0xFF), ver);
     }
     layer(2.0f);
     const char *tag = headline ? headline : "Build a civilization, on two screens";
