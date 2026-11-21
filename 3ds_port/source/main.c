@@ -867,8 +867,8 @@ int main(int argc, char* argv[])
             kDown = 0; kRep = 0; kHeld = 0; // nothing else reacts to this frame's input
         }
 
-        // Quit: START on the start menu, SELECT+START in a game (START alone
-        // ends the turn there). HOME -> Close also works at any time.
+        // SELECT is the End Turn button; START opens the game menu (Exit Game
+        // asks first). HOME -> Close also works at any time.
         // House style: no button quits outright. START on the title screen does nothing (Quit is a
         // button there); in a game START opens the menu (Exit Game asks first). Only a failed server
         // (nothing to lose) still quits on START.
@@ -2693,7 +2693,7 @@ int main(int argc, char* argv[])
                         : "No moves left.  Tap it for orders, or Next.";
                     ti.hint_color = C2D_Color32(0xFF, 0xF0, 0x80, 0xFF);
                 } else if (all_moved) {
-                    ti.hint = "Every unit has its orders: tap End Turn (or START).";
+                    ti.hint = "Every unit has its orders: tap End Turn (or SELECT).";
                     ti.hint_color = C2D_Color32(0x90, 0xE8, 0x90, 0xFF);
                 } else {
                     ti.hint = "Tap a unit or city.  Drag to scroll.  Hold: details.";

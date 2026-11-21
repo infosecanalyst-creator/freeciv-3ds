@@ -73,8 +73,8 @@ The full instruction manual is built into the game: Manual on the title screen, 
 | L / R | Research / Tax rates |
 | ZL | Swap screens (3D and touch off while swapped) |
 | ZR | Zoom in (wraps back to the widest view); the on-screen + and - also work |
-| START | End turn |
-| SELECT + START | Quit |
+| START | Menu: Resume, options, Save, Manual, Exit Game (asks first) |
+| SELECT | Same as the End Turn button (shows what needs you first) |
 | In a city | Tap an item to build it now (or to queue it), L/R to pick a unit, Y to lead it out |
 
 ## Old 3DS and New 3DS

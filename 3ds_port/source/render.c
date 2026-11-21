@@ -186,8 +186,8 @@ void render_init(void)
     C2D_TextParse(&s_txt_goto_button_hint, s_staticTextBuf, "Y: Disband  GOTO: multi-turn");
     C2D_TextParse(&s_txt_goto_destination_hint, s_staticTextBuf, "Goto: tap the destination tile");
     C2D_TextParse(&s_txt_goto_cancel_hint, s_staticTextBuf, "B, or tap the unit again: cancel");
-    C2D_TextParse(&s_txt_controls_hint_1, s_staticTextBuf, "Pan: D-Pad/Circle   SELECT: find units");
-    C2D_TextParse(&s_txt_controls_hint_2, s_staticTextBuf, "A: End Turn  L: Research  R: Rates");
+    C2D_TextParse(&s_txt_controls_hint_1, s_staticTextBuf, "Pan: D-Pad/Circle   X: next unit");
+    C2D_TextParse(&s_txt_controls_hint_2, s_staticTextBuf, "SELECT: End Turn  L: Research  R: Rates");
     C2D_TextParse(&s_txt_tap_row_hint, s_staticTextBuf, "Tap a row below: change build");
     C2D_TextParse(&s_txt_now_queue_hint, s_staticTextBuf, "NOW (tap left) builds immediately; QUEUE (right) appends.");
     C2D_TextParse(&s_txt_close, s_staticTextBuf, "Close");
@@ -3564,7 +3564,7 @@ void render_title_controls_top(int frame)
         { "B",                 "back or cancel" },
         { "D-Pad, Circle Pad", "move the unit / scroll" },
         { "L / R  ZL  ZR",    "research, tax / swap / zoom" },
-        { "START / SEL+START", "end turn / quit" },
+        { "START / SELECT",   "menu / End Turn button" },
     };
     u32 key = C2D_Color32(0xFF, 0xE8, 0xA0, 0xFF), val = C2D_Color32(0xE0, 0xE6, 0xEE, 0xFF);
     for (int i = 0; i < (int)(sizeof(rows) / sizeof(rows[0])); i++) {
