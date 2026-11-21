@@ -2394,8 +2394,8 @@ int main(int argc, char* argv[])
             // and whether the camera found your units, the first frame the
             // game is actually running. Lands in sdmc:/freeciv_out.log so a
             // "black fog" session can be diagnosed after the fact via FTP.
-            static bool pov_logged = !s_debug_log;   // debug.txt only (FC-04)
-            if (!pov_logged && get_game_turn() > 0) {
+            static bool pov_logged = false;
+            if (s_debug_log && !pov_logged && get_game_turn() > 0) {   // debug.txt only (FC-04)
                 char nm[48]; bool ai = false; int pidx = -1;
                 int nu = get_pov_summary(nm, sizeof(nm), &ai, &pidx);
                 int dx = -1, dy = -1;
