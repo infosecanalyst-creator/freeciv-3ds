@@ -4,7 +4,7 @@
  configure.ac        | 17 +++++++++++++----
  server/notify.c     | 16 ++++++++++++++++
  server/sernet.c     | 51 +++++++++++++++++++++++++++++++++++++++++++++++++--
- server/srv_main.c   |  8 ++++++++
+ server/srv_main.c   | 22 ++++++++++++++++++++++
  utility/shared.h    |  4 +++-
  utility/support.c   | 40 ++++++++++++++++++++++++++++++++++++++++
- 9 files changed, 143 insertions(+), 14 deletions(-)
+ 9 files changed, 157 insertions(+), 14 deletions(-)

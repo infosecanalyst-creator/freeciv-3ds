@@ -3879,12 +3879,18 @@ void render_game_over_bottom(void)
 }
 
 // "freeciv-T0012-Y-3450-auto.sav.gz" -> "Turn 12, 3450 BC  (autosave)";
-// "3ds-T0012-Y-3450.sav.gz" -> "Turn 12, 3450 BC  (saved)".
+// "3ds-T0012-Y-3450.sav.gz" -> "Turn 12, 3450 BC  (saved)";
+// "freeciv-auto-3.sav.gz" (FC-03 slot) -> "Turn 12, 3450 BC  (autosave)" from .autoslots.
 void save_file_label(const char *fn, char *out, int n)
 {
     int turn = 0, year = 0;
     bool manual = !strncmp(fn, "3ds-", 4);
-    if (sscanf(fn, manual ? "3ds-T%d-Y%d" : "freeciv-T%d-Y%d", &turn, &year) == 2)
+    if (fc3ds_autoslot_info(fn, &turn, &year)) {   // FC-03: "freeciv-auto-3.sav.gz", a fixed autosave slot
+        if (turn >= 0)
+            snprintf(out, n, "Turn %d, %d %s  (autosave)", turn, year < 0 ? -year : year, year < 0 ? "BC" : "AD");
+        else
+            snprintf(out, n, "Autosave");
+    } else if (sscanf(fn, manual ? "3ds-T%d-Y%d" : "freeciv-T%d-Y%d", &turn, &year) == 2)
         snprintf(out, n, "Turn %d, %d %s%s", turn, year < 0 ? -year : year, year < 0 ? "BC" : "AD",
                  manual ? "  (saved)" : strstr(fn, "auto") ? "  (autosave)" : "");
     else if (manual && sscanf(fn, "3ds-T%d", &turn) == 1)

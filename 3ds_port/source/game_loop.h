@@ -321,6 +321,10 @@ typedef struct {
 // touched).
 int get_save_files(SaveFile *out, int max);
 
+// FC-03: turn autosaves go in fixed slots freeciv-auto-1..5 (game_loop.c).
+// For a slot file name: true, with its turn (-1 when unknown) and year.
+bool fc3ds_autoslot_info(const char *fn, int *turn, int *year);
+
 // Server lifecycle (start/pump/busy/ready/end-turn/shutdown/pause) lives in
 // fc3ds_server.h - see that header for the cooperative-scheduling contract
 // the main loop codes against.

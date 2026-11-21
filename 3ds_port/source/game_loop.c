@@ -2588,6 +2588,78 @@ static bool is_savegame_name(const char *name)
     return len > suffix_len && strcmp(name + len - suffix_len, SUFFIX) == 0;
 }
 
+// --- FC-03: turn autosaves in a fixed set of slots --------------------------
+// The server wrote one autosave per turn ("freeciv-T0012-Y-3450-auto.sav.gz")
+// and nothing ever removed them, so the saves folder grew by a file a turn
+// (hundreds on a long game: a slower Load list and Continue, a fuller card).
+// Ryan's rule is that his files are never deleted, so instead of pruning old
+// autosaves the turn autosave now goes into one of FC3DS_AUTOSLOTS fixed names,
+// freeciv-auto-1 .. freeciv-auto-5 (slot = turn mod 5, plus 1): the save five
+// turns back is overwritten by design and the folder never grows. The last five
+// turns are always there. Each slot's turn and year are kept in .autoslots for
+// the Load list's label. Older per-turn autosaves made before this change are
+// left as they are. (Server side: save_game_auto in port-patches/freeciv-core.patch.)
+#define FC3DS_AUTOSLOTS   5
+#define AUTOSLOTS_PATH    "sdmc:/3ds/freeciv/saves/.autoslots"
+static int  s_slot_turn[FC3DS_AUTOSLOTS + 1], s_slot_year[FC3DS_AUTOSLOTS + 1];
+static bool s_slot_set[FC3DS_AUTOSLOTS + 1], s_slots_loaded;
+static int  s_slot_pending = 0;
+static u64  s_slot_t0;
+extern bool fc3ds_debug_log(void);   // main.c: sdmc:/3ds/freeciv/debug.txt
+
+static void autoslots_load(void)
+{
+    if (s_slots_loaded) return;
+    s_slots_loaded = true;
+    FILE *f = fopen(AUTOSLOTS_PATH, "r");
+    if (!f) return;
+    int k, turn, year;
+    while (fscanf(f, "%d %d %d", &k, &turn, &year) == 3)
+        if (k >= 1 && k <= FC3DS_AUTOSLOTS) { s_slot_turn[k] = turn; s_slot_year[k] = year; s_slot_set[k] = true; }
+    fclose(f);
+}
+
+// Server thread, from save_game_auto: the slot's name for this turn.
+void fc3ds_autosave_slot(int turn, int year, char *name, size_t size)
+{
+    int k = (turn >= 0 ? turn : -turn) % FC3DS_AUTOSLOTS + 1;
+    autoslots_load();
+    fc_snprintf(name, size, "freeciv-auto-%d", k);
+    s_slot_turn[k] = turn; s_slot_year[k] = year;
+    s_slot_pending = k;
+    s_slot_t0 = osGetTime();
+}
+
+// Server thread, after the save: remember the slot's turn and year (a few bytes).
+void fc3ds_autosave_done(void)
+{
+    int done = s_slot_pending;
+    if (!done) return;
+    s_slot_set[done] = true;
+    s_slot_pending = 0;
+    FILE *f = fopen(AUTOSLOTS_PATH ".tmp", "w");
+    if (!f) return;
+    bool ok = true;
+    for (int k = 1; k <= FC3DS_AUTOSLOTS; k++)
+        if (s_slot_set[k] && fprintf(f, "%d %d %d\n", k, s_slot_turn[k], s_slot_year[k]) < 0) ok = false;
+    if (fclose(f) != 0) ok = false;
+    if (ok) { remove(AUTOSLOTS_PATH); rename(AUTOSLOTS_PATH ".tmp", AUTOSLOTS_PATH); }
+    if (fc3ds_debug_log())   // debug.txt only: how long the turn autosave took
+        printf("PERF autosave: turn %d -> freeciv-auto-%d, %llu ms\n", s_slot_turn[done], done,
+               (unsigned long long)(osGetTime() - s_slot_t0));
+}
+
+// "freeciv-auto-3.sav.gz": true with the turn and year it holds, when known.
+bool fc3ds_autoslot_info(const char *fn, int *turn, int *year)
+{
+    int k;
+    if (sscanf(fn, "freeciv-auto-%d", &k) != 1 || k < 1 || k > FC3DS_AUTOSLOTS) return false;
+    autoslots_load();
+    if (!s_slot_set[k]) { *turn = -1; *year = 0; return true; }
+    *turn = s_slot_turn[k]; *year = s_slot_year[k];
+    return true;
+}
+
 // --- Load-order index (port-owned recency truth) ----------------------------
 // The picker must show the most-recently-written saves first, but directory
 // enumeration order does NOT track recency on the 3DS FAT card: overwriting an
