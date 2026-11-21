@@ -562,13 +562,35 @@ static void fc_view_bottom_content(void)
     else render_set_base(0.0f, 0.0f, 1.0f, 1.0f);
 }
 
+// FC-04: stdout (the port's lines, the engine's log and server console) went to the SD card
+// unbuffered, one write per line, with the engine logging at its normal level and a PERF line
+// for every slow step and every turn. Now: stdout is buffered (16 KB; FATAL and HOME-close
+// lines flush at once) and rolled over at 1 MB. Without sdmc:/3ds/freeciv/debug.txt (checked
+// once, here) the engine logs errors only and the PERF / POV lines are skipped.
+static bool s_debug_log = false;
+bool fc3ds_debug_log(void) { return s_debug_log; }
+
+static void fc3ds_log_cap(void)    // every few seconds from the main loop
+{
+    fflush(stdout);
+    if (ftell(stdout) > 1024 * 1024) {
+        remove("sdmc:/freeciv_out.old.log");
+        rename("sdmc:/freeciv_out.log", "sdmc:/freeciv_out.old.log");
+        freopen("sdmc:/freeciv_out.log", "w", stdout);
+        setvbuf(stdout, NULL, _IOFBF, 16384);
+        printf("(log rolled over at 1 MB: earlier lines in freeciv_out.old.log)\n");
+    }
+}
+
 int main(int argc, char* argv[])
 {
+    { FILE *d = fopen("sdmc:/3ds/freeciv/debug.txt", "r"); s_debug_log = d != NULL; if (d) fclose(d); }
     // Redirect output to SD card to catch fatal errors
     freopen("sdmc:/freeciv_out.log", "w", stdout);
     freopen("sdmc:/freeciv_err.log", "w", stderr);
-    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stdout, NULL, _IOFBF, 16384);
     setvbuf(stderr, NULL, _IONBF, 0);
+    if (s_debug_log) printf("debug log on (sdmc:/3ds/freeciv/debug.txt)\n");
 
     u32 linearFree = osGetMemRegionFree(MEMREGION_BASE);
     u32 appFree = osGetMemRegionFree(MEMREGION_APPLICATION);
@@ -828,6 +850,7 @@ int main(int argc, char* argv[])
     while (aptMainLoop())
     {
         frame_no++;
+        if ((frame_no % 600) == 0) fc3ds_log_cap();   // ~10 s: write out the buffered log, cap it at 1 MB
         hidScanInput();
         u32 kDown = remap_keys(hidKeysDown());
         u32 kHeld = remap_keys(hidKeysHeld());
@@ -1344,13 +1367,13 @@ int main(int argc, char* argv[])
             if (busy && !was_busy) busy_t0 = now;
             if (!busy && was_busy) {
                 u32 ms = (u32)((now - busy_t0) / CPU_TICKS_PER_MSEC);
-                if (ms > 250) printf("PERF step %lu ms (turn %d)\n", (unsigned long)ms, get_game_turn());
+                if (ms > 250 && s_debug_log) printf("PERF step %lu ms (turn %d)\n", (unsigned long)ms, get_game_turn());
             }
             was_busy = busy;
             int t = busy ? perf_turn : get_game_turn(); // no engine reads while it runs
             if (!busy && t != perf_turn && t > 0) {
                 struct mallinfo mi = mallinfo();
-                if (nframes)
+                if (nframes && s_debug_log)
                     printf("PERF turn %d: ui avg %.1f ms max %.1f ms over %lu frames; heap used %d KB, linear free %lu KB\n",
                            t, fsum / nframes, fmax, (unsigned long)nframes, mi.uordblks / 1024,
                            (unsigned long)(linearSpaceFree() / 1024));
@@ -2371,7 +2394,7 @@ int main(int argc, char* argv[])
             // and whether the camera found your units, the first frame the
             // game is actually running. Lands in sdmc:/freeciv_out.log so a
             // "black fog" session can be diagnosed after the fact via FTP.
-            static bool pov_logged = false;
+            static bool pov_logged = !s_debug_log;   // debug.txt only (FC-04)
             if (!pov_logged && get_game_turn() > 0) {
                 char nm[48]; bool ai = false; int pidx = -1;
                 int nu = get_pov_summary(nm, sizeof(nm), &ai, &pidx);
@@ -2836,6 +2859,7 @@ int main(int argc, char* argv[])
         if (fc3ds_server_is_busy()) fc3ds_server_wait_parked(5000);
         if (fc3ds_server_is_busy()) {
             printf("fc3ds: HOME -> Close during a running step, not saved\n");
+            fflush(stdout);
         } else if (get_game_turn() > 0) {
             take_save_result();                   // drop a result nobody read yet
             freeciv_request_save_game();

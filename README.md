@@ -96,7 +96,7 @@ There is no DS version. The DS has 4 MB of RAM, far less than the Freeciv engine
 - **3dsx**: copy `freeciv3ds.3dsx` to `/3ds/` and start it from the Homebrew Launcher.
 - **Over Wi-Fi**: in the Homebrew Launcher press Y, then `python3 tools/3dslink.py <3ds-ip> freeciv3ds.3dsx`.
 
-Saves go to `/3ds/freeciv/saves/` and settings to `/3ds/freeciv/settings.ini`. CI builds every push; the
+Saves go to `/3ds/freeciv/saves/` and settings to `/3ds/freeciv/settings.ini`. The log (`sdmc:/freeciv_out.log`) has the engine's errors and the port's start/exit lines only; an empty `/3ds/freeciv/debug.txt` turns on the engine's normal log and the PERF lines (buffered, rolled over at 1 MB). CI builds every push; the
 latest `.3dsx` and `.cia` are on the `builds` branch, and pushing a `v*` tag publishes a GitHub Release.
 
 ## Building

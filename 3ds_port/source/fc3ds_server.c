@@ -89,6 +89,12 @@ static void fc3ds_server_coro(void *arg)
     if (s_quitting) return; // app closed before a game was picked
 
     srv_init(); // resets srvarg, including load_filename - must run first
+    // FC-04: the engine's log goes to stdout (sdmc:/freeciv_out.log): errors only, unless
+    // sdmc:/3ds/freeciv/debug.txt existed at start-up (con_log_init reads this level later)
+    {
+        extern bool fc3ds_debug_log(void);
+        if (!fc3ds_debug_log()) srvarg.loglevel = LOG_ERROR;
+    }
 
     if (s_pending_has_load) {
         // Bare filename, same contract save_game() itself uses - resolved
@@ -144,7 +150,7 @@ void fc3ds_server_start(bool is_new_3ds)
     if (!s_srv_thread && dest_core != -1)
         s_srv_thread = threadCreate(fc3ds_server_coro, NULL, 512 * 1024, priority + 1, -1, false);
     if (!s_srv_thread) {
-        printf("fc3ds_server: could not create the engine thread\n");
+        printf("fc3ds_server: could not create the engine thread\n"); fflush(stdout);
         s_failed = true;
     }
 

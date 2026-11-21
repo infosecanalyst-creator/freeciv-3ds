@@ -204,5 +204,7 @@ The game says so and START quits. Try the next save in Load Game: there is one f
 ## The game crashed
 sdmc:/freeciv_out.log records what the game was doing. Send it along with a note of what happened.
 
+For a detailed log, create an empty file named debug.txt in sdmc:/3ds/freeciv/ and start the game again. Delete it afterwards: the detailed log slows the game.
+
 ## Changing this manual
 A file named manual.txt in sdmc:/3ds/freeciv/ replaces the built-in text. Sections start with "# ", headings with "## ", list items with "- ", steps with "1. ", and table rows with "| ".
