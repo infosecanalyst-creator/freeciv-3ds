@@ -302,7 +302,7 @@ static void popup_add(PopupMenu *m, int id, const char *label, bool enabled)
 static void build_unit_popup(PopupMenu *m, const UnitInfo *u)
 {
     memset(m, 0, sizeof(*m));
-    snprintf(m->title, sizeof(m->title), "%s", u->name);
+    snprintf(m->title, sizeof(m->title), "%.39s", u->name);   // FC-10: cut on purpose, not by accident
     static const struct { int kind; const char *label; } items[] = {
         { UNIT_ACTION_FOUND_CITY, "Build City" },
         { UNIT_ACTION_AUTO_WORK,  "Auto Work" },
@@ -705,6 +705,7 @@ int main(int argc, char* argv[])
     static char help_buf[2048]; // Encyclopedia text for the selection (top-screen card)
     u32 frame_no = 0;     // counts main-loop iterations
     char toast_msg[112] = "Saved";
+    bool toast_is_error = false; // FC-07: a failed save stays on screen; combat toasts wait until it has been seen
     int moved_refresh = 20; // frames until the End Turn button is re-evaluated
     int dipl_wait = 0;      // parked frames waiting for talks to open
     int city_scrolled = -1; // city whose Build list was scrolled to its current item
@@ -998,7 +999,11 @@ int main(int argc, char* argv[])
                     fc3ds_server_begin_load_game(continue_file);
                     app_state = APP_GAME;
                 } else if (it == TI_NEW) {
-                    bool dev = (kHeld & KEY_L) && (kHeld & KEY_R); // hold both shoulders = dev quick game
+#ifdef FC3DS_DEV
+                    bool dev = (kHeld & KEY_L) && (kHeld & KEY_R); // hold both shoulders = dev quick game (FC-08: only in a -DFC3DS_DEV build)
+#else
+                    const bool dev = false;   // FC-08: no hidden quick game in the release
+#endif
                     if (dev) { fc3ds_server_begin_new_game(true); app_state = APP_GAME; }
                     else app_state = APP_NEW_GAME;
                 } else if (it == TI_LOAD) {
@@ -1389,13 +1394,15 @@ int main(int argc, char* argv[])
                 int r = take_save_result();
                 if (save_seen_busy && r == 1) {
                     snprintf(toast_msg, sizeof(toast_msg), "Saved");
+                    toast_is_error = false;
                     if (s_quit_after_save) quit_now = true;
                 } else {
                     // Not written (SD card full or locked?): never quit on top of that.
                     snprintf(toast_msg, sizeof(toast_msg), "Save failed - check the SD card");
                     s_quit_after_save = false;
+                    toast_is_error = true;
                 }
-                save_toast_frames = SAVE_TOAST_FRAMES;
+                save_toast_frames = toast_is_error ? SAVE_TOAST_FRAMES * 2 : SAVE_TOAST_FRAMES;
                 save_in_flight = false; save_seen_busy = false; save_wait = 0;
             }
         }
@@ -1405,7 +1412,9 @@ int main(int argc, char* argv[])
         // as a toast on the map. Read only between steps: the server thread writes the log.
         {
             static int alert_seen = -1;
-            if (!busy) {
+            // FC-07: while "Save failed" is up, combat alerts are held back (alert_seen stays put, so
+            // they still show once it is gone; they are in the news list meanwhile)
+            if (!busy && !(toast_is_error && save_toast_frames > 0)) {
                 int total = get_message_total();
                 if (alert_seen < 0 || total < alert_seen) alert_seen = total;   // nothing old on load
                 int first = -1, more = 0;
@@ -1426,6 +1435,7 @@ int main(int argc, char* argv[])
             }
         }
         if (save_toast_frames > 0) save_toast_frames--;
+        else toast_is_error = false;
         if (end_armed > 0) end_armed--;
 
         // ---------------- Map screen stylus ----------------
@@ -1945,7 +1955,7 @@ int main(int argc, char* argv[])
                         want_next_unit = true;
                     } else if (id == PID_DISBAND_ASK) {
                         memset(&popup, 0, sizeof(popup));
-                        snprintf(popup.title, sizeof(popup.title), "Disband %s?", unit_info.name);
+                        snprintf(popup.title, sizeof(popup.title), "Disband %.30s?", unit_info.name);
                         popup_add(&popup, PID_YES, "Disband", true);
                         popup_add(&popup, PID_NO, "Keep", true);
                         int ux, uy;
@@ -2114,9 +2124,9 @@ int main(int argc, char* argv[])
                                 // Show the choices (and the odds) before acting.
                                 memset(&popup, 0, sizeof(popup));
                                 if (fight)
-                                    snprintf(popup.title, sizeof(popup.title), "vs %s", attack_odds.defender);
+                                    snprintf(popup.title, sizeof(popup.title), "vs %.36s", attack_odds.defender);
                                 else
-                                    snprintf(popup.title, sizeof(popup.title), "%s", t.city_name[0] ? t.city_name : "City");
+                                    snprintf(popup.title, sizeof(popup.title), "%.39s", t.city_name[0] ? t.city_name : "City");
                                 for (int i = 0; i < nca; i++) popup_add(&popup, PID_CITY_ACTION + ca[i].action, ca[i].label, true);
                                 if (fight) {
                                     char al[24];
@@ -2137,7 +2147,7 @@ int main(int argc, char* argv[])
                             // Your city: open it, or send the unit there.
                             get_route_preview(selected_unit_id, tx, ty, &route);
                             memset(&popup, 0, sizeof(popup));
-                            snprintf(popup.title, sizeof(popup.title), "%s", t.city_name[0] ? t.city_name : "City");
+                            snprintf(popup.title, sizeof(popup.title), "%.39s", t.city_name[0] ? t.city_name : "City");
                             popup_add(&popup, PID_OPEN_CITY, "Open city", true);
                             char gl[32];
                             if (route.reachable)

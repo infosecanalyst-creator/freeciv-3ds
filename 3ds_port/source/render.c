@@ -563,11 +563,6 @@ static bool minimap_layout_in(float bx, float by, float bw, float bh, float *des
     return true;
 }
 
-static bool minimap_layout(float *dest_x, float *dest_y, float *S)
-{
-    return minimap_layout_in(MINIMAP_X, MINIMAP_Y, MINIMAP_W, MINIMAP_H, dest_x, dest_y, S);
-}
-
 static void draw_minimap_in(float bx, float by, float bw, float bh, int cam_x, int cam_y,
                             float view_w_tiles, float view_h_tiles, int sel_x, int sel_y)
 {
@@ -1181,7 +1176,7 @@ static void draw_help_block(const char *text, float x, float y, float w, float b
         draw_text(x, y + i * HELP_LINE - 2, HELP_SCALE, i == 0 && page == 0 ? C2D_Color32(0xFF, 0xE0, 0x90, 0xFF) : c,
                   lines[page * per + i]);
     if (pages > 1) {
-        char pg[8];
+        char pg[24];
         snprintf(pg, sizeof(pg), "%d/%d", page + 1, pages);
         draw_text(x + w - font_width(pg, 0.38f), y - 14, 0.38f, C2D_Color32(0x8C, 0xA0, 0xB4, 0xFF), pg);
     }
@@ -2687,7 +2682,7 @@ void render_city_tiles_panel(const CityInfo *info, const CityTileInfo *tiles, in
         }
         // food / shields / trade digits
         if (t->state != 3) {
-            char d[4];
+            char d[16];
             u32 col[3] = { C2D_Color32(0x60, 0xFF, 0x60, 0xFF), C2D_Color32(0xFF, 0x98, 0x38, 0xFF),
                            C2D_Color32(0xFF, 0xE8, 0x30, 0xFF) };
             int v[3] = { t->food, t->shield, t->trade };
@@ -3034,7 +3029,7 @@ void render_tech_tree_panel(const TechNode *nodes, int n, int scroll)
             }
             C2D_DrawRectSolid(bx, y + 1, 0.001f, TECHTREE_BOX_W, PANEL_ROW_H - 2, bg);
             char nm[32];
-            snprintf(nm, sizeof(nm), "%s", node->name);
+            snprintf(nm, sizeof(nm), "%.31s", node->name);
             float sc = 0.42f;
             while (sc > 0.38f && font_width(nm, sc) > TECHTREE_BOX_W - 6) sc -= 0.02f;
             while (nm[0] && font_width(nm, sc) > TECHTREE_BOX_W - 6) nm[strlen(nm) - 1] = 0;

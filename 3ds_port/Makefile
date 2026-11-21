@@ -69,7 +69,7 @@ endif
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11
 
 ASFLAGS	:=	-g $(ARCH)
-LDFLAGS	=	-specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map) -Wl,--wrap=exit -Wl,--wrap=abort
+LDFLAGS	=	-specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map) -Wl,--wrap=exit -Wl,--wrap=abort -Wl,--no-enum-size-warning
 # Hardware test hooks (3ds-test-suite hwtest/selftest): inactive unless the test agent
 # starts the game with --selftest=<script>.
 SELFTEST_WRAP := hidScanInput hidKeysHeld hidKeysDown hidKeysDownRepeat hidKeysUp hidTouchRead hidCircleRead irrstCstickRead aptMainLoop

@@ -269,7 +269,7 @@ static bool save_file_stat(const char *base, long *size, time_t *mtime)
     struct dirent *de;
     while ((de = readdir(d))) {
         if (strncmp(de->d_name, base, nl) != 0 || (de->d_name[nl] && de->d_name[nl] != '.')) continue;
-        char path[160];
+        char path[300];   // FC-10: a 255-byte file name fits
         snprintf(path, sizeof(path), "sdmc:/3ds/freeciv/saves/%s", de->d_name);
         struct stat st;
         if (stat(path, &st) == 0) { *size = (long)st.st_size; *mtime = st.st_mtime; found = true; break; }
