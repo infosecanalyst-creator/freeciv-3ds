@@ -1164,7 +1164,7 @@ int main(int argc, char* argv[])
 
         if (ui_mode == UI_PEDIA) {
             if (kDown & KEY_L) pedia_text_scroll = pedia_text_scroll > 4 ? pedia_text_scroll - 4 : 0;
-            if (kDown & KEY_R) pedia_text_scroll += 4;
+            if ((kDown & KEY_R) && render_pedia_more()) pedia_text_scroll += 4;
         }
         if (ui_mode == UI_CITY || ui_mode == UI_RESEARCH || ui_mode == UI_GOVERNMENT
             || ui_mode == UI_DIPLOMACY || ui_mode == UI_MESSAGES || ui_mode == UI_PEDIA) {

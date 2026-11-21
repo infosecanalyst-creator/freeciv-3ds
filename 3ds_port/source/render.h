@@ -418,6 +418,7 @@ void render_messages_top(const GameMessage *m);
 #define PEDIA_TAB_W   61
 #define PEDIA_TAB_X(i) (3 + (i) * 63)
 void render_pedia_panel(int kind, const PediaEntry *list, int n, int scroll, int selected);
+bool render_pedia_more(void);
 void render_pedia_top(const char *title, const char *text, int scroll_lines,
                       const char *icon_tag, const char *icon_alt, bool icon_is_unit);
 

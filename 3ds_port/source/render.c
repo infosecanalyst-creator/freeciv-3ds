@@ -3030,10 +3030,30 @@ void render_tech_tree_panel(const TechNode *nodes, int n, int scroll)
             C2D_DrawRectSolid(bx, y + 1, 0.001f, TECHTREE_BOX_W, PANEL_ROW_H - 2, bg);
             char nm[32];
             snprintf(nm, sizeof(nm), "%.31s", node->name);
+            // A name is never cut off ("Horseback Ridin", "Ceremonial Buria"): one line if it fits,
+            // else two lines broken at the space nearest the middle, else one smaller line.
+            const float bw = TECHTREE_BOX_W - 6;
             float sc = 0.42f;
-            while (sc > 0.38f && font_width(nm, sc) > TECHTREE_BOX_W - 6) sc -= 0.02f;
-            while (nm[0] && font_width(nm, sc) > TECHTREE_BOX_W - 6) nm[strlen(nm) - 1] = 0;
-            draw_text_z(bx + 3, y + 4, 0.01f, sc, fg, nm);
+            while (sc > 0.38f && font_width(nm, sc) > bw) sc -= 0.02f;
+            if (font_width(nm, sc) <= bw) {
+                draw_text_z(bx + 3, y + 4, 0.01f, sc, fg, nm);
+            } else {
+                int len = (int)strlen(nm), cut = -1;
+                for (int k = 1; k < len - 1; k++)
+                    if (nm[k] == ' ' && (cut < 0 || abs(k - len / 2) < abs(cut - len / 2))) cut = k;
+                if (cut > 0) {
+                    char l1[32], l2[32];
+                    snprintf(l1, sizeof(l1), "%.*s", cut, nm);
+                    snprintf(l2, sizeof(l2), "%s", nm + cut + 1);
+                    float s2 = 0.34f;
+                    while (s2 > 0.26f && (font_width(l1, s2) > bw || font_width(l2, s2) > bw)) s2 -= 0.01f;
+                    draw_text_z(bx + 3, y + 1, 0.01f, s2, fg, l1);
+                    draw_text_z(bx + 3, y + 11, 0.01f, s2, fg, l2);
+                } else {
+                    float s2 = fit_scale(nm, 0.38f, bw, 0.26f);
+                    draw_text_z(bx + 3, y + 4 + (0.42f - s2) * 10, 0.01f, s2, fg, nm);
+                }
+            }
         }
     }
     if (nr > PANEL_ROWS_VISIBLE) scroll_thumb(nr, scroll, 317);
@@ -3721,6 +3741,11 @@ static int pedia_icon_index(const char *tag)
     return -1;
 }
 
+// Is there Encyclopedia text below the last line shown? (R only scrolls on while there is:
+// it used to scroll the text, or the "Pick a category" line, off the page for good.)
+static bool s_pedia_more = false;
+bool render_pedia_more(void) { return s_pedia_more; }
+
 void render_pedia_top(const char *title, const char *text, int scroll_lines,
                       const char *icon_tag, const char *icon_alt, bool icon_is_unit)
 {
@@ -3767,6 +3792,7 @@ void render_pedia_top(const char *title, const char *text, int scroll_lines,
         pic_bottom = fy + 68;
     }
     // Paragraph-by-paragraph wrap, skipping scroll_lines lines.
+    bool more = false;
     float y = 44;
     int line_no = 0;
     const char *p = text ? text : "";
@@ -3795,14 +3821,18 @@ void render_pedia_top(const char *title, const char *text, int scroll_lines,
             }
             if (!best) best = strlen(q) < sizeof(line) - 1 ? (int)strlen(q) : (int)sizeof(line) - 1;
             memcpy(line, q, best); line[best] = 0;
-            if (line_no++ >= scroll_lines && y < text_end) {
-                draw_text_z(16, y, 0.01f, 0.47f, 0xFFFFFFFF, line);
-                y += 16;
+            if (line_no++ >= scroll_lines) {
+                if (y < text_end) {
+                    draw_text_z(16, y, 0.01f, 0.47f, 0xFFFFFFFF, line);
+                    y += 16;
+                } else more = true;   // a line below the last one shown
             }
             q += best;
             while (*q == ' ') q++;
         }
     }
+    if (*p) more = true;
+    s_pedia_more = more;
     layer(0.0f);
     hint_strip(foot, soft);
 }
