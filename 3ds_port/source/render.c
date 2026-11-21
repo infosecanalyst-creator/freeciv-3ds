@@ -351,7 +351,7 @@ static const char *lh(const char *s)
         { "D-Pad, Circle Pad", "A/B/X/Y, Circle Pad" },
         { "D-Pad: scroll   B: close", "A/B/X/Y: scroll   D-Down: close" },
         { "L/R: scroll the text   D-Pad: list   B: close", "L/R: scroll the text   A/B/X/Y: list   D-Down: close" },
-        { "Sticks: scroll   D-Pad, L / R: section   B: close", "Sticks: scroll   A/B/X/Y, L / R: section   D-Down: close" },
+        { "Sticks: scroll   D-Pad, L / R: section   B / START: close", "Sticks: scroll   A/B/X/Y, L / R: section   D-Down / START: close" },
     };
     if (!s || !fc3ds_lefty()) return s;
     for (size_t i = 0; i < sizeof(sw) / sizeof(sw[0]); i++)
@@ -4115,7 +4115,7 @@ void render_manual_top(void)
     draw_fit_z(10, 2, 0.51f, TW - 8 - hw - 18, 0.6f, white, s_man_title[s_man_sec]);
     draw_text_z(TW - 8 - hw, 5, 0.51f, 0.45f, C2D_Color32(0xC8, 0xD8, 0xE8, 0xFF), hdr);
     C2D_DrawRectSolid(0, MAN_BOTTOM + 1, 0.5f, TW, 240 - MAN_BOTTOM - 1, C2D_Color32(0x0C, 0x12, 0x1C, 0xFF));
-    const char *foot = lh("Sticks: scroll   D-Pad, L / R: section   B: close");
+    const char *foot = lh("Sticks: scroll   D-Pad, L / R: section   B / START: close");
     draw_text_z(5, 240 - 16, 0.51f, fit_scale(foot, 0.45f, TW - 10, 0.40f), soft, foot);
 
     int y = MAN_TOP - s_man_scroll;
