@@ -10,7 +10,7 @@
 # 3ds_port/romfs/data with the server data the engine reads at run time.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-FREECIV_COMMIT="${FREECIV_COMMIT:-691fe4de54ab3c2594a241a4954067b5c6913400}"   # what port-patches/freeciv-core.patch was made against
+FREECIV_COMMIT="${FREECIV_COMMIT:-04852fbf679715632d1a3a56c32f0ade72621ded}"   # what port-patches/freeciv-core.patch was made against
 cd "$ROOT"
 
 # 1. upstream source at the pinned commit, with the port's glue patch

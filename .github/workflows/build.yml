@@ -2,7 +2,7 @@ name: build
 
 on:
   push:
-    branches: [main]
+    branches: ["**", "!builds", "!builds-*"]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -49,15 +49,17 @@ jobs:
           cp 3ds_port.3dsx freeciv3ds-amplio.3dsx
           touch source/main.c && rm -f 3ds_port.smdh && make -j"$(nproc)"   # leave the normal build for the CIA
       - name: Publish the .3dsx to the builds branch (works even when artifact storage is full)
-        if: github.ref == 'refs/heads/main'
+        # main publishes to `builds` (what gets installed); other branches to builds-<branch>
+        if: success() && github.event_name == 'push' && github.ref_type == 'branch'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
+          dest=builds; [ "$GITHUB_REF_NAME" = main ] || dest="builds-${GITHUB_REF_NAME//\//-}"
           git config --global --add safe.directory '*'
-          git clone --depth 1 --branch builds "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" /tmp/pub 2>/dev/null \
-            || { mkdir /tmp/pub && cd /tmp/pub && git init -q -b builds; }
+          git clone --depth 1 --branch "$dest" "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" /tmp/pub 2>/dev/null \
+            || { mkdir /tmp/pub && cd /tmp/pub && git init -q -b "$dest"; }
           cd /tmp/pub
           git remote remove origin 2>/dev/null || true
           git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
@@ -73,7 +75,7 @@ jobs:
           git config user.name "freeciv-3ds-ci"; git config user.email "ci@users.noreply.github.com"
           git add -A
           git commit -q -m "build ${GITHUB_RUN_NUMBER} from ${GITHUB_SHA::7}" || exit 0
-          git push -q -f origin builds
+          git push -q -f origin HEAD:"$dest"
       - uses: actions/upload-artifact@v4
         continue-on-error: true   # artifact storage quota may be full; the builds branch has the binary
         with:
