@@ -553,6 +553,8 @@ int get_city_ids(int *out, int max);  // the pov player's cities, in list order
 bool find_unit_tile_by_id(int unit_id, int *x, int *y);
 bool get_city_tile(int city_id, int *x, int *y);
 int take_save_result(void); // 1 written, -1 failed, 0 none since the last call
+// FC-Q2: a line about an order that could not be carried out (false: none waiting).
+bool take_order_note(char *out, int len);
 
 // ---- Isometric map support (native coordinates throughout) ----
 bool map_is_iso(void);                      // the map uses the ISO topology

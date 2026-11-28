@@ -8,6 +8,7 @@ You play on the touch screen with the stylus, the way the PC game is played with
 - Circle Pad or C-Stick up and down: scroll (hold to keep scrolling), or drag the stylus up and down on the touch screen.
 - L and R: previous and next section.
 - B or Start: close. The manual opens again where you left it.
+- Left hand: tap Left hand: off / on on the touch screen (D-pad past the last section, then A). It swaps the D-Pad with Y, A, B and X so the stylus can be held in the left hand. It is also in Settings on the title screen and in START, SETTINGS during a game.
 
 # Getting started
 ## Installing over Wi-Fi
@@ -20,7 +21,7 @@ The same steps install every update. You never need to take the SD card out.
 ## The title screen
 | Continue | Opens your newest save. It is chosen already when you have one.
 | New Game | Set up a new world, then tap Start.
-| Load Game | Your saves, newest first, by turn and year.
+| Load Game | Your saves, newest first. Each row says Saved (you saved it, or the exit save) or Autosave (made each turn), then the turn and year. Tap one, or move the gold ring with the D-pad and press A.
 | Settings | Music and effects volume, text size, and Left hand: swaps the D-Pad with Y, A, B and X (Y is up, A is right, B is down, X is left, and the reverse) so the stylus can be held in the left hand. It is remembered.
 | Controls | The button chart.
 | Manual | This manual.
@@ -44,9 +45,10 @@ Tap - and + to change a setting, then Start (or press START). Your choices are r
 - Drag to scroll the map.
 - Hold the stylus still on a square for a moment to see what is there, without moving anything.
 - In any list (cities, research, messages), drag up and down to scroll, or hold the D-pad. Left and right on the D-pad jump a page.
+- In the research, government, diplomacy, messages and Encyclopedia lists the D-pad moves a gold ring; A does what a tap on that row does. Nothing there needs the stylus.
 
 The buttons along the bottom:
-| Menu | Research, taxes, government, diplomacy, messages, Encyclopedia, saving and options.
+| Menu | The game's panels: Research, Tax Rates, Government, Diplomacy, Messages, Encyclopedia (and Spaceship), and START Menu... for saving, settings and exit.
 | Next | Jump to the nearest unit that needs orders. The number is how many are left.
 | Map | The whole world. Tap anywhere on it to jump there.
 | - and + | Zoom out and in.
@@ -81,7 +83,7 @@ When a unit has used up its moves, the next unit is picked after a moment.
 Tap an enemy next to your unit. A menu shows your chance of winning on the Attack button, for example Attack 64%, and the top screen shows both units' health. Tap Attack, or Cancel.
 
 ## Orders
-The bar above the buttons shows the orders that make sense for the unit: Build City, Auto Work, Fortify, Explore, Irrigate, Mine, Road, Sentry. Tap the selected unit again, or More..., for all of them.
+The bar above the buttons shows the orders that make sense for the unit: Build City, Auto Work, Fortify, Explore, Irrigate, Mine, Road, Sentry. Tap the selected unit again, or More..., for all of them. The map then names the order the unit got, for example "Settlers: Build City", so a tap on the wrong button shows at once.
 | Wait | Come back to this unit after the others.
 | Skip Turn | Leave this unit alone until next turn.
 | Auto Work | Workers improve the land on their own. They show an A.
@@ -97,7 +99,7 @@ Tap the square and pick a unit from the list. Units marked (done) have no moves 
 
 # Cities
 ## Founding a city
-Select a Settlers unit and tap Build City. Good sites have grassland, plains, rivers and coast nearby. Hold the stylus on a square to see its terrain first.
+Select a Settlers unit and tap Build City (the first, green button of the order bar). If no city can be built there the map says why, for example "No city built: another city is too close". Good sites have grassland, plains, rivers and coast nearby. Hold the stylus on a square to see its terrain first.
 
 ## The city screen
 Tap your city on the map. L and R go to your previous and next city, on the same tab. The top screen shows its yields (food, shields, trade and what they become), growth, what it is building and its mood: how many citizens are happy, content and unhappy. A red DISORDER badge means the city has stopped working. Raise luxury, build a Temple, or turn a worker into an entertainer.
@@ -118,7 +120,7 @@ What the city has. Tap a building twice to sell it.
 The units inside the city. Tap one to command it.
 
 # Research
-Press L, or Menu then Research.
+Press L, or Menu then Research. Picking a technology says "Now researching ..." on the map.
 - The list shows what you can study now, with turns to learn each at your current science rate. The current one is highlighted.
 - Tree view shows every technology by era: green you can research, blue you know, grey is locked.
 - Tap a locked technology to make it your goal. Your scientists then work towards it on their own, and the goal shows on the top screen.
@@ -140,9 +142,9 @@ The End Turn button turns green when every unit has its orders. Before it ends t
 | City: Starving | A city is about to run out of food. It opens on the Tiles tab.
 | End Turn | Nothing is waiting. Tap to end the turn.
 
-After you pick, you go straight back to the map. SELECT does the same as the button.
+After you pick, you go straight back to the map. SELECT does the same as the button, including the question below.
 
-If some units still have no orders, the first tap on End Turn shows how many. Tap again within two seconds to end the turn anyway.
+If some units still have no orders, the first tap on End Turn (or press of SELECT) shows how many. Tap or press again within two seconds to end the turn anyway.
 
 ## While the computer plays
 A banner across the bottom shows that the other civilizations are moving. Taps made then are ignored, so nothing happens by accident.
@@ -162,8 +164,10 @@ Menu then Spaceship appears once you start building one.
 
 # Saving
 - The game saves itself at the start of every turn, into five rotating slots named freeciv-auto-1 to freeciv-auto-5 (the turn number decides which one). So the last five turns are always kept, the oldest one is replaced, and the saves folder never grows. Autosaves from older versions, one file per turn, are left as they are.
-- Menu then Save Game saves now. "Saved" appears once it is written. If the SD card is full or locked, "Save failed" appears instead, and Save & Exit does not exit.
-- START, then Exit Game asks: Save & Exit, Exit, no save, or No.
+- START opens the menu: RESUME, MANUAL, SAVE GAME, SETTINGS, EXIT GAME. SETTINGS has music, effects, text size and left hand.
+- SAVE GAME saves now. "Saved" appears once it is written. If the SD card is full or locked, "Save failed - check the SD card" appears instead. Saving the same turn again keeps the save before it beside the new one (same name, ending .bak).
+- EXIT GAME asks "Exit Freeciv? It is saved first." with YES and NO; NO is chosen. YES saves, then exits. If that save fails it asks "Not saved! Exit anyway?" (EXIT ANYWAY or NO): it never exits after a failed save without asking. Before the first turn there is nothing to save, and it says so.
+- To load another save, exit and start Freeciv again: the title screen has Continue and Load Game.
 - Closing the game from the HOME menu (HOME, then Close) while a game is running saves it the way Save & Exit does. If the engine is in the middle of a step it quits without saving; the last autosave is at most one turn old.
 - "Save failed" outranks other messages on the map: combat alerts wait until it is gone.
 - Continue on the title screen opens your newest save.
@@ -182,8 +186,8 @@ Menu then Spaceship appears once you start building one.
 | L / R | Research / tax rates. In a city: previous / next city
 | ZL | Swap screens (3D and touch off while swapped)
 | ZR | Zoom in, wrapping to the widest view
-| START | Menu: Resume, options, Save, Manual, Exit Game
-| SELECT | Same as the End Turn button
+| START | Menu: RESUME, MANUAL, SAVE GAME, SETTINGS, EXIT GAME
+| SELECT | Same as the End Turn button (asks once if units still wait)
 
 # Tips
 - Found your second and third cities early. More cities mean more of everything.

@@ -286,9 +286,10 @@ enum { POPUP_NONE, POPUP_UNIT, POPUP_CONFIRM_DISBAND, POPUP_STACK, POPUP_MENU, P
 #define PID_NO          0
 #define PID_CITY_ACTION 1000            // + Freeciv action id
 enum { MENU_RESEARCH = 1, MENU_RATES, MENU_GOVERNMENT, MENU_DIPLOMACY, MENU_SAVE, MENU_MUSIC, MENU_EFFECTS, MENU_CLOSE, MENU_MESSAGES, MENU_PEDIA, MENU_SPACESHIP, MENU_TEXT,
-       MENU_OPTIONS, MENU_SAVE_QUIT, MENU_QUIT, MENU_BACK, MENU_MANUAL, MENU_EXIT_ASK };
+       MENU_OPTIONS, MENU_SAVE_QUIT, MENU_QUIT, MENU_BACK, MENU_MANUAL, MENU_EXIT_ASK, MENU_HOUSE, MENU_LEFTY };
 static bool s_has_spaceship;   // refreshed while the engine is parked
 static bool s_quit_after_save; // Save & Quit: leave once the save has run
+static int s_save_wait;         // frames waited for the engine's answer to a save request
 
 static void popup_add(PopupMenu *m, int id, const char *label, bool enabled)
 {
@@ -328,11 +329,29 @@ static void build_unit_popup(PopupMenu *m, const UnitInfo *u)
     popup_add(m, PID_DISBAND_ASK, "Disband", true);
 }
 
+static int s_lefty = 0;   // left-handed play (see remap_keys below)
+
+// FC-X1: START opens the house menu, the same five rows in the same order as the other ports
+// (claude/3ds-look-and-feel.md): RESUME, MANUAL, SAVE GAME, SETTINGS, EXIT GAME. There is no
+// LOAD row: the engine can open a save only once per start, from the title screen.
+static void open_house_menu(PopupMenu *m)
+{
+    memset(m, 0, sizeof(*m));
+    snprintf(m->title, sizeof(m->title), "MENU");
+    popup_add(m, MENU_CLOSE,      "RESUME", true);
+    popup_add(m, MENU_MANUAL,     "MANUAL", true);
+    popup_add(m, MENU_SAVE,       "SAVE GAME", true);
+    popup_add(m, MENU_OPTIONS,    "SETTINGS", true);
+    popup_add(m, MENU_EXIT_ASK,   "EXIT GAME", true);
+    popup_layout(m, 160, 104);
+    m->x = (320 - m->w) / 2;
+}
+
+// The Menu button on the touch screen: the game's own panels, and the way to the START menu.
 static void open_game_menu(PopupMenu *m)
 {
     memset(m, 0, sizeof(*m));
-    snprintf(m->title, sizeof(m->title), "Menu");
-    popup_add(m, MENU_CLOSE,      "Resume", true);
+    snprintf(m->title, sizeof(m->title), "Game");
     popup_add(m, MENU_RESEARCH,   "Research", true);
     popup_add(m, MENU_RATES,      "Tax Rates", true);
     popup_add(m, MENU_GOVERNMENT, "Government", true);
@@ -340,43 +359,59 @@ static void open_game_menu(PopupMenu *m)
     popup_add(m, MENU_MESSAGES,   "Messages", true);
     popup_add(m, MENU_PEDIA,      "Encyclopedia", true);
     if (s_has_spaceship) popup_add(m, MENU_SPACESHIP, "Spaceship", true);
-    popup_add(m, MENU_SAVE,       "Save Game", true);
-    popup_add(m, MENU_OPTIONS,    "Options", true);
-    popup_add(m, MENU_MANUAL,     "Manual", true);
-    popup_add(m, MENU_EXIT_ASK,   "Exit Game", true);
+    popup_add(m, MENU_HOUSE,      "START Menu...", true);
+    m->force_cols = 2;
     popup_layout(m, HUD_MENU_X, HUD_Y - 10);
     m->x = 2;
 }
 
-static void open_options_menu(PopupMenu *m)
+// SETTINGS (FC-X2: Left hand is here too, so it can be changed in the middle of a game).
+static void open_options_menu(PopupMenu *m, int focus)
 {
     memset(m, 0, sizeof(*m));
-    snprintf(m->title, sizeof(m->title), "Options");
+    snprintf(m->title, sizeof(m->title), "SETTINGS");
     char lbl[24];
-    snprintf(lbl, sizeof(lbl), "Music: %d", audio_music_volume());
+    snprintf(lbl, sizeof(lbl), "MUSIC: %d", audio_music_volume());
     popup_add(m, MENU_MUSIC, lbl, audio_available());
-    snprintf(lbl, sizeof(lbl), "Effects: %d", audio_sfx_volume());
+    snprintf(lbl, sizeof(lbl), "EFFECTS: %d", audio_sfx_volume());
     popup_add(m, MENU_EFFECTS, lbl, audio_available());
-    popup_add(m, MENU_TEXT,       font_get_bias() ? "Text: Large" : "Text: Normal", true);
-    popup_add(m, MENU_BACK,       "Back", true);
-    popup_layout(m, HUD_MENU_X, HUD_Y - 10);
-    m->x = 2;
+    popup_add(m, MENU_TEXT,       font_get_bias() ? "TEXT: LARGE" : "TEXT: NORMAL", true);
+    popup_add(m, MENU_LEFTY,      s_lefty ? "LEFT HAND: ON" : "LEFT HAND: OFF", true);
+    popup_add(m, MENU_BACK,       "BACK", true);
+    popup_layout(m, 160, 104);
+    m->x = (320 - m->w) / 2;
+    if (focus >= 0 && focus < m->n && m->enabled[focus]) m->focus = focus;
+    else if (!m->enabled[0]) m->focus = 2;
 }
 
-static void open_quit_menu(PopupMenu *m)
+// FC-X3: the exit question as everywhere else: YES on the left, NO on the right, NO chosen.
+// YES saves first (when there is something to save), and a failed save asks again (below).
+static void open_quit_menu(PopupMenu *m, bool saves)
 {
     memset(m, 0, sizeof(*m));
-    snprintf(m->title, sizeof(m->title), "Exit the game?");
-    popup_add(m, MENU_SAVE_QUIT,  "Save & Exit", true);
-    popup_add(m, MENU_QUIT,       "Exit, no save", true);
-    popup_add(m, MENU_CLOSE,      "No", true);
+    snprintf(m->title, sizeof(m->title), saves ? "Exit Freeciv? It is saved first." : "Exit Freeciv?");
+    popup_add(m, saves ? MENU_SAVE_QUIT : MENU_QUIT, "YES", true);
+    popup_add(m, MENU_CLOSE,      "NO", true);
+    m->force_cols = 2;
     popup_layout(m, 160, 110);
     m->x = (320 - m->w) / 2;
-    m->focus = 2;                 // house style: the focus starts on No
+    m->focus = 1;                 // house style: the focus starts on NO
+}
+
+// The exit save failed: never quit on top of that without asking.
+static void open_quit_failed_menu(PopupMenu *m)
+{
+    memset(m, 0, sizeof(*m));
+    snprintf(m->title, sizeof(m->title), "Not saved! Exit anyway?");
+    popup_add(m, MENU_QUIT,       "EXIT ANYWAY", true);
+    popup_add(m, MENU_CLOSE,      "NO", true);
+    m->force_cols = 2;
+    popup_layout(m, 160, 110);
+    m->x = (320 - m->w) / 2;
+    m->focus = 1;
 }
 
 // Left-handed play (Settings): the D-pad and A/B/X/Y swap jobs (Y<->up, A<->right, B<->down, X<->left).
-static int s_lefty = 0;
 int fc3ds_lefty(void) { return s_lefty; }
 static u32 remap_keys(u32 m)
 {
@@ -433,14 +468,27 @@ static void load_settings(void *ngp)
 
 static void save_settings(void)
 {
-    FILE *f = fopen(SETTINGS_PATH, "w");
+    // FC-Q7: written to a temporary file and moved into place only when every line reached
+    // the card, so a power cut never leaves an empty settings file
+    static const char *tmp = SETTINGS_PATH ".tmp";
+    FILE *f = fopen(tmp, "w");
     if (!f) return;
-    fprintf(f, "music=%d\neffects=%d\ntext=%d\nlefty=%d\nswapped=%d\n", audio_music_volume(), audio_sfx_volume(), font_get_bias(), s_lefty, fc_swapped);
+    bool ok = fprintf(f, "music=%d\neffects=%d\ntext=%d\nlefty=%d\nswapped=%d\n", audio_music_volume(), audio_sfx_volume(), font_get_bias(), s_lefty, fc_swapped) > 0;
     if (s_saved_ng.size >= 0)
-        fprintf(f, "ng_size=%d\nng_rivals=%d\nng_skill=%d\nng_rules=%d\nng_land=%d\nng_barb=%d\n",
-                s_saved_ng.size, s_saved_ng.rivals, s_saved_ng.skill, s_saved_ng.rules,
-                s_saved_ng.land, s_saved_ng.barb);
-    fclose(f);
+        ok = fprintf(f, "ng_size=%d\nng_rivals=%d\nng_skill=%d\nng_rules=%d\nng_land=%d\nng_barb=%d\n",
+                     s_saved_ng.size, s_saved_ng.rivals, s_saved_ng.skill, s_saved_ng.rules,
+                     s_saved_ng.land, s_saved_ng.barb) > 0 && ok;
+    if (fclose(f) != 0) ok = false;
+    if (!ok) { remove(tmp); return; }
+    remove(SETTINGS_PATH);            // the SD card will not rename over a file
+    if (rename(tmp, SETTINGS_PATH) != 0) remove(tmp);
+}
+
+// The manual's Left hand button (render.c) and SETTINGS change it through here.
+void fc3ds_set_lefty(int on)
+{
+    s_lefty = on != 0;
+    save_settings();
 }
 
 // Volume steps the menu cycles through.
@@ -660,6 +708,9 @@ int main(int argc, char* argv[])
     static SaveFile save_files[MAX_SAVE_FILES];
     int save_file_count = 0;
     int load_scroll = 0;
+    int load_focus = 0;      // FC-Q5: the Load list's D-Pad focus (gold ring), A loads it
+    int list_focus = -1;     // FC-Q5: the same in the in-game lists (-1: not shown until the D-Pad is used)
+    bool list_pick = false;  // A on the focused row: handled as a tap on it
     int save_toast_frames = 0; // >0 while the "Saved" banner should show
     // New Game options. Old 3DS (64 MB, 268 MHz) gets smaller defaults and caps.
     NewGameOpts ng = { 1, 4, 1, 0, 1, 1 };
@@ -839,8 +890,12 @@ int main(int argc, char* argv[])
         if (get_save_files(newest, 1) > 0) {
             snprintf(continue_file, sizeof(continue_file), "%s", newest[0].filename);
             save_file_label(continue_file, continue_label, sizeof(continue_label));
-            char *paren = strstr(continue_label, "  ("); // the title row is narrow
-            if (paren) *paren = 0;
+            // the title row is narrow: "Autosave: turn 12, 3450 BCE" -> "Turn 12, 3450 BCE"
+            char *colon = strstr(continue_label, ": ");
+            if (colon) {
+                memmove(continue_label, colon + 2, strlen(colon + 2) + 1);
+                if (continue_label[0] >= 'a' && continue_label[0] <= 'z') continue_label[0] -= 32;
+            }
         }
     }
     if (continue_file[0]) title_sel = TI_CONTINUE; // the likeliest choice, chosen already
@@ -902,7 +957,7 @@ int main(int argc, char* argv[])
         if ((kDown & KEY_START) && app_state == APP_GAME && ui_mode == UI_MAP) {
             kDown &= ~KEY_START;
             if (popup_kind == POPUP_MENU) popup_kind = POPUP_NONE;   // START again closes it
-            else { open_game_menu(&popup); popup_kind = POPUP_MENU; }
+            else { open_house_menu(&popup); popup_kind = POPUP_MENU; }
         }
 
         // Start menu / load picker (handoff-nohw.md §A.3): the server
@@ -1009,6 +1064,7 @@ int main(int argc, char* argv[])
                 } else if (it == TI_LOAD) {
                     save_file_count = get_save_files(save_files, MAX_SAVE_FILES);
                     load_scroll = 0;
+                    load_focus = 0;
                     app_state = APP_LOAD_PICKER;
                 } else if (it == TI_SETTINGS) {
                     app_state = APP_SETTINGS;
@@ -1024,12 +1080,24 @@ int main(int argc, char* argv[])
             title_frame++;
             if (app_state == APP_NEW_GAME && (kDown & KEY_B)) app_state = APP_START_MENU;
             if (app_state == APP_LOAD_PICKER) {
-                if (kDown & KEY_DUP)   load_scroll--;
-                if (kDown & KEY_DDOWN) load_scroll++;
+                // FC-Q5: the D-Pad moves a gold ring down the list (the list follows it), A loads that save
+                if ((kRep & KEY_DUP) && load_focus > 0) load_focus--;
+                if ((kRep & KEY_DDOWN) && load_focus + 1 < save_file_count) load_focus++;
+                if (kRep & KEY_DLEFT)  load_focus = load_focus > PANEL_ROWS_VISIBLE ? load_focus - PANEL_ROWS_VISIBLE : 0;
+                if ((kRep & KEY_DRIGHT) && save_file_count > 0)
+                    load_focus = load_focus + PANEL_ROWS_VISIBLE < save_file_count ? load_focus + PANEL_ROWS_VISIBLE : save_file_count - 1;
+                if (load_focus < load_scroll) load_scroll = load_focus;
+                if (load_focus >= load_scroll + PANEL_ROWS_VISIBLE) load_scroll = load_focus - PANEL_ROWS_VISIBLE + 1;
                 int max_scroll = save_file_count > PANEL_ROWS_VISIBLE
                                  ? save_file_count - PANEL_ROWS_VISIBLE : 0;
                 if (load_scroll < 0) load_scroll = 0;
                 if (load_scroll > max_scroll) load_scroll = max_scroll;
+                if ((kDown & KEY_A) && load_focus >= 0 && load_focus < save_file_count) {
+                    s_started_from_save = true;
+                    fc3ds_server_begin_load_game(save_files[load_focus].filename);
+                    app_state = APP_GAME;
+                    continue;
+                }
                 if (kDown & KEY_B) app_state = APP_START_MENU;
             }
 
@@ -1099,6 +1167,7 @@ int main(int argc, char* argv[])
                 render_new_game_setup(labels, values, dec, inc);
             } else {
                 render_load_picker(save_files, save_file_count, load_scroll);
+                if (save_file_count > 0) render_list_focus(load_focus - load_scroll);
             }
 
             render_press_end();
@@ -1133,6 +1202,12 @@ int main(int argc, char* argv[])
         if (ui_mode == UI_MAP && popup_kind == POPUP_NONE && (kDown & KEY_SELECT) && !fc3ds_server_is_busy()
             && smart_kind != SMART_END) {
             want_smart = smart_kind; // same as the button: the decision comes first
+        } else if (ui_mode == UI_MAP && popup_kind == POPUP_NONE && (kDown & KEY_SELECT) && !fc3ds_server_is_busy()
+                   && !all_moved && end_armed == 0 && get_game_turn() > 0) {
+            // FC-Q3: units still wait for orders: SELECT asks once, like the End Turn button
+            int idle = count_idle_units(skip_ids, nskip);
+            snprintf(end_armed_label, sizeof(end_armed_label), "Again: %d idle", idle);
+            end_armed = 120;
         } else if (ui_mode == UI_MAP && popup_kind == POPUP_NONE && (kDown & KEY_SELECT) && !fc3ds_server_is_busy()) {
             end_armed = 0;
             report_seen = get_message_total();
@@ -1168,12 +1243,39 @@ int main(int argc, char* argv[])
         }
         if (ui_mode == UI_CITY || ui_mode == UI_RESEARCH || ui_mode == UI_GOVERNMENT
             || ui_mode == UI_DIPLOMACY || ui_mode == UI_MESSAGES || ui_mode == UI_PEDIA) {
-            // D-Pad up/down scrolls the open list; B closes the panel.
-            if ((kRep & KEY_DUP) && ui_scroll > 0) ui_scroll--; // never negative, even mid-step
-            if (kRep & KEY_DDOWN) ui_scroll++;
-            if (kRep & KEY_DLEFT) ui_scroll = ui_scroll > PANEL_ROWS_VISIBLE ? ui_scroll - PANEL_ROWS_VISIBLE : 0;
-            if (kRep & KEY_DRIGHT) ui_scroll += PANEL_ROWS_VISIBLE; // a page at a time
-            if (kRep & (KEY_DUP | KEY_DDOWN | KEY_DLEFT | KEY_DRIGHT)) msg_sel = -1; // the top follows the scroll again
+            // FC-Q5: in the plain lists (research, government, civilizations, messages, encyclopedia)
+            // the D-Pad moves a gold ring and the list follows it; A does what a tap on that row does.
+            // The city screen, the tech tree and the treaty editor keep the D-Pad as a scroll.
+            int focus_n = -1;
+            if (ui_mode == UI_RESEARCH && !ui_tech_tree_view) focus_n = ui_tech_count;
+            else if (ui_mode == UI_GOVERNMENT) focus_n = ui_gov_count;
+            else if (ui_mode == UI_DIPLOMACY && ui_dipl_stage == 1) focus_n = ui_other_player_count;
+            else if (ui_mode == UI_MESSAGES) focus_n = msg_view_n;
+            else if (ui_mode == UI_PEDIA) focus_n = pedia_n;
+            if (focus_n > 0) {
+                if (kRep & (KEY_DUP | KEY_DDOWN | KEY_DLEFT | KEY_DRIGHT)) {
+                    if (list_focus < 0) list_focus = ui_scroll < focus_n ? ui_scroll : 0;   // first press: the ring appears
+                    else if (kRep & KEY_DUP) list_focus--;
+                    else if (kRep & KEY_DDOWN) list_focus++;
+                    else if (kRep & KEY_DLEFT) list_focus -= PANEL_ROWS_VISIBLE;
+                    else list_focus += PANEL_ROWS_VISIBLE;
+                    if (list_focus < 0) list_focus = 0;
+                    if (list_focus >= focus_n) list_focus = focus_n - 1;
+                    if (list_focus < ui_scroll) ui_scroll = list_focus;
+                    if (list_focus >= ui_scroll + PANEL_ROWS_VISIBLE) ui_scroll = list_focus - PANEL_ROWS_VISIBLE + 1;
+                }
+                if ((kDown & KEY_A) && list_focus >= ui_scroll && list_focus < ui_scroll + PANEL_ROWS_VISIBLE && list_focus < focus_n)
+                    list_pick = true;
+            } else {
+                list_focus = -1;
+                // D-Pad up/down scrolls the open list; B closes the panel.
+                if ((kRep & KEY_DUP) && ui_scroll > 0) ui_scroll--; // never negative, even mid-step
+                if (kRep & KEY_DDOWN) ui_scroll++;
+                if (kRep & KEY_DLEFT) ui_scroll = ui_scroll > PANEL_ROWS_VISIBLE ? ui_scroll - PANEL_ROWS_VISIBLE : 0;
+                if (kRep & KEY_DRIGHT) ui_scroll += PANEL_ROWS_VISIBLE; // a page at a time
+            }
+            if (kRep & (KEY_DUP | KEY_DDOWN | KEY_DLEFT | KEY_DRIGHT))
+                msg_sel = (ui_mode == UI_MESSAGES && list_focus >= 0) ? list_focus : -1;   // messages: the ringed one is read on top; else the top follows the scroll
             if (kDown & KEY_B) {
                 // B always fully exits to UI_MAP (universal escape hatch,
                 // same as every other panel) - but from the diplomacy
@@ -1387,23 +1489,34 @@ int main(int argc, char* argv[])
         }
         if (busy && busy_frames > 6) { tap_pending = false; bar_tap = -1; } // taps during the banner
         {
-            static bool save_seen_busy = false;
-            static int save_wait = 0;
-            if (save_in_flight && busy) save_seen_busy = true;
-            if (save_in_flight && !busy && (save_seen_busy || ++save_wait > 90)) {
+            // FC-Q1: the engine's own answer decides. The old test also wanted to have seen the
+            // engine "busy" during the save; a save quicker than a frame was never seen busy and
+            // was reported as "Save failed" although the file was written.
+            if (save_in_flight) {
                 int r = take_save_result();
-                if (save_seen_busy && r == 1) {
+                if (r == 0 && !busy && ++s_save_wait > 60 * 20) r = -1;   // no answer in 20 s of idle engine
+                if (r == 1) {
                     snprintf(toast_msg, sizeof(toast_msg), "Saved");
                     toast_is_error = false;
                     if (s_quit_after_save) quit_now = true;
-                } else {
-                    // Not written (SD card full or locked?): never quit on top of that.
+                } else if (r < 0) {
+                    // Not written (SD card full or locked?): never quit on top of that without asking.
                     snprintf(toast_msg, sizeof(toast_msg), "Save failed - check the SD card");
-                    s_quit_after_save = false;
                     toast_is_error = true;
+                    if (s_quit_after_save && ui_mode == UI_MAP) { open_quit_failed_menu(&popup); popup_kind = POPUP_MENU; }
+                    s_quit_after_save = false;
                 }
-                save_toast_frames = toast_is_error ? SAVE_TOAST_FRAMES * 2 : SAVE_TOAST_FRAMES;
-                save_in_flight = false; save_seen_busy = false; save_wait = 0;
+                if (r != 0) {
+                    save_toast_frames = toast_is_error ? SAVE_TOAST_FRAMES * 2 : SAVE_TOAST_FRAMES;
+                    save_in_flight = false; s_save_wait = 0;
+                }
+            }
+            // FC-Q2: an order the engine could not carry out says so
+            char note[96];
+            if (!busy && take_order_note(note, sizeof(note))) {
+                snprintf(toast_msg, sizeof(toast_msg), "%s", note);
+                toast_is_error = false;
+                save_toast_frames = SAVE_TOAST_FRAMES * 2;
             }
         }
 
@@ -1566,6 +1679,16 @@ int main(int argc, char* argv[])
         } else {
             m_active = false;
         }
+        if (list_pick) {
+            // FC-Q5: A on the focused row is a tap on it
+            list_pick = false;
+            if (list_focus >= ui_scroll && list_focus < ui_scroll + PANEL_ROWS_VISIBLE && ui_mode != UI_MAP) {
+                modal_tap = true;
+                mpx = 100;
+                mpy = PANEL_LIST_Y + (list_focus - ui_scroll) * PANEL_ROW_H + PANEL_ROW_H / 2;
+            }
+        }
+        if (ui_mode == UI_MAP || ui_mode != ui_mode_frame_start) list_focus = -1;   // every panel opens without a ring
         if (!busy && ui_mode_frame_start != UI_MAP && modal_tap) {
             int px = mpx, py = mpy;
 
@@ -1681,6 +1804,12 @@ int main(int argc, char* argv[])
                     int row = hit_test_scroll_list(py, ui_scroll, ui_tech_count);
                     if (row >= 0) {
                         freeciv_request_set_research(ui_tech_opts[row].tech);
+                        if (!ui_tech_opts[row].current && !(toast_is_error && save_toast_frames > 0)) {
+                            // FC-X4: say what the tap did
+                            snprintf(toast_msg, sizeof(toast_msg), "Now researching %.60s", ui_tech_opts[row].name);
+                            toast_is_error = false;
+                            save_toast_frames = SAVE_TOAST_FRAMES;
+                        }
                         if (from_smart) ui_mode = UI_MAP;
                     } else if (py >= PANEL_FOOTER_Y) {
                         if (px < 160) { ui_tech_tree_view = true; ui_scroll = 0; } // "Tree view"
@@ -1969,6 +2098,12 @@ int main(int argc, char* argv[])
                         want_next_unit = true;
                     } else {
                         freeciv_request_unit_action(selected_unit_id, (UnitActionKind)id);
+                        if (!(toast_is_error && save_toast_frames > 0)) {
+                            // FC-Q2: the order is named, so a tap on the wrong button is seen at once
+                            snprintf(toast_msg, sizeof(toast_msg), "%.40s: %s", unit_info.name, popup.label[popup_choice]);
+                            toast_is_error = false;
+                            save_toast_frames = SAVE_TOAST_FRAMES / 2;
+                        }
                         if (id != UNIT_ACTION_WAKE) {
                             advance_from = selected_unit_id;
                             selected_unit_id = -1;
@@ -2028,20 +2163,27 @@ int main(int argc, char* argv[])
                     case MENU_TEXT:
                         font_set_bias(font_get_bias() ? 0 : 1);
                         save_settings();
-                        open_options_menu(&popup);
+                        open_options_menu(&popup, 2);
+                        popup_kind = POPUP_MENU;
+                        break;
+                    case MENU_LEFTY:
+                        fc3ds_set_lefty(!s_lefty);
+                        open_options_menu(&popup, 3);
                         popup_kind = POPUP_MENU;
                         break;
                     case MENU_OPTIONS:
-                        open_options_menu(&popup);
+                        open_options_menu(&popup, -1);
                         popup_kind = POPUP_MENU;
                         break;
                     case MENU_BACK:
-                        open_game_menu(&popup);
+                    case MENU_HOUSE:
+                        open_house_menu(&popup);
+                        if (id == MENU_BACK) popup.focus = 3;
                         popup_kind = POPUP_MENU;
                         break;
                     case MENU_EXIT_ASK:
-                        if (get_game_turn() <= 0) { quit_now = true; break; } // nothing to save yet
-                        open_quit_menu(&popup);
+                        // FC-Q8: it always asks; on turn 0 (or after the game ended) there is nothing to save
+                        open_quit_menu(&popup, get_game_turn() > 0 && !game_over);
                         popup_kind = POPUP_MENU;
                         break;
                     case MENU_QUIT:
@@ -2049,6 +2191,8 @@ int main(int argc, char* argv[])
                         break;
                     case MENU_SAVE_QUIT:
                         if (game_over) { quit_now = true; break; } // the game is finished: nothing to keep
+                        take_save_result();   // an answer nobody read is not this save's
+                        s_save_wait = 0;
                         freeciv_request_save_game();
                         save_in_flight = true;
                         s_quit_after_save = true;
@@ -2061,6 +2205,8 @@ int main(int argc, char* argv[])
                             save_toast_frames = SAVE_TOAST_FRAMES;
                             break;
                         }
+                        take_save_result();   // an answer nobody read is not this save's
+                        s_save_wait = 0;
                         freeciv_request_save_game();
                         save_in_flight = true;
                         capture_next = true;
@@ -2071,7 +2217,7 @@ int main(int argc, char* argv[])
                         else audio_set_volumes(audio_music_volume(), next_volume(audio_sfx_volume()));
                         save_settings();
                         if (id == MENU_EFFECTS) audio_play("e_tech_gain");
-                        open_options_menu(&popup);   // stay open to show the new level
+                        open_options_menu(&popup, id == MENU_MUSIC ? 0 : 1);   // stay open to show the new level
                         popup_kind = POPUP_MENU;
                         break;
                     default: break;
@@ -2245,6 +2391,17 @@ int main(int argc, char* argv[])
                     found = find_next_idle_unit(-1, skip_ids, nskip, &nid, &nx, &ny);
                 }
                 if (found) {
+                    // FC-Q4: stepping to a unit on the same square changes little on screen: name it
+                    if (selected_unit_id >= 0 && nid != selected_unit_id && nx == sel_x && ny == sel_y && unit_info.valid
+                        && !(toast_is_error && save_toast_frames > 0) && save_toast_frames <= 0) {
+                        UnitInfo nu;
+                        get_unit_info(nid, &nu);
+                        if (nu.valid && nu.x == unit_info.x && nu.y == unit_info.y) {
+                            snprintf(toast_msg, sizeof(toast_msg), "Next: %.40s, same square", nu.name);
+                            toast_is_error = false;
+                            save_toast_frames = SAVE_TOAST_FRAMES / 2;
+                        }
+                    }
                     selected_unit_id = nid;
                     get_unit_info(nid, &unit_info);
                     sel_x = nx; sel_y = ny;
@@ -2796,6 +2953,7 @@ int main(int argc, char* argv[])
                     render_tech_tree_panel(ui_tech_tree, ui_tech_tree_count, ui_scroll);
                 } else {
                     render_research_panel(ui_tech_opts, ui_tech_count, ui_scroll);
+                    if (list_focus >= 0) render_list_focus(list_focus - ui_scroll);
                 }
                 break;
             case UI_RATES:
@@ -2804,6 +2962,7 @@ int main(int argc, char* argv[])
             case UI_GOVERNMENT:
                 render_set_gov_armed(gov_armed);
                 render_government_panel(ui_gov_opts, ui_gov_count, ui_scroll, ui_civ_info.government_id);
+                if (list_focus >= 0) render_list_focus(list_focus - ui_scroll);
                 break;
             case UI_SPACESHIP:
                 render_spaceship_panel(&ship);
@@ -2813,14 +2972,17 @@ int main(int argc, char* argv[])
                 break;
             case UI_PEDIA:
                 render_pedia_panel(pedia_kind, pedia_list, pedia_n, ui_scroll, pedia_sel);
+                if (list_focus >= 0) render_list_focus(list_focus - ui_scroll);
                 break;
             case UI_MESSAGES:
                 render_messages_panel(msg_view, msg_view_n, ui_scroll, msg_sel >= 0 ? msg_sel : ui_scroll);
+                if (list_focus >= 0) render_list_focus(list_focus - ui_scroll);
                 break;
             case UI_DIPLOMACY:
                 render_diplomacy_panel(ui_dipl_stage, ui_dipl_counterpart_name,
                                        ui_other_players, ui_other_player_count, ui_scroll,
                                        &ui_diplo_info);
+                if (list_focus >= 0 && ui_dipl_stage == 1) render_list_focus(list_focus - ui_scroll);
                 break;
             case UI_MAP:
             default:

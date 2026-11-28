@@ -747,7 +747,7 @@ static const char *k_terrain_names[] = { "Ocean", "Grassland", "Plains", "Desert
 
 void popup_layout(PopupMenu *m, int anchor_x, int anchor_y)
 {
-    m->cols = m->n > 12 ? 3 : m->n > 7 ? 2 : 1;
+    m->cols = m->force_cols > 0 ? m->force_cols : m->n > 12 ? 3 : m->n > 7 ? 2 : 1;
     int rows = (m->n + m->cols - 1) / m->cols;
     m->w = m->cols * POPUP_ITEM_W + (m->cols + 1) * 3;
     m->h = POPUP_TITLE_H + rows * (POPUP_ITEM_H + 3) + 3;
@@ -965,7 +965,7 @@ hud:
     // HUD button row along the bottom edge.
     hud_strip(HUD_Y, 320, 240 - HUD_Y);
     const float Z = 0.9f;
-    float by = HUD_Y + 2, bh = 240 - HUD_Y - 3;
+    float by = HUD_Y + 2, bh = HUD_BTN_H;
     draw_button(HUD_MENU_X, by, HUD_MENU_W, bh, Z, "Menu", 0.5f, true, false);
     char next_lbl[16] = "Next";
     if (s_idle_count > 0 && !all_moved) snprintf(next_lbl, sizeof(next_lbl), "Next %d", s_idle_count);
@@ -2574,6 +2574,17 @@ void draw_scroll_list(int x, const ScrollRow *rows, int count)
     }
 }
 
+void render_list_focus(int row)
+{
+    if (row < 0 || row >= PANEL_ROWS_VISIBLE) return;
+    const float x = 2, y = PANEL_LIST_Y + row * PANEL_ROW_H, w = 304, h = PANEL_ROW_H - 1, Z = 0.2f;
+    u32 g = C2D_Color32(255, 204, 64, 0xFF);
+    C2D_DrawRectSolid(x, y, Z, w, 2, g);
+    C2D_DrawRectSolid(x, y + h - 2, Z, w, 2, g);
+    C2D_DrawRectSolid(x, y, Z, 2, h, g);
+    C2D_DrawRectSolid(x + w - 2, y, Z, 2, h, g);
+}
+
 static void scroll_thumb(int n, int scroll, float x);
 static int s_city_units_n;
 static bool s_buy_armed;
@@ -3523,12 +3534,12 @@ static void title_row(float y, const char *label, const char *sub, bool sel)
     if (sel) C2D_DrawRectSolid(TITLE_ROW_X, y, 0.11f, 4, h, edge);
     u32 tc = sel ? C2D_Color32(0xFF, 0xF2, 0xC8, 0xFF) : 0xFFFFFFFF;
     if (sub && sub[0]) {
-        draw_text_z(TITLE_ROW_X + 14, y + 1, 0.12f, 0.55f, tc, label);
+        draw_text_z(TITLE_ROW_X + 14, y + (h - 30 * 0.55f) / 2 + 1, 0.12f, 0.55f, tc, label);   // FC-U5: centred in the row
         float sw = text_width(sub, 0.42f);
-        draw_text_z(TITLE_ROW_X + TITLE_ROW_W - 10 - sw, y + 7, 0.12f, 0.42f,
+        draw_text_z(TITLE_ROW_X + TITLE_ROW_W - 10 - sw, y + (h - 30 * 0.42f) / 2 + 1, 0.12f, 0.42f,
                     sel ? C2D_Color32(0xFF, 0xE0, 0x90, 0xFF) : C2D_Color32(0xA8, 0xC0, 0xD8, 0xFF), sub);
     } else {
-        draw_text_z(TITLE_ROW_X + 14, y + 2, 0.12f, 0.55f, tc, label);
+        draw_text_z(TITLE_ROW_X + 14, y + (h - 30 * 0.55f) / 2 + 1, 0.12f, 0.55f, tc, label);
     }
 }
 
@@ -3908,23 +3919,24 @@ void render_game_over_bottom(void)
     draw_button(165, GAMEOVER_BTN_Y, 145, 44, 0.02f, "Quit", 0.5f, true, true);
 }
 
-// "freeciv-T0012-Y-3450-auto.sav.gz" -> "Turn 12, 3450 BC  (autosave)";
-// "3ds-T0012-Y-3450.sav.gz" -> "Turn 12, 3450 BC  (saved)";
-// "freeciv-auto-3.sav.gz" (FC-03 slot) -> "Turn 12, 3450 BC  (autosave)" from .autoslots.
+// "freeciv-T0012-Y-3450-auto.sav.gz" -> "Autosave: turn 12, 3450 BCE";
+// "3ds-T0012-Y-3450.sav.gz" -> "Saved: turn 12, 3450 BCE" (SAVE GAME and the exit save);
+// "freeciv-auto-3.sav.gz" (FC-03 slot) -> "Autosave: turn 12, 3450 BCE" from .autoslots.
 void save_file_label(const char *fn, char *out, int n)
 {
     int turn = 0, year = 0;
     bool manual = !strncmp(fn, "3ds-", 4);
     if (fc3ds_autoslot_info(fn, &turn, &year)) {   // FC-03: "freeciv-auto-3.sav.gz", a fixed autosave slot
+        // FC-Q6: every row starts with what kind of save it is; FC-U7: years as the game writes them (BCE / CE)
         if (turn >= 0)
-            snprintf(out, n, "Turn %d, %d %s  (autosave)", turn, year < 0 ? -year : year, year < 0 ? "BC" : "AD");
+            snprintf(out, n, "Autosave: turn %d, %d %s", turn, year < 0 ? -year : year, year < 0 ? "BCE" : "CE");
         else
             snprintf(out, n, "Autosave");
     } else if (sscanf(fn, manual ? "3ds-T%d-Y%d" : "freeciv-T%d-Y%d", &turn, &year) == 2)
-        snprintf(out, n, "Turn %d, %d %s%s", turn, year < 0 ? -year : year, year < 0 ? "BC" : "AD",
-                 manual ? "  (saved)" : strstr(fn, "auto") ? "  (autosave)" : "");
+        snprintf(out, n, "%s: turn %d, %d %s", manual ? "Saved" : strstr(fn, "auto") ? "Autosave" : "Save",
+                 turn, year < 0 ? -year : year, year < 0 ? "BCE" : "CE");
     else if (manual && sscanf(fn, "3ds-T%d", &turn) == 1)
-        snprintf(out, n, "Turn %d  (saved)", turn);
+        snprintf(out, n, "Saved: turn %d", turn);
     else
         snprintf(out, n, "%.40s", fn);
 }
@@ -3949,12 +3961,19 @@ void render_load_picker(const SaveFile *files, int n, int scroll)
             if (idx >= n) break;
             save_file_label(files[idx].filename, rows[visible].text, sizeof(rows[visible].text));
             rows[visible].color = white;
+            // FC-U5: each row looks like the button it is
+            C2D_DrawRectSolid(2, PANEL_LIST_Y + visible * PANEL_ROW_H, 0.01f, 304, PANEL_ROW_H - 1, C2D_Color32(40, 56, 120, 0xFF));
+            C2D_DrawRectSolid(2, PANEL_LIST_Y + visible * PANEL_ROW_H, 0.011f, 304, 1, C2D_Color32(120, 150, 230, 0xFF));
             visible++;
         }
         draw_scroll_list(8, rows, visible);
+        scroll_thumb(n, scroll, 310);
     }
 
-    if (n > 0) draw_text(8, PANEL_HEADER_H + 8, 0.45f, dim, "Newest first. Tap one to load it.");
+    if (n > 0) {
+        draw_text(8, PANEL_HEADER_H + 6, 0.45f, dim, "Newest first. Tap one, or D-Pad and A, to load it.");
+        draw_text(8, PANEL_HEADER_H + 24, 0.45f, dim, "Saved: you saved it. Autosave: made each turn.");
+    }
     draw_button(4, PANEL_FOOTER_Y + 2, 312, 240 - PANEL_FOOTER_Y - 4, 0.02f, "Back", 0.5f, true, false);
 }
 
@@ -4180,7 +4199,10 @@ void render_manual_top(void)
     }
 }
 
-// Bottom screen: 3 columns x 5 rows of section buttons; Close fills the rest.
+// Bottom screen: 3 columns x 5 rows of section buttons; then "Left hand: off / on" (FC-X2, as in
+// the other ports' manuals) and Close, which fills the rest.
+void fc3ds_set_lefty(int on);
+static bool s_man_on_toggle;   // the D-Pad focus is on the Left hand button (A presses it)
 #define MAN_COLS 3
 #define MAN_ROWS 5
 static void man_cell(int i, float *x, float *y, float *w, float *h)
@@ -4195,7 +4217,11 @@ static int man_hit(int px, int py)
     for (int i = 0; i < MAN_COLS * MAN_ROWS; i++) {
         float x, y, w, h;
         man_cell(i, &x, &y, &w, &h);
-        if (i >= ncell) { // Close: this cell to the end of the grid
+        if (i == ncell && ncell < MAN_COLS * MAN_ROWS - 1) { // Left hand: the first free cell
+            if (px >= x && px < x + w && py >= y && py < y + h) return -3;
+            continue;
+        }
+        if (i > ncell || i == MAN_COLS * MAN_ROWS - 1) { // Close: from here to the end of the grid
             float x2, y2, w2, h2;
             man_cell(MAN_COLS * MAN_ROWS - 1, &x2, &y2, &w2, &h2);
             if (py >= y && py < y + h && px >= x && px < x2 + w2) return -2;
@@ -4221,7 +4247,23 @@ void render_manual_bottom(int frame)
         draw_button(x, y, w, h, 0.12f, t, sc, true, i == s_man_sec);
     }
     float x, y, w, h, x2, y2, w2, h2;
-    man_cell(ncell, &x, &y, &w, &h);
+    int close_cell = ncell;
+    if (ncell < MAN_COLS * MAN_ROWS - 1) {   // room for the Left hand button before Close
+        man_cell(ncell, &x, &y, &w, &h);
+        const char *t = fc3ds_lefty() ? "Left hand: on" : "Left hand: off";
+        float sc = 0.47f;
+        while (sc > 0.38f && text_width(t, sc) > w - 8) sc -= 0.01f;
+        draw_button(x, y, w, h, 0.12f, t, sc, true, false);
+        if (s_man_on_toggle) {   // D-Pad focus: 2 px gold ring
+            u32 g = C2D_Color32(255, 204, 64, 0xFF);
+            C2D_DrawRectSolid(x, y, 0.14f, w, 2, g);
+            C2D_DrawRectSolid(x, y + h - 2, 0.14f, w, 2, g);
+            C2D_DrawRectSolid(x, y, 0.14f, 2, h, g);
+            C2D_DrawRectSolid(x + w - 2, y, 0.14f, 2, h, g);
+        }
+        close_cell = ncell + 1;
+    }
+    man_cell(close_cell, &x, &y, &w, &h);
     man_cell(MAN_COLS * MAN_ROWS - 1, &x2, &y2, &w2, &h2);
     draw_button(x, y, x2 + w2 - x, h, 0.12f, "Close", 0.5f, true, false);
     C2D_DrawRectSolid(x, y, 0.13f, x2 + w2 - x, 2, C2D_Color32(0xE0, 0x60, 0x50, 0xFF));
@@ -4239,11 +4281,19 @@ bool manual_input(u32 kDown, u32 kHeld, bool touched, int px, int py, int circle
     {
         int ncell = s_man_n < MAN_COLS * MAN_ROWS ? s_man_n : MAN_COLS * MAN_ROWS - 1;
         int t = s_man_sec;
-        if (kDown & KEY_DLEFT)  t -= 1;
-        if (kDown & KEY_DRIGHT) t += 1;
-        if (kDown & KEY_DUP)    t -= MAN_COLS;
-        if (kDown & KEY_DDOWN)  t += MAN_COLS;
-        if (t != s_man_sec && t >= 0 && t < ncell) s_man_sec = t;
+        bool has_toggle = ncell < MAN_COLS * MAN_ROWS - 1;
+        if (s_man_on_toggle) {
+            // on the Left hand button: A presses it, Left / Up go back to the sections
+            if (kDown & KEY_A) fc3ds_set_lefty(!fc3ds_lefty());
+            if (kDown & (KEY_DLEFT | KEY_DUP | KEY_L | KEY_R)) s_man_on_toggle = false;
+        } else {
+            if (kDown & KEY_DLEFT)  t -= 1;
+            if (kDown & KEY_DRIGHT) t += 1;
+            if (kDown & KEY_DUP)    t -= MAN_COLS;
+            if (kDown & KEY_DDOWN)  t += MAN_COLS;
+            if (t != s_man_sec && t >= 0 && t < ncell) s_man_sec = t;
+            else if (has_toggle && t >= ncell && t != s_man_sec) s_man_on_toggle = true;   // past the last section
+        }
     }
     // Touch: a tap (lifted within 6 px) presses the button where it went down; a touch that
     // moves further drags the text (rule 13), with a little momentum after the stylus lifts.
@@ -4261,6 +4311,7 @@ bool manual_input(u32 kDown, u32 kHeld, bool touched, int px, int py, int circle
             if (was == 1) {
                 int hit = man_hit(tx0, ty0);
                 if (hit == -2) return false;
+                if (hit == -3) fc3ds_set_lefty(!fc3ds_lefty());
                 if (hit >= 0) s_man_sec = hit;
             }
         } else if (mom > 0.5f || mom < -0.5f) {

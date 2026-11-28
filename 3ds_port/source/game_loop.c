@@ -260,7 +260,9 @@ bool find_pov_unit_tile(int *x, int *y)
 static int s_save_result; // written on the server thread, read by the UI
 
 // Size and time of the save file whose name starts with base (any extension).
-static bool save_file_stat(const char *base, long *size, time_t *mtime)
+// The save file "<base>.sav.gz" (whatever the compression suffix): its size and full path.
+// A set-aside copy ("....bak") is not a save.
+static bool save_file_stat(const char *base, long *size, char *path_out, size_t path_len)
 {
     DIR *d = opendir("sdmc:/3ds/freeciv/saves");
     if (!d) return false;
@@ -269,13 +271,36 @@ static bool save_file_stat(const char *base, long *size, time_t *mtime)
     struct dirent *de;
     while ((de = readdir(d))) {
         if (strncmp(de->d_name, base, nl) != 0 || (de->d_name[nl] && de->d_name[nl] != '.')) continue;
+        size_t dl = strlen(de->d_name);
+        if (dl > 4 && !strcmp(de->d_name + dl - 4, ".bak")) continue;
         char path[300];   // FC-10: a 255-byte file name fits
         snprintf(path, sizeof(path), "sdmc:/3ds/freeciv/saves/%s", de->d_name);
         struct stat st;
-        if (stat(path, &st) == 0) { *size = (long)st.st_size; *mtime = st.st_mtime; found = true; break; }
+        if (stat(path, &st) == 0) {
+            *size = (long)st.st_size;
+            if (path_out) snprintf(path_out, path_len, "%s", path);
+            found = true;
+            break;
+        }
     }
     closedir(d);
     return found;
+}
+
+// FC-Q2: a line for the player when an order could not be carried out (server thread writes,
+// the UI takes it between steps and shows it as a toast).
+static char s_order_note[96];
+static int s_order_note_set;
+static void set_order_note(const char *text)
+{
+    snprintf(s_order_note, sizeof(s_order_note), "%s", text);
+    __atomic_store_n(&s_order_note_set, 1, __ATOMIC_RELEASE);
+}
+bool take_order_note(char *out, int len)
+{
+    if (!__atomic_exchange_n(&s_order_note_set, 0, __ATOMIC_ACQ_REL)) return false;
+    snprintf(out, len, "%s", s_order_note);
+    return true;
 }
 int take_save_result(void) { return __atomic_exchange_n(&s_save_result, 0, __ATOMIC_ACQ_REL); }
 
@@ -1706,13 +1731,25 @@ void freeciv3ds_process_pending_actions(void)
                     }
                     break;
                 }
-                case UNIT_ACTION_FOUND_CITY:
-                    if (is_action_enabled_unit_on_tile(&(wld.map), ACTION_FOUND_CITY, punit, unit_tile(punit), NULL)) {
+                case UNIT_ACTION_FOUND_CITY: {
+                    // FC-Q2: if no city comes of it, the player is told (and why, where the
+                    // engine's own rules say): the order never just vanishes.
+                    struct tile *ut = unit_tile(punit);
+                    bool done = false;
+                    if (is_action_enabled_unit_on_tile(&(wld.map), ACTION_FOUND_CITY, punit, ut, NULL)) {
                         push_sound("w_generic");
-                        unit_do_action(pov, punit->id, tile_index(unit_tile(punit)), 0,
-                                       city_name_suggestion(pov, unit_tile(punit)), ACTION_FOUND_CITY);
+                        done = unit_perform_action(pov, punit->id, tile_index(ut), 0,
+                                                   city_name_suggestion(pov, ut), ACTION_FOUND_CITY, ACT_REQ_PLAYER)
+                               && tile_city(ut) != NULL;
+                    }
+                    if (!done) {
+                        if (tile_city(ut)) set_order_note("No city built: there is a city here already");
+                        else if (citymindist_prevents_city_on_tile(&(wld.map), ut)) set_order_note("No city built: another city is too close");
+                        else if (terrain_has_flag(tile_terrain(ut), TER_NO_CITIES)) set_order_note("No city built: this terrain cannot hold a city");
+                        else set_order_note("No city built here - see Messages for why");
                     }
                     break;
+                }
                 case UNIT_ACTION_JOIN_CITY: {
                     struct city *pcity = tile_city(unit_tile(punit));
                     if (pcity && is_action_enabled_unit_on_city(&(wld.map), ACTION_JOIN_CITY, punit, pcity)) {
@@ -1849,15 +1886,26 @@ void freeciv3ds_process_pending_actions(void)
             // game_loop.c), so this bare filename lands there.
             char name[64];
             fc_snprintf(name, sizeof(name), "3ds-T%04d-Y%d", game.info.turn, game.info.year); // read back by save_file_label()
-            // save_game() reports failure only in the log: check the file landed
-            // (new, or changed since before the save).
-            long sz0 = -1; time_t mt0 = 0;
-            save_file_stat(name, &sz0, &mt0);
+            // FC-Q1: save_game() reports failure only in the log, so the file itself is the
+            // proof. The old test ("its size or time changed") called a good save a failure
+            // when the same turn was saved twice: same size, and a file time that does not
+            // move (2-second steps on the card, none at all in an emulator). Now a save of
+            // the same name is first set aside as "<name>.bak" (also the copy to fall back
+            // on), so a file under the name afterwards can only be the new one.
+            long sz0 = -1, sz1 = -1;
+            char old_path[300], bak_path[310];
+            bool had = save_file_stat(name, &sz0, old_path, sizeof(old_path));
+            bool moved = false;
+            if (had) {
+                snprintf(bak_path, sizeof(bak_path), "%s.bak", old_path);
+                remove(bak_path);
+                moved = rename(old_path, bak_path) == 0;
+            }
             save_game(name, "User request", FALSE);
-            long sz1 = -1; time_t mt1 = 0;
-            int ok = (save_file_stat(name, &sz1, &mt1) && sz1 > 0
-                      && (sz0 < 0 || sz1 != sz0 || mt1 != mt0)) ? 1 : -1;
-            __atomic_store_n(&s_save_result, ok, __ATOMIC_RELEASE);
+            bool landed = save_file_stat(name, &sz1, NULL, 0) && sz1 > 0;
+            if (!landed && moved) rename(bak_path, old_path);   // the save before it is back in place
+            // (if the old one could not be set aside, a file with content is all that can be checked)
+            __atomic_store_n(&s_save_result, landed ? 1 : -1, __ATOMIC_RELEASE);
             break;
         }
         }

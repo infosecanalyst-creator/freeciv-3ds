@@ -37,6 +37,7 @@ typedef struct {
     char title[40];
     int  x, y, w, h, cols;        // set by popup_layout()
     int  focus;                   // D-Pad focus (gold ring); 0 after memset
+    int  force_cols;              // >0: this many columns whatever the item count (YES / NO side by side)
 } PopupMenu;
 // Places the popup beside the anchor point, kept on screen above the HUD.
 void popup_layout(PopupMenu *m, int anchor_x, int anchor_y);
@@ -45,7 +46,9 @@ void popup_layout(PopupMenu *m, int anchor_x, int anchor_y);
 int popup_hit_test(const PopupMenu *m, int px, int py);
 
 // Bottom-screen HUD button row.
-#define HUD_Y       212
+// FC-U1 (rule 11): the row's buttons are 28 px tall (y 206..233) and end 6 px above the screen edge
+#define HUD_Y       204
+#define HUD_BTN_H   28
 #define HUD_MENU_X  2
 #define HUD_MENU_W  50
 #define HUD_NEXT_X  55
@@ -67,7 +70,7 @@ int hud_hit_test(int px, int py);
 // popup may be NULL. all_moved highlights End Turn.
 // Quick-order bar for the selected unit, just above the HUD row: up to 4
 // buttons (the last is usually "More..."). n = 0 hides it.
-#define UNITBAR_H 24
+#define UNITBAR_H 26
 #define UNITBAR_Y (HUD_Y - UNITBAR_H - 2)
 #define UNITBAR_MAX 4
 void render_set_unit_bar(const char labels[][20], int n);
@@ -196,6 +199,8 @@ typedef struct {
 // x lets a panel place more than one column of rows side by side (see the
 // city panel's worklist column, handoff.md §6.4).
 void draw_scroll_list(int x, const ScrollRow *rows, int count);
+// FC-Q5: the D-Pad focus in a panel's list: a gold ring round visible row `row` (0..PANEL_ROWS_VISIBLE-1).
+void render_list_focus(int row);
 
 // Rates panel row/button rects (bottom screen).
 #define RATES_TAX_Y        84

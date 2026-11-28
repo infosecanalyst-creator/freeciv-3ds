@@ -52,21 +52,21 @@ supports the Old 3DS.
   number of rivals, AI skill and barbarians. Your choices are remembered.
 - **End of game**: victory or defeat screen with your score.
 - **Sound and music**: Freeciv's sound set (unit moves, combat, cities, technology) plus a rotation of
-  CC0 medieval music. Volumes are in the Menu.
+  CC0 medieval music. Volumes are in START > SETTINGS.
 - **Stereo 3D** on the top screen, driven by the 3D slider: the minimap gets depth; panels and text stay at screen depth so they read sharply.
 - **Crisp text**: the UI font is pre-rendered at exact pixel sizes, not scaled.
-- Save and load to the SD card, plus a turn autosave in five rotating slots (`freeciv-auto-1` to `freeciv-auto-5`: the last five turns, the folder never grows). HOME > Close saves a game in play, as Save & Exit does. Suspending with HOME is safe.
+- Save and load to the SD card, plus a turn autosave in five rotating slots (`freeciv-auto-1` to `freeciv-auto-5`: the last five turns, the folder never grows). HOME > Close saves a game in play, as EXIT GAME does. Suspending with HOME is safe.
 
 ## Manual
 
-The full instruction manual is built into the game: Manual on the title screen, or Menu, then Manual, in a game. Its text is [3ds_port/romfs/manual.txt](3ds_port/romfs/manual.txt); a `manual.txt` in `sdmc:/3ds/freeciv/` replaces it.
+The full instruction manual is built into the game: Manual on the title screen, or START, then MANUAL, in a game. Its text is [3ds_port/romfs/manual.txt](3ds_port/romfs/manual.txt); a `manual.txt` in `sdmc:/3ds/freeciv/` replaces it.
 
 ## Controls
 
 | | |
 |---|---|
 | Stylus on the map | Tap a unit: command it and show its orders. Tap a neighbouring square: move. Tap a farther square twice: route. Drag: scroll. |
-| Menu / Next / − + / End Turn | Bottom-row buttons (Menu: Research, Tax Rates, Government, Diplomacy, Save, Music, Effects) |
+| Menu / Next / − + / End Turn | Bottom-row buttons (Menu: Research, Tax Rates, Government, Diplomacy, Messages, Encyclopedia, START Menu...) |
 | D-Pad | Move the selected unit (or scroll if none is selected) |
 | Circle Pad | Scroll |
 | A | Selected unit's orders, or the next unit (also puts the turn report away) |
@@ -75,7 +75,7 @@ The full instruction manual is built into the game: Manual on the title screen, 
 | L / R | Research / Tax rates |
 | ZL | Swap screens (3D and touch off while swapped) |
 | ZR | Zoom in (wraps back to the widest view); the on-screen + and - also work |
-| START | Menu: Resume, options, Save, Manual, Exit Game (asks first) |
+| START | Menu: RESUME, MANUAL, SAVE GAME, SETTINGS (music, effects, text, left hand), EXIT GAME (asks YES / NO, saves first) |
 | SELECT | Same as the End Turn button (shows what needs you first) |
 | In a city | Tap an item to build it now (or to queue it), L/R to pick a unit, Y to lead it out |
 
