@@ -1547,7 +1547,7 @@ int main(int argc, char* argv[])
                 alert_seen = total;
             }
         }
-        if (save_toast_frames > 0) save_toast_frames--;
+        if (save_toast_frames > 0 && !busy) save_toast_frames--;   // the toast is only drawn while the engine is idle: count only that time
         else toast_is_error = false;
         if (end_armed > 0) end_armed--;
 
